@@ -91,10 +91,7 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_type(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.type_scope.0 as usize]
-            .symbols
-            .contains_key(&name)
-        {
+        if self.scopes[self.type_scope.0].symbols.contains_key(&name) {
             println!(
                 "Another type with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -106,10 +103,7 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_value(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.value_scope.0 as usize]
-            .symbols
-            .contains_key(&name)
-        {
+        if self.scopes[self.value_scope.0].symbols.contains_key(&name) {
             println!(
                 "Another variable with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -122,15 +116,13 @@ impl<'a> Binder<'a> {
 
     fn declare_symbol(&mut self, scope: ScopeId, name: StrId, symbol: Symbol) {
         let symbol_id = self.create_symbol(symbol);
-        self.scopes[scope.0 as usize]
-            .symbols
-            .insert(name, symbol_id);
+        self.scopes[scope.0].symbols.insert(name, symbol_id);
     }
 
     fn lookup_type(&self, name: StrId) -> Option<SymbolId> {
         let mut curr = Some(self.type_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0 as usize];
+            let scope = &self.scopes[scope.0];
             if let Some(symbol) = scope.symbols.get(&name) {
                 return Some(*symbol);
             }
@@ -142,7 +134,7 @@ impl<'a> Binder<'a> {
     fn lookup_value(&self, name: StrId) -> Option<SymbolId> {
         let mut curr = Some(self.value_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0 as usize];
+            let scope = &self.scopes[scope.0];
             if let Some(symbol) = scope.symbols.get(&name) {
                 return Some(*symbol);
             }
@@ -157,7 +149,7 @@ impl<'a> Binder<'a> {
     fn in_value_scope_of(&self, kind: ScopeKind) -> bool {
         let mut curr = Some(self.value_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0 as usize];
+            let scope = &self.scopes[scope.0];
             if scope.kind == kind {
                 return true;
             }
