@@ -1017,19 +1017,69 @@ mod tests {
     }
 
     #[test]
-    fn test_lower_basic_2() {
+    fn test_lower_if_only() {
         let source = r#"
-            // let a = { 10 };
-            // let a = {
-            //     { 10 } + 12
-            // };
+            let a = 1;
+            if a == 1 {
+                a = 2;
+            }
+            print(a);
+        "#;
+        run_ok(source);
+    }
 
-            // let a = 10;
-            // {
-            //     a = 20;
-            // }
-            // print(a);
-            let a = 1 + 2 + 3;
+    #[test]
+    fn test_lower_if_else() {
+        let source = r#"
+
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_block_with_single_expr() {
+        let source = r#"
+            let a = { 10 };
+            let b = {
+                { 10 } + 12
+            };
+            print(a);
+            print(b);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_for_loop() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                print(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_for_loop_with_continue() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                if i == 5 {
+                    continue;
+                }
+                print(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_for_loop_with_unconditional_continue() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                print(i);
+                continue;
+                print(20);
+            }
         "#;
         run_ok(source);
     }

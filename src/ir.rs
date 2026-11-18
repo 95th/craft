@@ -411,6 +411,7 @@ impl<'a> Lowering<'a> {
                 });
 
                 self.lower_expr(body, None);
+                self.drop_locals(continue_locals);
                 self.set_terminator(Terminator::Jump {
                     target: continue_target,
                 });
@@ -435,7 +436,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
-                for i in context.break_locals..self.local_stack.len() {
+                for i in (context.break_locals..self.local_stack.len()).rev() {
                     self.push_stmt(Statement::StorageDead(self.local_stack[i]));
                 }
                 self.set_terminator(Terminator::Jump {
@@ -448,7 +449,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Continue => {
                 let context = *self.loop_contexts.last().unwrap();
-                for i in context.continue_locals..self.local_stack.len() {
+                for i in (context.continue_locals..self.local_stack.len()).rev() {
                     self.push_stmt(Statement::StorageDead(self.local_stack[i]));
                 }
                 self.set_terminator(Terminator::Jump {
@@ -470,7 +471,7 @@ impl<'a> Lowering<'a> {
                     value: RValue::Use(value),
                 });
                 // 0 is the RETURN slot
-                for i in 1..self.local_stack.len() {
+                for i in (1..self.local_stack.len()).rev() {
                     self.push_stmt(Statement::StorageDead(self.local_stack[i]));
                 }
                 return Operand::Constant(Constant::Unit);
