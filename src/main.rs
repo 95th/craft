@@ -1096,4 +1096,16 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_lower_for_loop_with_unconditional_break() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                print(i);
+                break;
+                print(20);
+            }
+        "#;
+        run_ok(source);
+    }
 }

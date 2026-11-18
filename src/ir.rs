@@ -50,7 +50,7 @@ impl<'a> Lowering<'a> {
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
-        self.drop_locals(0);
+        self.pop_locals(0, true);
 
         while let Some(symbol) = self.function_worklist.pop_front() {
             if self.body.functions.contains_key(&symbol) {
@@ -100,7 +100,7 @@ impl<'a> Lowering<'a> {
             }
             _ => unreachable!(),
         }
-        self.drop_locals(1);
+        self.pop_locals(1, true);
     }
 
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
@@ -238,7 +238,7 @@ impl<'a> Lowering<'a> {
                 } else {
                     self.constant_operand(place, Constant::Unit)
                 };
-                self.drop_locals(prev_locals);
+                self.pop_locals(prev_locals, true);
                 return value;
             }
             ast::Expr::Variable(..) => {
@@ -377,7 +377,6 @@ impl<'a> Lowering<'a> {
                 if let Some(init) = init {
                     self.lower_stmt(init);
                 }
-                let continue_locals = self.local_stack.len();
                 let cond_block = cond.map(|_| self.create_block());
                 let body_block = self.create_block();
                 let incr_block = incr.map(|_| self.create_block());
@@ -405,13 +404,12 @@ impl<'a> Lowering<'a> {
 
                 self.loop_contexts.push(LoopContext {
                     continue_target,
-                    continue_locals,
+                    continue_locals: self.local_stack.len(),
                     break_target: merge_block,
-                    break_locals: continue_locals,
+                    break_locals: self.local_stack.len(),
                 });
 
                 self.lower_expr(body, None);
-                self.drop_locals(continue_locals);
                 self.set_terminator(Terminator::Jump {
                     target: continue_target,
                 });
@@ -431,14 +429,12 @@ impl<'a> Lowering<'a> {
 
                 self.current_block = merge_block;
                 self.loop_contexts.pop();
-                self.drop_locals(prev_locals);
+                self.pop_locals(prev_locals, true);
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
-                for i in (context.break_locals..self.local_stack.len()).rev() {
-                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
-                }
+                self.pop_locals(context.break_locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.break_target,
                 });
@@ -449,9 +445,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Continue => {
                 let context = *self.loop_contexts.last().unwrap();
-                for i in (context.continue_locals..self.local_stack.len()).rev() {
-                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
-                }
+                self.pop_locals(context.continue_locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.continue_target,
                 });
@@ -470,10 +464,7 @@ impl<'a> Lowering<'a> {
                     place: Place::local(LocalId::RETURN),
                     value: RValue::Use(value),
                 });
-                // 0 is the RETURN slot
-                for i in (1..self.local_stack.len()).rev() {
-                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
-                }
+                self.pop_locals(1, false);
                 return Operand::Constant(Constant::Unit);
             }
             ast::Expr::Unit => return self.constant_operand(place, Constant::Unit),
@@ -533,10 +524,12 @@ impl<'a> Lowering<'a> {
             .push(statement);
     }
 
-    fn drop_locals(&mut self, keep_len: usize) {
-        while self.local_stack.len() > keep_len {
-            let local = self.local_stack.pop().unwrap();
-            self.push_stmt(Statement::StorageDead(local));
+    fn pop_locals(&mut self, keep_len: usize, drop: bool) {
+        for i in (keep_len..self.local_stack.len()).rev() {
+            self.push_stmt(Statement::StorageDead(self.local_stack[i]));
+        }
+        if drop {
+            self.local_stack.truncate(keep_len);
         }
     }
 }
