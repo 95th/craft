@@ -10,7 +10,7 @@ pub enum Ty {
     UnknownInt,
     Unit,
     Bool,
-    Number,
+    F64,
     I64,
     U64,
     String,
@@ -23,7 +23,7 @@ pub enum Ty {
 
 pub struct CommonTypes {
     pub boolean: TyId,
-    pub number: TyId,
+    pub f64: TyId,
     pub i64: TyId,
     pub u64: TyId,
     pub unit: TyId,
@@ -34,7 +34,7 @@ impl CommonTypes {
     pub fn new(table: &mut InPlaceUnificationTable<TyId>) -> Self {
         Self {
             boolean: table.new_key(Ty::Bool),
-            number: table.new_key(Ty::Number),
+            f64: table.new_key(Ty::F64),
             i64: table.new_key(Ty::I64),
             u64: table.new_key(Ty::U64),
             unit: table.new_key(Ty::Unit),

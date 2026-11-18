@@ -328,7 +328,7 @@ impl VM {
                     let callee = self.stack.pop().unwrap();
                     self.call(callee, arg_count);
                 }
-                Opcode::PrintNumber => {
+                Opcode::PrintF64 => {
                     let value = self.stack.pop().unwrap();
                     let value = f64::from_bits(value);
                     println!("{value}");

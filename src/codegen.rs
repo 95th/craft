@@ -127,7 +127,7 @@ impl<'a> Codegen<'a> {
                 let ty = self.ty_ctx.expr_types[&expr];
                 match self.ty_ctx.types.probe_value(ty) {
                     Ty::I64 => self.code.write(Opcode::I64Neg),
-                    Ty::Number => self.code.write(Opcode::F64Neg),
+                    Ty::F64 => self.code.write(Opcode::F64Neg),
                     t => unreachable!("{t:?}"),
                 }
             }
@@ -222,7 +222,7 @@ impl<'a> Codegen<'a> {
                 self.process_expr(rhs);
                 let ty = self.ty_ctx.expr_types[&lhs];
                 match self.ty_ctx.types.probe_value(ty) {
-                    Ty::Number => match op {
+                    Ty::F64 => match op {
                         BinaryOp::Add => self.code.write(Opcode::F64Add),
                         BinaryOp::Sub => self.code.write(Opcode::F64Sub),
                         BinaryOp::Mul => self.code.write(Opcode::F64Mul),
@@ -280,7 +280,7 @@ impl<'a> Codegen<'a> {
                 if symbol == self.ty_ctx.bind_ctx.print_function {
                     let ty = self.ty_ctx.expr_types[&args[0]];
                     match self.ty_ctx.types.probe_value(ty) {
-                        Ty::Number => self.code.write(Opcode::PrintNumber),
+                        Ty::F64 => self.code.write(Opcode::PrintF64),
                         Ty::I64 => self.code.write(Opcode::PrintI64),
                         Ty::U64 => self.code.write(Opcode::PrintU64),
                         Ty::String => self.code.write(Opcode::PrintString),

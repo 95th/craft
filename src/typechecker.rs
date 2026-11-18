@@ -62,7 +62,7 @@ impl<'a> TypeChecker<'a> {
 
     pub fn check(mut self, nodes: &[StmtId]) -> Result<TyContext, Error> {
         self.type_bindings
-            .insert(self.bind_ctx.number_type, self.common_types.number);
+            .insert(self.bind_ctx.f64_type, self.common_types.f64);
         self.type_bindings
             .insert(self.bind_ctx.i64_type, self.common_types.i64);
         self.type_bindings
@@ -102,7 +102,7 @@ impl<'a> TypeChecker<'a> {
         } else {
             let lhs = lhs.display(self);
             let rhs = rhs.display(self);
-            self.error(format!("expected `{lhs}`, found `{rhs}`"), span);
+            self.error(format!("expect `{lhs}`, found `{rhs}`"), span);
         }
     }
 
@@ -190,7 +190,7 @@ fn deferred_check_integers(c: &mut TypeChecker) {
     for (expr, ty) in std::mem::take(&mut c.deferred_negation_checks) {
         if let Ty::U64 = c.types.probe_value(ty) {
             c.error(
-                format!("expect `i64` or `number`, found `u64`"),
+                format!("expect `i64` or `f64`, found `u64`"),
                 c.ast.exprs.span(expr),
             );
         }
@@ -339,7 +339,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             c.integer_literals.push((node, ty));
             ty
         }
-        Expr::Number(_) => c.common_types.number,
+        Expr::Number(_) => c.common_types.f64,
         Expr::String(_) => c.common_types.string,
         Expr::Assign(lhs, rhs) => {
             let lhs_ty = check_expr(c, lhs);
@@ -354,9 +354,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
                     c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
                     match c.types.probe_value(lhs_ty) {
-                        Ty::I64 | Ty::U64 | Ty::Number | Ty::UnknownInt => lhs_ty,
+                        Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => lhs_ty,
                         _ => {
-                            c.error("expected i64, u64 or number", c.ast.exprs.span(lhs));
+                            let message = format!(
+                                "expect `i64`, `u64` or `f64`, found `{}`",
+                                lhs_ty.display(c)
+                            );
+                            c.error(message, c.ast.exprs.span(lhs));
                             c.types.new_key(Ty::Unknown)
                         }
                     }
@@ -366,7 +370,9 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                     match c.types.probe_value(lhs_ty) {
                         Ty::I64 | Ty::U64 | Ty::UnknownInt => lhs_ty,
                         _ => {
-                            c.error("expect i64 or u64", c.ast.exprs.span(lhs));
+                            let message =
+                                format!("expect `i64` or `u64`, found `{}`", lhs_ty.display(c));
+                            c.error(message, c.ast.exprs.span(lhs));
                             c.types.new_key(Ty::Unknown)
                         }
                     }
@@ -377,8 +383,14 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 | BinaryOp::LessEqual => {
                     c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
                     match c.types.probe_value(lhs_ty) {
-                        Ty::I64 | Ty::U64 | Ty::Number | Ty::UnknownInt => {}
-                        _ => c.error("expect i64, u64 or number", c.ast.exprs.span(lhs)),
+                        Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => {}
+                        _ => {
+                            let message = format!(
+                                "expect `i64`, `u64` or `f64`, found `{}`",
+                                lhs_ty.display(c)
+                            );
+                            c.error(message, c.ast.exprs.span(lhs));
+                        }
                     }
                     c.common_types.boolean
                 }
@@ -401,13 +413,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::Negate(expr) => {
             let ty = check_expr(c, expr);
             match c.types.probe_value(ty) {
-                Ty::I64 | Ty::Number => ty,
+                Ty::I64 | Ty::F64 => ty,
                 Ty::UnknownInt => {
                     c.deferred_negation_checks.push((expr, ty));
                     ty
                 }
                 _ => {
-                    let message = format!("expect `i64` or `number`, found `{}`", ty.display(c));
+                    let message = format!("expect `i64` or `f64`, found `{}`", ty.display(c));
                     c.error(message, c.ast.exprs.span(expr));
                     c.types.new_key(Ty::Unknown)
                 }
@@ -499,12 +511,12 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                     if let Some(fields) = c.tuple_struct_properties.get(&symbol) {
                         fields.clone()
                     } else {
-                        c.error("expected a tuple", c.ast.exprs.span(expr));
+                        c.error("expect a tuple", c.ast.exprs.span(expr));
                         return c.types.new_key(Ty::Unknown);
                     }
                 }
                 _ => {
-                    c.error("expected a tuple", c.ast.exprs.span(expr));
+                    c.error("expect a tuple", c.ast.exprs.span(expr));
                     return c.types.new_key(Ty::Unknown);
                 }
             };
@@ -547,11 +559,11 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::StructField(expr, ref name) => {
             let expr_ty = check_expr(c, expr);
             let Ty::Named(symbol) = c.types.probe_value(expr_ty) else {
-                c.error("expected a struct instance", c.ast.exprs.span(expr));
+                c.error("expect a struct instance", c.ast.exprs.span(expr));
                 return c.types.new_key(Ty::Unknown);
             };
             let Some(properties) = c.struct_properties.get(&symbol) else {
-                c.error("expected a struct instance", c.ast.exprs.span(expr));
+                c.error("expect a struct instance", c.ast.exprs.span(expr));
                 return c.types.new_key(Ty::Unknown);
             };
 
@@ -693,7 +705,7 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
         }
         Ty::Unit => buf.push_str("()"),
         Ty::Bool => buf.push_str("bool"),
-        Ty::Number => buf.push_str("number"),
+        Ty::F64 => buf.push_str("f64"),
         Ty::I64 => buf.push_str("i64"),
         Ty::U64 => buf.push_str("u64"),
         Ty::UnknownInt => buf.push_str("{integer}"),

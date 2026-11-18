@@ -54,7 +54,7 @@ fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Resu
 
 fn main() {
     let source = r#"
-        fn fib(n: number) -> number {
+        fn fib(n: f64) -> f64 {
             if n < 2 {
                 return n;
             }
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn test_fn_return() {
         let source = r#"
-            fn foo(x: number) -> number { x + 1.0 }
+            fn foo(x: f64) -> f64 { x + 1.0 }
             let x = 1.0;
             1.0 + foo(x);
         "#;
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn test_fn_duplicate_param() {
         let source = r#"
-            fn foo(n: number, n: number) -> number { n + 1 }
+            fn foo(n: f64, n: f64) -> f64 { n + 1 }
         "#;
         check_err(source, Error::Bind);
     }
@@ -160,9 +160,9 @@ mod tests {
     #[test]
     fn test_tuple_2() {
         let source = r#"
-            fn foo(a: number, b: number) -> number { 1.0 }
-            let f: fn(number, number) -> number = foo;
-            let a: (number, (number, number)) = (1.0, (2.0, 3.0));
+            fn foo(a: f64, b: f64) -> f64 { 1.0 }
+            let f: fn(f64, f64) -> f64 = foo;
+            let a: (f64, (f64, f64)) = (1.0, (2.0, 3.0));
             foo(a.0, a.1.0);
         "#;
         run_ok(source)
@@ -186,9 +186,9 @@ mod tests {
     #[test]
     fn test_tuples_fail_mismatch_inner() {
         let source = r#"
-            fn foo(a: number, b: number) -> number { 1.0 }
-            let f: fn(number, number) -> number = foo;
-            let a: (number, (number)) = (1.0, (2.0, 3.0));
+            fn foo(a: f64, b: f64) -> f64 { 1.0 }
+            let f: fn(f64, f64) -> f64 = foo;
+            let a: (f64, (f64)) = (1.0, (2.0, 3.0));
             foo(a.0, (a.1).0);
         "#;
         check_err(source, Error::TypeCheck);
@@ -198,9 +198,9 @@ mod tests {
     fn test_struct() {
         let source = r#"
             struct Foo {
-                a: number
+                a: f64
             }
-            fn bar(f: Foo) -> number {
+            fn bar(f: Foo) -> f64 {
                 f.a + 10.0
             }
             let foo = Foo {
@@ -261,7 +261,7 @@ mod tests {
     fn test_struct_non_existent_field() {
         let source = r#"
             struct Foo {
-                a: number
+                a: f64
             }
             let foo = Foo {
                 a: 10,
@@ -275,8 +275,8 @@ mod tests {
     fn test_struct_missing_field() {
         let source = r#"
             struct Foo {
-                a: number,
-                b: number
+                a: f64,
+                b: f64
             }
             let foo = Foo {
             };
@@ -288,7 +288,7 @@ mod tests {
     fn test_struct_wrong_type() {
         let source = r#"
             struct Foo {
-                a: number
+                a: f64
             }
             let foo = Foo {
                 a: true
@@ -317,8 +317,8 @@ mod tests {
     fn test_duplicate_field_in_struct() {
         let source = r#"
             struct Foo {
-                a: number,
-                a: number
+                a: f64,
+                a: f64
             }
         "#;
         check_err(source, Error::Parse);
@@ -441,9 +441,9 @@ mod tests {
     fn test_struct_field_function() {
         let source = r#"
             struct Foo {
-                f: fn(number) -> number
+                f: fn(f64) -> f64
             }
-            fn foo(n: number) -> number { n + 1.0 }
+            fn foo(n: f64) -> f64 { n + 1.0 }
             let f = Foo { f: foo };
             f.f(10.0);
         "#;
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn test_functions() {
         let source = r#"
-            fn foo(n: number) {
+            fn foo(n: f64) {
                 print(n);
             }
 
@@ -600,7 +600,7 @@ mod tests {
                 (a, b)
             }
 
-            let f: fn(number, bool) -> (number, bool) = foo;
+            let f: fn(f64, bool) -> (f64, bool) = foo;
             print(f(10.0, true).0);
             print(f(20.0, false).0);
         "#;
@@ -644,7 +644,7 @@ mod tests {
             fn foo<T>(a: T) -> T {
                 a
             }
-            fn bar(n: number) -> number {
+            fn bar(n: f64) -> f64 {
                 n + 1.0
             }
             let x = if true { foo } else { bar };
@@ -659,7 +659,7 @@ mod tests {
             fn foo<T>(a: T) -> T {
                 a
             }
-            fn bar(n: number) -> number {
+            fn bar(n: f64) -> f64 {
                 n + 1.0
             }
             let x = if true { foo } else { bar };
@@ -687,8 +687,8 @@ mod tests {
     #[test]
     fn test_tuple_struct() {
         let source = r#"
-            struct Bar(number);
-            struct Foo(number, string, Bar);
+            struct Bar(f64);
+            struct Foo(f64, string, Bar);
             let bar = Bar(10.0);
             let foo = Foo(20.0, "hello", bar);
             print(foo.0);
@@ -715,10 +715,10 @@ mod tests {
             let a = [1.0, 2.0, 3.0];
             print(a);
 
-            let b: [number] = a;
+            let b: [f64] = a;
             print(b[2]);
 
-            fn foo(n: number) -> [number] {
+            fn foo(n: f64) -> [f64] {
                 [n; 20]
             }
             print(foo(10.0)[1]);

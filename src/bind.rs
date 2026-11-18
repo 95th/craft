@@ -35,7 +35,7 @@ pub struct Scope {
 pub struct BindCtx {
     pub symbols: Arena<Symbol>,
     pub interner: StrInterner,
-    pub number_type: SymbolId,
+    pub f64_type: SymbolId,
     pub i64_type: SymbolId,
     pub u64_type: SymbolId,
     pub string_type: SymbolId,
@@ -53,7 +53,7 @@ pub struct Binder<'a> {
     symbols: Arena<Symbol>,
     interner: StrInterner,
     has_error: bool,
-    number_type: SymbolId,
+    f64_type: SymbolId,
     i64_type: SymbolId,
     u64_type: SymbolId,
     string_type: SymbolId,
@@ -76,7 +76,7 @@ impl<'a> Binder<'a> {
             symbols: Arena::new(),
             interner: StrInterner::new(),
             has_error: false,
-            number_type: SymbolId::MAX,
+            f64_type: SymbolId::MAX,
             i64_type: SymbolId::MAX,
             u64_type: SymbolId::MAX,
             string_type: SymbolId::MAX,
@@ -103,7 +103,7 @@ impl<'a> Binder<'a> {
         Ok(BindCtx {
             symbols: self.symbols,
             interner: self.interner,
-            number_type: self.number_type,
+            f64_type: self.f64_type,
             i64_type: self.i64_type,
             u64_type: self.u64_type,
             string_type: self.string_type,
@@ -115,7 +115,7 @@ impl<'a> Binder<'a> {
     fn declare_default_types(&mut self) {
         self.i64_type = self.declare_default_type("i64");
         self.u64_type = self.declare_default_type("u64");
-        self.number_type = self.declare_default_type("number");
+        self.f64_type = self.declare_default_type("f64");
         self.string_type = self.declare_default_type("string");
         self.bool_type = self.declare_default_type("bool");
     }

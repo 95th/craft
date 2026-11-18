@@ -12,7 +12,7 @@ pub enum Opcode {
     SetLocal,
     SetLocalLong,
 
-    PrintNumber,
+    PrintF64,
     PrintI64,
     PrintU64,
     PrintString,
