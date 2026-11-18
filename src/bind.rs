@@ -276,16 +276,16 @@ fn bind_block(b: &mut Binder, nodes: &[StmtId], expr: Option<ExprId>) {
 }
 
 fn declare_item(b: &mut Binder, stmt: StmtId) {
-    match b.ast.stmts[stmt] {
-        Stmt::Fn(name, ..) => {
-            b.declare_fn(name, stmt);
+    match &b.ast.stmts[stmt] {
+        Stmt::Fn(f) => {
+            b.declare_fn(f.name, stmt);
         }
-        Stmt::Struct(name, ..) => {
-            b.declare_type(name, SymbolKind::Struct, stmt);
+        Stmt::Struct(s) => {
+            b.declare_type(s.name, SymbolKind::Struct, stmt);
         }
-        Stmt::TupleStruct(name, ..) => {
-            b.declare_type(name, SymbolKind::Struct, stmt);
-            b.declare_fn(name, stmt);
+        Stmt::TupleStruct(s) => {
+            b.declare_type(s.name, SymbolKind::Struct, stmt);
+            b.declare_fn(s.name, stmt);
         }
         _ => (),
     }
@@ -293,48 +293,48 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
 
 fn bind_statement(b: &mut Binder, stmt: StmtId) {
     match b.ast.stmts[stmt] {
-        Stmt::Let(name, ty, init) => {
+        Stmt::Let { name, ty, init } => {
             bind_expr(b, init);
             if let Some(ty) = ty {
                 bind_ty(b, ty);
             }
             b.declare_value(name, SymbolKind::Let, stmt);
         }
-        Stmt::Fn(_, ref type_params, ref params, return_ty, body) => b.with_item_scope(|b| {
-            for t in type_params {
+        Stmt::Fn(ref f) => b.with_item_scope(|b| {
+            for t in f.type_params.iter() {
                 bind_statement(b, *t);
             }
             b.with_value_scope(false, |b| {
                 let prev_local_count = std::mem::replace(&mut b.local_count, 0);
-                for param in params {
+                for param in f.params.iter() {
                     bind_statement(b, *param);
                 }
-                if let Some(return_ty) = return_ty {
+                if let Some(return_ty) = f.return_ty {
                     bind_ty(b, return_ty);
                 }
                 let prev_loop_depth = std::mem::replace(&mut b.loop_depth, 0);
                 b.fn_depth += 1;
-                bind_expr(b, body);
+                bind_expr(b, f.body);
                 b.fn_depth -= 1;
                 b.loop_depth = prev_loop_depth;
                 b.local_count = prev_local_count;
             })
         }),
-        Stmt::Param(name, ty) => {
+        Stmt::Param { name, ty } => {
             bind_ty(b, ty);
             b.declare_value(name, SymbolKind::Param, stmt);
         }
         Stmt::TypeParam(name) => {
             b.declare_type(name, SymbolKind::TypeParam, stmt);
         }
-        Stmt::Expr(expr, _) => bind_expr(b, expr),
-        Stmt::Struct(_, ref fields) => {
-            for (_, ty) in fields {
+        Stmt::Expr { expr, .. } => bind_expr(b, expr),
+        Stmt::Struct(ref s) => {
+            for ty in s.fields.values() {
                 bind_ty(b, *ty)
             }
         }
-        Stmt::TupleStruct(_, ref types) => {
-            for ty in types {
+        Stmt::TupleStruct(ref s) => {
+            for ty in s.fields.iter() {
                 bind_ty(b, *ty)
             }
         }
@@ -352,31 +352,35 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                 b.has_error = true;
             }
         }
-        Expr::Assign(left, right) => {
-            bind_expr(b, left);
-            bind_expr(b, right);
+        Expr::Assign { lhs, rhs } => {
+            bind_expr(b, lhs);
+            bind_expr(b, rhs);
         }
-        Expr::Binary(left, _op, right) => {
-            bind_expr(b, left);
-            bind_expr(b, right);
+        Expr::Binary { lhs, rhs, .. } => {
+            bind_expr(b, lhs);
+            bind_expr(b, rhs);
         }
         Expr::Unit | Expr::Bool(_) | Expr::Number(_) | Expr::Int(_) | Expr::String(_) => {}
-        Expr::If(cond, then_clause, else_clause) => {
+        Expr::If {
+            cond,
+            then_clause,
+            else_clause,
+        } => {
             bind_expr(b, cond);
             bind_expr(b, then_clause);
             if let Some(else_clause) = else_clause {
                 bind_expr(b, else_clause)
             }
         }
-        Expr::While(cond, body) => {
+        Expr::While { cond, body } => {
             bind_expr(b, cond);
             b.loop_depth += 1;
             bind_expr(b, body);
             b.loop_depth -= 1;
         }
-        Expr::Block(ref nodes, expr) => bind_block(b, nodes, expr),
+        Expr::Block { ref stmts, expr } => bind_block(b, stmts, expr),
         Expr::Negate(expr) | Expr::Not(expr) => bind_expr(b, expr),
-        Expr::Call(callee, ref args) => {
+        Expr::Call { callee, ref args } => {
             for arg in args {
                 bind_expr(b, *arg);
             }
@@ -404,11 +408,11 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                 bind_expr(b, *node);
             }
         }
-        Expr::TupleField(target, _) => {
-            bind_expr(b, target);
+        Expr::TupleField { obj, .. } => {
+            bind_expr(b, obj);
         }
-        Expr::Struct(name, ref fields) => {
-            if let Some(symbol) = b.lookup_type(name) {
+        Expr::Struct(ref s) => {
+            if let Some(symbol) = b.lookup_type(s.name) {
                 b.ast.exprs.bind_value(node, symbol);
             } else {
                 b.diagnostics
@@ -416,14 +420,19 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                 b.has_error = true;
             }
 
-            for expr in fields.values() {
+            for expr in s.fields.values() {
                 bind_expr(b, *expr);
             }
         }
-        Expr::StructField(target, _) => {
-            bind_expr(b, target);
+        Expr::StructField { obj, .. } => {
+            bind_expr(b, obj);
         }
-        Expr::For(init, cond, incr, body) => b.with_value_scope(true, |b| {
+        Expr::For {
+            init,
+            cond,
+            incr,
+            body,
+        } => b.with_value_scope(true, |b| {
             if let Some(init) = init {
                 bind_statement(b, init);
             }
@@ -442,12 +451,12 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                 bind_expr(b, *e);
             }
         }
-        Expr::ArrayRepeat(expr, count) => {
+        Expr::ArrayRepeat { expr, count } => {
             bind_expr(b, expr);
             bind_expr(b, count);
         }
-        Expr::ArrayIndex(expr, index) => {
-            bind_expr(b, expr);
+        Expr::ArrayIndex { array, index } => {
+            bind_expr(b, array);
             bind_expr(b, index);
         }
     }
@@ -464,7 +473,7 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
                 b.has_error = true;
             }
         }
-        Type::FnType(ref params, ret) => {
+        Type::FnType { ref params, ret } => {
             for p in params {
                 bind_ty(b, *p);
             }

@@ -34,44 +34,121 @@ pub enum Expr {
     String(StrId),
     Not(ExprId),
     Negate(ExprId),
-    Binary(ExprId, BinaryOp, ExprId),
+    Binary {
+        lhs: ExprId,
+        op: BinaryOp,
+        rhs: ExprId,
+    },
     Variable(StrId),
-    Assign(ExprId, ExprId),
-    If(ExprId, ExprId, Option<ExprId>),
-    Block(Vec<StmtId>, Option<ExprId>),
-    While(ExprId, ExprId),
-    For(Option<StmtId>, Option<ExprId>, Option<ExprId>, ExprId),
+    Assign {
+        lhs: ExprId,
+        rhs: ExprId,
+    },
+    If {
+        cond: ExprId,
+        then_clause: ExprId,
+        else_clause: Option<ExprId>,
+    },
+    Block {
+        stmts: Box<[StmtId]>,
+        expr: Option<ExprId>,
+    },
+    While {
+        cond: ExprId,
+        body: ExprId,
+    },
+    For {
+        init: Option<StmtId>,
+        cond: Option<ExprId>,
+        incr: Option<ExprId>,
+        body: ExprId,
+    },
     Break,
     Continue,
-    Call(ExprId, Vec<ExprId>),
+    Call {
+        callee: ExprId,
+        args: Box<[ExprId]>,
+    },
     Return(Option<ExprId>),
     Unit,
-    TupleField(ExprId, u16),
-    Tuple(Vec<ExprId>),
-    Struct(StrId, FxIndexMap<StrId, ExprId>),
-    StructField(ExprId, StrId),
-    Array(Vec<ExprId>),
-    ArrayRepeat(ExprId, ExprId),
-    ArrayIndex(ExprId, ExprId),
+    TupleField {
+        obj: ExprId,
+        index: u16,
+    },
+    Tuple(Box<[ExprId]>),
+    Struct(Box<StructExpr>),
+    StructField {
+        obj: ExprId,
+        name: StrId,
+    },
+    Array(Box<[ExprId]>),
+    ArrayRepeat {
+        expr: ExprId,
+        count: ExprId,
+    },
+    ArrayIndex {
+        array: ExprId,
+        index: ExprId,
+    },
 }
 
 #[derive(Debug)]
 pub enum Stmt {
-    Let(StrId, Option<TypeId>, ExprId),
-    Expr(ExprId, bool),
-    Param(StrId, TypeId),
-    Fn(StrId, Vec<StmtId>, Vec<StmtId>, Option<TypeId>, ExprId),
-    Struct(StrId, FxIndexMap<StrId, TypeId>),
-    TupleStruct(StrId, Vec<TypeId>),
+    Let {
+        name: StrId,
+        ty: Option<TypeId>,
+        init: ExprId,
+    },
+    Expr {
+        expr: ExprId,
+        semi: bool,
+    },
+    Param {
+        name: StrId,
+        ty: TypeId,
+    },
+    Fn(Box<FnDecl>),
+    Struct(Box<StructDecl>),
+    TupleStruct(Box<TupleStructDecl>),
     TypeParam(StrId),
+}
+
+#[derive(Debug)]
+pub struct StructDecl {
+    pub name: StrId,
+    pub fields: FxIndexMap<StrId, TypeId>,
+}
+
+#[derive(Debug)]
+pub struct TupleStructDecl {
+    pub name: StrId,
+    pub fields: Box<[TypeId]>,
+}
+
+#[derive(Debug)]
+pub struct StructExpr {
+    pub name: StrId,
+    pub fields: FxIndexMap<StrId, ExprId>,
+}
+
+#[derive(Debug)]
+pub struct FnDecl {
+    pub name: StrId,
+    pub type_params: Box<[StmtId]>,
+    pub params: Box<[StmtId]>,
+    pub return_ty: Option<TypeId>,
+    pub body: ExprId,
 }
 
 #[derive(Debug)]
 pub enum Type {
     Named(StrId),
-    FnType(Vec<TypeId>, Option<TypeId>),
+    FnType {
+        params: Box<[TypeId]>,
+        ret: Option<TypeId>,
+    },
     Unit,
-    Tuple(Vec<TypeId>),
+    Tuple(Box<[TypeId]>),
     Array(TypeId),
 }
 

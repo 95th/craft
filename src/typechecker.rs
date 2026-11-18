@@ -238,10 +238,13 @@ fn check_scope(c: &mut TypeChecker, nodes: &[StmtId]) {
 
 fn declare_item(c: &mut TypeChecker, node: StmtId) {
     match c.ast.stmts[node] {
-        Stmt::Fn(_, ref type_params, ref params, ret, _) => {
-            let type_params: Vec<TyId> = type_params.iter().map(|p| check_stmt(c, *p)).collect();
-            let params = params.iter().map(|p| check_stmt(c, *p)).collect();
-            let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
+        Stmt::Fn(ref f) => {
+            let type_params: Vec<TyId> = f.type_params.iter().map(|p| check_stmt(c, *p)).collect();
+            let params = f.params.iter().map(|p| check_stmt(c, *p)).collect();
+            let ret = f
+                .return_ty
+                .map(|t| check_type(c, t))
+                .unwrap_or(c.common_types.unit);
             let fn_ty = c.types.new_key(Ty::Fn(params, ret));
             let fn_symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(fn_symbol, fn_ty);
@@ -254,7 +257,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
             let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
             c.type_bindings.insert(struct_symbol, struct_ty);
         }
-        Stmt::TupleStruct(..) => {
+        Stmt::TupleStruct { .. } => {
             let struct_symbol = c.ast.stmts.type_binding(node);
             let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
             c.type_bindings.insert(struct_symbol, struct_ty);
@@ -265,7 +268,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
 
 fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
     match c.ast.stmts[node] {
-        Stmt::Let(_, ty, init) => {
+        Stmt::Let { ty, init, .. } => {
             let init_ty = check_expr(c, init);
             if let Some(ty) = ty {
                 let ty = check_type(c, ty);
@@ -275,7 +278,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             c.value_bindings.insert(symbol, init_ty);
             c.common_types.unit
         }
-        Stmt::Fn(.., body) => {
+        Stmt::Fn(ref f) => {
             let fn_symbol = c.ast.stmts.value_binding(node);
             let fn_ty = c.value_bindings[&fn_symbol];
             let Ty::Fn(.., return_ty) = c.types.probe_value(fn_ty) else {
@@ -283,35 +286,35 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             };
 
             let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
-            let body_ty = check_expr(c, body);
-            c.unify(return_ty, body_ty, c.ast.exprs.span(body));
+            let body_ty = check_expr(c, f.body);
+            c.unify(return_ty, body_ty, c.ast.exprs.span(f.body));
             c.containing_return_ty = prev_containing_return_ty;
             c.common_types.unit
         }
-        Stmt::Param(_, ty) => {
+        Stmt::Param { ty, .. } => {
             let ty = check_type(c, ty);
             let symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(symbol, ty);
             ty
         }
-        Stmt::Expr(expr, semi) => {
+        Stmt::Expr { expr, semi } => {
             let ty = check_expr(c, expr);
             if semi { c.common_types.unit } else { ty }
         }
-        Stmt::Struct(.., ref fields) => {
+        Stmt::Struct(ref s) => {
             let symbol = c.ast.stmts.type_binding(node);
             let mut properties = FxIndexMap::default();
-            for (&name, &ty) in fields.iter() {
+            for (&name, &ty) in s.fields.iter() {
                 let ty = check_type(c, ty);
                 properties.insert(name, ty);
             }
             c.struct_properties.insert(symbol, properties);
             c.common_types.unit
         }
-        Stmt::TupleStruct(.., ref types) => {
+        Stmt::TupleStruct(ref s) => {
             let type_symbol = c.ast.stmts.type_binding(node);
             let mut arg_tys = Vec::new();
-            for ty in types {
+            for ty in s.fields.iter() {
                 let ty = check_type(c, *ty);
                 arg_tys.push(ty);
             }
@@ -351,13 +354,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Number(_) => c.common_types.f64,
         Expr::String(_) => c.common_types.string,
-        Expr::Assign(lhs, rhs) => {
+        Expr::Assign { lhs, rhs } => {
             let lhs_ty = check_expr(c, lhs);
             let rhs_ty = check_expr(c, rhs);
             c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
             c.common_types.unit
         }
-        Expr::Binary(lhs, op, rhs) => {
+        Expr::Binary { lhs, op, rhs } => {
             let lhs_ty = check_expr(c, lhs);
             let rhs_ty = check_expr(c, rhs);
             match op {
@@ -439,7 +442,11 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             let symbol = c.ast.exprs.value_binding(node);
             instantiate(c, c.value_bindings[&symbol])
         }
-        Expr::If(cond, then_clause, else_clause) => {
+        Expr::If {
+            cond,
+            then_clause,
+            else_clause,
+        } => {
             let cond_ty = check_expr(c, cond);
             c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
             let then_clause_ty = check_expr(c, then_clause);
@@ -460,15 +467,15 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 c.common_types.unit
             }
         }
-        Expr::Block(ref nodes, expr) => crate::stack_safe(|| {
-            check_scope(c, nodes);
+        Expr::Block { ref stmts, expr } => crate::stack_safe(|| {
+            check_scope(c, stmts);
             if let Some(expr) = expr {
                 check_expr(c, expr)
             } else {
                 c.common_types.unit
             }
         }),
-        Expr::While(cond, body) => {
+        Expr::While { cond, body } => {
             let cond_ty = check_expr(c, cond);
             c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
             check_expr(c, body);
@@ -476,7 +483,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Break => c.types.new_key(Ty::Unknown),
         Expr::Continue => c.types.new_key(Ty::Unknown),
-        Expr::Call(callee, ref args) => {
+        Expr::Call { callee, ref args } => {
             let callee_ty = check_expr(c, callee);
             let Ty::Fn(params, ret) = c.types.probe_value(callee_ty) else {
                 c.error("call expression requires function", c.ast.exprs.span(node));
@@ -513,20 +520,20 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             let types = types.iter().map(|t| check_expr(c, *t)).collect();
             c.types.new_key(Ty::Tuple(types))
         }
-        Expr::TupleField(expr, index) => {
-            let expr_ty = check_expr(c, expr);
+        Expr::TupleField { obj, index } => {
+            let expr_ty = check_expr(c, obj);
             let types = match c.types.probe_value(expr_ty) {
                 Ty::Tuple(types) => types,
                 Ty::Named(symbol) => {
                     if let Some(fields) = c.tuple_struct_properties.get(&symbol) {
                         fields.clone()
                     } else {
-                        c.error("expect a tuple", c.ast.exprs.span(expr));
+                        c.error("expect a tuple", c.ast.exprs.span(obj));
                         return c.types.new_key(Ty::Unknown);
                     }
                 }
                 _ => {
-                    c.error("expect a tuple", c.ast.exprs.span(expr));
+                    c.error("expect a tuple", c.ast.exprs.span(obj));
                     return c.types.new_key(Ty::Unknown);
                 }
             };
@@ -536,10 +543,10 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             }
             types[index as usize]
         }
-        Expr::Struct(_, ref fields) => {
+        Expr::Struct(ref s) => {
             let symbol = c.ast.exprs.value_binding(node);
             let declared = c.struct_properties[&symbol].clone();
-            for (name, &value) in fields {
+            for (name, &value) in s.fields.iter() {
                 let ty = check_expr(c, value);
                 if let Some(&declared_ty) = declared.get(name) {
                     c.unify(declared_ty, ty, c.ast.exprs.span(value));
@@ -550,7 +557,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
             let mut missing = Vec::new();
             for (name, _) in declared {
-                if !fields.contains_key(&name) {
+                if !s.fields.contains_key(&name) {
                     missing.push(c.interner.lookup(name));
                 }
             }
@@ -564,24 +571,29 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
             c.type_bindings[&symbol]
         }
-        Expr::StructField(expr, name) => {
-            let expr_ty = check_expr(c, expr);
+        Expr::StructField { obj, name } => {
+            let expr_ty = check_expr(c, obj);
             let Ty::Named(symbol) = c.types.probe_value(expr_ty) else {
-                c.error("expect a struct instance", c.ast.exprs.span(expr));
+                c.error("expect a struct instance", c.ast.exprs.span(obj));
                 return c.types.new_key(Ty::Unknown);
             };
             let Some(properties) = c.struct_properties.get(&symbol) else {
-                c.error("expect a struct instance", c.ast.exprs.span(expr));
+                c.error("expect a struct instance", c.ast.exprs.span(obj));
                 return c.types.new_key(Ty::Unknown);
             };
 
             let Some(&ty) = properties.get(&name) else {
-                c.error("unknown field", c.ast.exprs.span(expr));
+                c.error("unknown field", c.ast.exprs.span(obj));
                 return c.types.new_key(Ty::Unknown);
             };
             ty
         }
-        Expr::For(init, cond, incr, body) => {
+        Expr::For {
+            init,
+            cond,
+            incr,
+            body,
+        } => {
             if let Some(init) = init {
                 check_stmt(c, init);
             }
@@ -603,21 +615,21 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             }
             c.types.new_key(Ty::Array(element_ty))
         }
-        Expr::ArrayRepeat(expr, count) => {
+        Expr::ArrayRepeat { expr, count } => {
             let element_ty = check_expr(c, expr);
             let count_ty = check_expr(c, count);
             c.unify(c.common_types.u64, count_ty, c.ast.exprs.span(count));
             c.types.new_key(Ty::Array(element_ty))
         }
-        Expr::ArrayIndex(expr, index) => {
-            let array_ty = check_expr(c, expr);
+        Expr::ArrayIndex { array, index } => {
+            let array_ty = check_expr(c, array);
             let index_ty = check_expr(c, index);
             c.unify(c.common_types.u64, index_ty, c.ast.exprs.span(index));
 
             match c.types.probe_value(array_ty) {
                 Ty::Array(element_ty) => element_ty,
                 _ => {
-                    c.error("expect array", c.ast.exprs.span(expr));
+                    c.error("expect array", c.ast.exprs.span(array));
                     c.types.new_key(Ty::Unknown)
                 }
             }
@@ -627,7 +639,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
 fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
     match c.ast.types[node] {
-        Type::FnType(ref params, ret) => {
+        Type::FnType { ref params, ret } => {
             let params = params.iter().map(|t| check_type(c, *t)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
             c.types.new_key(Ty::Fn(params, ret))

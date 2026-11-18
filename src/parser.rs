@@ -1,6 +1,9 @@
 use crate::{
     Error, FxIndexMap,
-    ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
+    ast::{
+        AstNodes, BinaryOp, Expr, ExprId, FnDecl, Span, Stmt, StmtId, StructDecl, StructExpr,
+        TupleStructDecl, Type, TypeId,
+    },
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
     scanner::{
@@ -200,12 +203,16 @@ fn let_declaration(p: &mut Parser) -> StmtId {
     let init = expression(p);
     p.consume(Semicolon, "expect ';'");
     p.ast.stmts.alloc(
-        Stmt::Let(name, type_annotation, init),
+        Stmt::Let {
+            name,
+            ty: type_annotation,
+            init,
+        },
         start.to(p.prev_span),
     )
 }
 
-fn type_params(p: &mut Parser) -> Vec<StmtId> {
+fn type_params(p: &mut Parser) -> Box<[StmtId]> {
     let mut type_params = Vec::new();
     if p.eat(Less) {
         loop {
@@ -218,7 +225,7 @@ fn type_params(p: &mut Parser) -> Vec<StmtId> {
         }
         p.consume(Greater, "Expect '>'");
     }
-    type_params
+    type_params.into_boxed_slice()
 }
 
 fn fn_declaration(p: &mut Parser) -> StmtId {
@@ -239,7 +246,7 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
             params.push(
                 p.ast
                     .stmts
-                    .alloc(Stmt::Param(name, ty), param_span.to(p.prev_span)),
+                    .alloc(Stmt::Param { name, ty }, param_span.to(p.prev_span)),
             );
             if !p.eat(Comma) {
                 break;
@@ -251,7 +258,13 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
     p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast.stmts.alloc(
-        Stmt::Fn(name, type_params, params, return_ty, body),
+        Stmt::Fn(Box::new(FnDecl {
+            name,
+            type_params,
+            params: params.into_boxed_slice(),
+            return_ty,
+            body,
+        })),
         start.to(p.prev_span),
     )
 }
@@ -263,10 +276,10 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
     p.consume(Identifier, "expect identifier");
 
     if p.eat(OpenParen) {
-        let mut types = Vec::new();
+        let mut fields = Vec::new();
         if p.token != CloseParen {
             loop {
-                types.push(ty(p));
+                fields.push(ty(p));
                 if !p.eat(Comma) {
                     break;
                 }
@@ -274,10 +287,13 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
         }
         p.consume(CloseParen, "expect ')'");
         p.consume(Semicolon, "expect ';'");
-        return p
-            .ast
-            .stmts
-            .alloc(Stmt::TupleStruct(name, types), start.to(p.prev_span));
+        return p.ast.stmts.alloc(
+            Stmt::TupleStruct(Box::new(TupleStructDecl {
+                name,
+                fields: fields.into_boxed_slice(),
+            })),
+            start.to(p.prev_span),
+        );
     }
 
     p.consume(OpenBrace, "expect '{'");
@@ -298,9 +314,10 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
         }
     }
     p.consume(CloseBrace, "expect '}'");
-    p.ast
-        .stmts
-        .alloc(Stmt::Struct(name, fields), start.to(p.prev_span))
+    p.ast.stmts.alloc(
+        Stmt::Struct(Box::new(StructDecl { name, fields })),
+        start.to(p.prev_span),
+    )
 }
 
 fn expression_statement(p: &mut Parser) -> StmtId {
@@ -309,7 +326,7 @@ fn expression_statement(p: &mut Parser) -> StmtId {
     let semi = p.eat(Semicolon);
     p.ast
         .stmts
-        .alloc(Stmt::Expr(expr, semi), start.to(p.prev_span))
+        .alloc(Stmt::Expr { expr, semi }, start.to(p.prev_span))
 }
 
 fn ty(p: &mut Parser) -> TypeId {
@@ -345,10 +362,14 @@ fn fn_ty(p: &mut Parser) -> TypeId {
         }
     }
     p.consume(CloseParen, "expect ')'");
-    let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.ast
-        .types
-        .alloc(Type::FnType(params, return_ty), start.to(p.prev_span))
+    let ret = if p.eat(RightArrow) { Some(ty(p)) } else { None };
+    p.ast.types.alloc(
+        Type::FnType {
+            params: params.into_boxed_slice(),
+            ret,
+        },
+        start.to(p.prev_span),
+    )
 }
 
 fn tuple_ty(p: &mut Parser) -> TypeId {
@@ -373,7 +394,9 @@ fn tuple_ty(p: &mut Parser) -> TypeId {
         }
     }
     p.consume(CloseParen, "expect ')'");
-    p.ast.types.alloc(Type::Tuple(types), start.to(p.prev_span))
+    p.ast
+        .types
+        .alloc(Type::Tuple(types.into_boxed_slice()), start.to(p.prev_span))
 }
 
 fn array_ty(p: &mut Parser) -> TypeId {
@@ -408,7 +431,10 @@ fn tuple(p: &mut Parser) -> ExprId {
                 }
             }
             p.consume(CloseParen, "expect ')'");
-            return p.ast.exprs.alloc(Expr::Tuple(exprs), start.to(p.prev_span));
+            return p
+                .ast
+                .exprs
+                .alloc(Expr::Tuple(exprs.into_boxed_slice()), start.to(p.prev_span));
         }
 
         p.consume(CloseParen, "expect ')'");
@@ -424,7 +450,7 @@ fn array(p: &mut Parser) -> ExprId {
         return p
             .ast
             .exprs
-            .alloc(Expr::Array(Vec::new()), start.to(p.prev_span));
+            .alloc(Expr::Array(Box::new([])), start.to(p.prev_span));
     }
 
     let expr = expression(p);
@@ -434,7 +460,7 @@ fn array(p: &mut Parser) -> ExprId {
         return p
             .ast
             .exprs
-            .alloc(Expr::ArrayRepeat(expr, count), start.to(p.prev_span));
+            .alloc(Expr::ArrayRepeat { expr, count }, start.to(p.prev_span));
     }
 
     let mut exprs = vec![expr];
@@ -447,7 +473,9 @@ fn array(p: &mut Parser) -> ExprId {
         }
     }
     p.consume(CloseBracket, "expect ']'");
-    p.ast.exprs.alloc(Expr::Array(exprs), start.to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::Array(exprs.into_boxed_slice()), start.to(p.prev_span))
 }
 
 fn binary(p: &mut Parser, lhs: ExprId) -> ExprId {
@@ -472,7 +500,7 @@ fn binary(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
     let rhs = parse_precedence(p, precedence + 1);
     p.ast.exprs.alloc(
-        Expr::Binary(lhs, op, rhs),
+        Expr::Binary { lhs, op, rhs },
         p.ast.exprs.span(lhs).to(p.prev_span),
     )
 }
@@ -483,12 +511,12 @@ fn assignment(p: &mut Parser, lhs: ExprId) -> ExprId {
     let lhs_span = p.ast.exprs.span(lhs);
     match p.ast.exprs[lhs] {
         Expr::Variable(..)
-        | Expr::StructField(..)
-        | Expr::TupleField(..)
-        | Expr::ArrayIndex(..) => p
+        | Expr::StructField { .. }
+        | Expr::TupleField { .. }
+        | Expr::ArrayIndex { .. } => p
             .ast
             .exprs
-            .alloc(Expr::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
+            .alloc(Expr::Assign { lhs, rhs }, lhs_span.to(p.prev_span)),
         _ => {
             p.error_at("invalid assignment target", lhs_span);
             ExprId::MAX
@@ -508,9 +536,13 @@ fn call(p: &mut Parser, lhs: ExprId) -> ExprId {
         }
     }
     p.consume(CloseParen, "expect ')'");
-    p.ast
-        .exprs
-        .alloc(Expr::Call(lhs, args), p.ast.exprs.span(lhs).to(p.prev_span))
+    p.ast.exprs.alloc(
+        Expr::Call {
+            callee: lhs,
+            args: args.into_boxed_slice(),
+        },
+        p.ast.exprs.span(lhs).to(p.prev_span),
+    )
 }
 
 fn index(p: &mut Parser, lhs: ExprId) -> ExprId {
@@ -518,7 +550,7 @@ fn index(p: &mut Parser, lhs: ExprId) -> ExprId {
     let index = expression(p);
     p.consume(CloseBracket, "expect ']'");
     p.ast.exprs.alloc(
-        Expr::ArrayIndex(lhs, index),
+        Expr::ArrayIndex { array: lhs, index },
         p.ast.exprs.span(lhs).to(p.prev_span),
     )
 }
@@ -534,7 +566,7 @@ fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
         };
         p.ast
             .exprs
-            .alloc(Expr::TupleField(lhs, index), start.to(p.prev_span))
+            .alloc(Expr::TupleField { obj: lhs, index }, start.to(p.prev_span))
     } else if p.eat(NumberLiteral) {
         let start = p.ast.exprs.span(lhs);
         let (int, fract) = name.split_once('.').unwrap();
@@ -546,10 +578,13 @@ fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
             p.error_at("literal out of range", int_span);
             return ExprId::MAX;
         };
-        let expr = p
-            .ast
-            .exprs
-            .alloc(Expr::TupleField(lhs, int_index), start.to(int_span));
+        let expr = p.ast.exprs.alloc(
+            Expr::TupleField {
+                obj: lhs,
+                index: int_index,
+            },
+            start.to(int_span),
+        );
 
         let Ok(fract_index) = fract.parse() else {
             p.error_at(
@@ -559,12 +594,19 @@ fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
             return ExprId::MAX;
         };
 
-        p.ast
-            .exprs
-            .alloc(Expr::TupleField(expr, fract_index), start.to(p.prev_span))
+        p.ast.exprs.alloc(
+            Expr::TupleField {
+                obj: expr,
+                index: fract_index,
+            },
+            start.to(p.prev_span),
+        )
     } else if p.eat(Identifier) {
         p.ast.exprs.alloc(
-            Expr::StructField(lhs, p.interner.intern(name)),
+            Expr::StructField {
+                obj: lhs,
+                name: p.interner.intern(name),
+            },
             p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else {
@@ -680,10 +722,10 @@ fn variable(p: &mut Parser) -> ExprId {
             }
         }
         p.consume(CloseBrace, "expect '}'");
-        return p
-            .ast
-            .exprs
-            .alloc(Expr::Struct(name, fields), start.to(p.prev_span));
+        return p.ast.exprs.alloc(
+            Expr::Struct(Box::new(StructExpr { name, fields })),
+            start.to(p.prev_span),
+        );
     }
 
     p.ast.exprs.alloc(Expr::Variable(name), p.prev_span)
@@ -711,7 +753,11 @@ fn if_expr(p: &mut Parser) -> ExprId {
         None
     };
     p.ast.exprs.alloc(
-        Expr::If(cond, then_clause, else_clause),
+        Expr::If {
+            cond,
+            then_clause,
+            else_clause,
+        },
         start.to(p.prev_span),
     )
 }
@@ -724,7 +770,7 @@ fn while_expr(p: &mut Parser) -> ExprId {
     let body = block_expr(p);
     p.ast
         .exprs
-        .alloc(Expr::While(cond, body), start.to(p.prev_span))
+        .alloc(Expr::While { cond, body }, start.to(p.prev_span))
 }
 
 fn for_expr(p: &mut Parser) -> ExprId {
@@ -739,7 +785,7 @@ fn for_expr(p: &mut Parser) -> ExprId {
         let expr = expression(p);
         p.consume(Semicolon, "expect ';'");
         let stmt = p.ast.stmts.alloc(
-            Stmt::Expr(expr, true),
+            Stmt::Expr { expr, semi: true },
             p.ast.exprs.span(expr).to(p.prev_span),
         );
         Some(stmt)
@@ -760,39 +806,49 @@ fn for_expr(p: &mut Parser) -> ExprId {
     };
     p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
-    p.ast
-        .exprs
-        .alloc(Expr::For(init, cond, incr, body), start.to(p.prev_span))
+    p.ast.exprs.alloc(
+        Expr::For {
+            init,
+            cond,
+            incr,
+            body,
+        },
+        start.to(p.prev_span),
+    )
 }
 
 fn block_expr(p: &mut Parser) -> ExprId {
     crate::stack_safe(|| {
         let start = p.prev_span;
-        let mut nodes = Vec::new();
+        let mut stmts = Vec::new();
         let mut trailing_expr = None;
         if p.token != CloseBrace && p.token != Eof {
             loop {
                 let stmt = declaration(p);
                 if p.token == CloseBrace || p.token == Eof {
                     if stmt != StmtId::MAX
-                        && let Stmt::Expr(expr, false) = p.ast.stmts[stmt]
+                        && let Stmt::Expr { expr, semi: false } = p.ast.stmts[stmt]
                     {
                         trailing_expr = Some(expr);
                     } else {
-                        nodes.push(stmt);
+                        stmts.push(stmt);
                     }
                     break;
                 }
-                nodes.push(stmt);
+                stmts.push(stmt);
                 if expr_requires_semi(p, stmt) {
                     p.error_at("expect ';'", p.ast.stmts.span(stmt));
                 }
             }
         }
         p.consume(CloseBrace, "expect '}'");
-        p.ast
-            .exprs
-            .alloc(Expr::Block(nodes, trailing_expr), start.to(p.prev_span))
+        p.ast.exprs.alloc(
+            Expr::Block {
+                stmts: stmts.into_boxed_slice(),
+                expr: trailing_expr,
+            },
+            start.to(p.prev_span),
+        )
     })
 }
 
@@ -868,12 +924,12 @@ impl Token {
 
 fn expr_requires_semi(p: &Parser, stmt: StmtId) -> bool {
     if stmt != StmtId::MAX
-        && let Stmt::Expr(expr, false) = p.ast.stmts[stmt]
+        && let Stmt::Expr { expr, semi: false } = p.ast.stmts[stmt]
         && expr != ExprId::MAX
     {
         !matches!(
             p.ast.exprs[expr],
-            Expr::If(..) | Expr::While(..) | Expr::Block(..) | Expr::For(..)
+            Expr::If { .. } | Expr::While { .. } | Expr::Block { .. } | Expr::For { .. }
         )
     } else {
         false

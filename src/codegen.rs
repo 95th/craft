@@ -84,15 +84,15 @@ impl<'a> Codegen<'a> {
     }
 
     fn process_function(&mut self, function: StmtId) {
-        match self.ast.stmts[function] {
-            Stmt::Fn(.., ref params, _, body) => {
-                self.locals = params.len();
-                self.process_expr(body);
+        match &self.ast.stmts[function] {
+            Stmt::Fn(f) => {
+                self.locals = f.params.len();
+                self.process_expr(f.body);
                 self.code.op_return();
             }
-            Stmt::TupleStruct(.., ref args) => {
-                self.locals = args.len();
-                self.code.op_struct(args.len() as u16);
+            Stmt::TupleStruct(s) => {
+                self.locals = s.fields.len();
+                self.code.op_struct(s.fields.len() as u16);
                 self.code.op_return();
             }
             _ => unreachable!(),
@@ -101,11 +101,11 @@ impl<'a> Codegen<'a> {
 
     fn process_stmt(&mut self, stmt: StmtId) {
         match self.ast.stmts[stmt] {
-            Stmt::Let(_, _, init) => {
+            Stmt::Let { init, .. } => {
                 self.process_expr(init);
                 self.locals += 1;
             }
-            Stmt::Expr(expr, _) => {
+            Stmt::Expr { expr, .. } => {
                 self.process_expr(expr);
                 self.code.pop();
             }
@@ -166,7 +166,7 @@ impl<'a> Codegen<'a> {
                     _ => unreachable!(),
                 }
             }
-            Expr::Assign(lhs, rhs) => match self.ast.exprs[lhs] {
+            Expr::Assign { lhs, rhs } => match self.ast.exprs[lhs] {
                 Expr::Variable(..) => {
                     let symbol = self.ast.exprs.value_binding(lhs);
                     let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
@@ -174,26 +174,26 @@ impl<'a> Codegen<'a> {
                     self.code.op_set_local(index);
                     self.code.op_unit();
                 }
-                Expr::TupleField(expr, index) => {
-                    self.process_expr(expr);
+                Expr::TupleField { obj, index } => {
+                    self.process_expr(obj);
                     self.process_expr(rhs);
                     self.code.op_set_struct_property(index);
                     self.code.op_unit();
                 }
-                Expr::StructField(expr, name) => {
-                    let ty = self.ty_ctx.expr_types[&expr];
+                Expr::StructField { obj, name } => {
+                    let ty = self.ty_ctx.expr_types[&obj];
                     let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                         unreachable!();
                     };
                     let properties = &self.ty_ctx.struct_properties[&symbol];
                     let index = properties.get_index_of(&name).unwrap();
-                    self.process_expr(expr);
+                    self.process_expr(obj);
                     self.process_expr(rhs);
                     self.code.op_set_struct_property(index as u16);
                     self.code.op_unit();
                 }
-                Expr::ArrayIndex(expr, index) => {
-                    self.process_expr(expr);
+                Expr::ArrayIndex { array, index } => {
+                    self.process_expr(array);
                     self.process_expr(index);
                     self.process_expr(rhs);
                     self.code.op_set_struct_index();
@@ -201,7 +201,11 @@ impl<'a> Codegen<'a> {
                 }
                 _ => unreachable!(),
             },
-            Expr::Binary(lhs, BinaryOp::And, rhs) => {
+            Expr::Binary {
+                lhs,
+                op: BinaryOp::And,
+                rhs,
+            } => {
                 self.process_expr(lhs);
                 let jump_false = self.code.write_jump(Opcode::JumpIfFalse);
                 self.process_expr(rhs);
@@ -210,7 +214,11 @@ impl<'a> Codegen<'a> {
                 self.code.op(Opcode::False);
                 self.code.patch_jump(jump_end);
             }
-            Expr::Binary(lhs, BinaryOp::Or, rhs) => {
+            Expr::Binary {
+                lhs,
+                op: BinaryOp::Or,
+                rhs,
+            } => {
                 self.process_expr(lhs);
                 let jump_rhs = self.code.write_jump(Opcode::JumpIfFalse);
                 let jump_true = self.code.write_jump(Opcode::Jump);
@@ -221,7 +229,7 @@ impl<'a> Codegen<'a> {
                 self.code.op(Opcode::True);
                 self.code.patch_jump(jump_end);
             }
-            Expr::Binary(lhs, op, rhs) => {
+            Expr::Binary { lhs, op, rhs } => {
                 self.process_expr(lhs);
                 self.process_expr(rhs);
                 let ty = self.ty_ctx.expr_types[&lhs];
@@ -276,7 +284,7 @@ impl<'a> Codegen<'a> {
                     },
                 }
             }
-            Expr::Call(callee, ref args) => {
+            Expr::Call { callee, ref args } => {
                 for &arg in args {
                     self.process_expr(arg);
                 }
@@ -297,7 +305,7 @@ impl<'a> Codegen<'a> {
                     self.code.op_call(args.len() as u8);
                 }
             }
-            Expr::Block(ref stmts, expr) => {
+            Expr::Block { ref stmts, expr } => {
                 let prev_locals = std::mem::replace(&mut self.locals, 0);
                 for &stmt in stmts {
                     self.process_stmt(stmt);
@@ -311,7 +319,11 @@ impl<'a> Codegen<'a> {
                 }
                 self.locals = prev_locals;
             }
-            Expr::If(cond, then_clause, else_clause) => {
+            Expr::If {
+                cond,
+                then_clause,
+                else_clause,
+            } => {
                 self.process_expr(cond);
                 let then_offset = self.code.write_jump(Opcode::JumpIfFalse);
                 self.process_expr(then_clause);
@@ -325,7 +337,7 @@ impl<'a> Codegen<'a> {
                     self.code.op_unit();
                 }
             }
-            Expr::While(cond, body) => {
+            Expr::While { cond, body } => {
                 self.enter_loop();
                 let start = self.code.len();
                 self.process_expr(cond);
@@ -336,7 +348,12 @@ impl<'a> Codegen<'a> {
                 self.code.patch_jump(jump_offset);
                 self.exit_loop();
             }
-            Expr::For(init, cond, incr, body) => {
+            Expr::For {
+                init,
+                cond,
+                incr,
+                body,
+            } => {
                 let prev_locals = std::mem::replace(&mut self.locals, 0);
                 if let Some(init) = init {
                     self.process_stmt(init);
@@ -393,30 +410,30 @@ impl<'a> Codegen<'a> {
                 }
                 self.code.op_struct(args.len() as u16);
             }
-            Expr::TupleField(expr, index) => {
-                self.process_expr(expr);
+            Expr::TupleField { obj, index } => {
+                self.process_expr(obj);
                 self.code.op_get_struct_property(index);
             }
-            Expr::Struct(.., ref fields) => {
+            Expr::Struct(ref s) => {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let properties = &self.ty_ctx.struct_properties[&symbol];
                 let mut exprs = Vec::with_capacity(properties.len());
                 for (name, _) in properties {
-                    exprs.push(fields[name]);
+                    exprs.push(s.fields[name]);
                 }
                 for &expr in exprs.iter() {
                     self.process_expr(expr);
                 }
                 self.code.op_struct(exprs.len() as u16);
             }
-            Expr::StructField(expr, name) => {
-                let ty = self.ty_ctx.expr_types[&expr];
+            Expr::StructField { obj, name } => {
+                let ty = self.ty_ctx.expr_types[&obj];
                 let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                     unreachable!();
                 };
                 let properties = &self.ty_ctx.struct_properties[&symbol];
                 let index = properties.get_index_of(&name).unwrap();
-                self.process_expr(expr);
+                self.process_expr(obj);
                 self.code.op_get_struct_property(index as u16);
             }
             Expr::Array(ref args) => {
@@ -425,13 +442,13 @@ impl<'a> Codegen<'a> {
                 }
                 self.code.op_struct(args.len() as u16);
             }
-            Expr::ArrayRepeat(expr, count) => {
+            Expr::ArrayRepeat { expr, count } => {
                 self.process_expr(expr);
                 self.process_expr(count);
                 self.code.op_repeat_struct();
             }
-            Expr::ArrayIndex(expr, index) => {
-                self.process_expr(expr);
+            Expr::ArrayIndex { array, index } => {
+                self.process_expr(array);
                 self.process_expr(index);
                 self.code.op_get_struct_index();
             }
