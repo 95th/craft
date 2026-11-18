@@ -407,7 +407,7 @@ impl<'a> Lowering<'a> {
                     continue_target,
                     continue_locals,
                     break_target: merge_block,
-                    break_locals: prev_locals,
+                    break_locals: continue_locals,
                 });
 
                 self.lower_expr(body, None);

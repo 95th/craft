@@ -1083,4 +1083,17 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_lower_for_loop_with_break() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                if i == 5 {
+                    break;
+                }
+                print(i);
+            }
+        "#;
+        run_ok(source);
+    }
 }
