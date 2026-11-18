@@ -95,12 +95,7 @@ fn let_declaration(p: &mut Parser) -> NodeId {
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "Expect variable name.");
-    let type_annotation = if p.token == Colon {
-        p.advance();
-        Some(ty(p))
-    } else {
-        None
-    };
+    let type_annotation = if p.eat(Colon) { Some(ty(p)) } else { None };
     p.consume(Equal, "Expect '=' before initializer.");
     let init = expression(p);
     p.consume(Semicolon, "Expect ';' after initializer.");
@@ -249,8 +244,7 @@ fn if_expr(p: &mut Parser) -> NodeId {
         return p.nodes.alloc(Node::Error, p.scanner.span());
     }
     let then_clause = block_expr(p);
-    let else_clause = if p.token == Else {
-        p.advance();
+    let else_clause = if p.eat(Else) {
         Some(match p.token {
             OpenBrace => block_expr(p),
             If => if_expr(p),
