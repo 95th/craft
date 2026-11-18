@@ -215,22 +215,25 @@ impl<'a> Lowering<'a> {
                 });
             }
             ast::Expr::Block { ref stmts, expr } => {
-                let result_local = self.create_local(ty);
+                let result_local = expr.map(|_| self.create_local(ty));
                 let prev_locals = self.local_stack.len();
                 for &stmt in stmts {
                     self.lower_stmt(stmt);
                 }
-                let value = if let Some(expr) = expr {
-                    self.lower_expr(expr)
+                let value = if let Some(expr) = expr
+                    && let Some(result_local) = result_local
+                {
+                    let value = self.lower_expr(expr);
+                    self.push_stmt(Statement::Assign {
+                        place: Place::local(result_local),
+                        value: RValue::Use(value),
+                    });
+                    Operand::Place(Place::local(result_local))
                 } else {
                     Operand::Constant(Constant::Unit)
                 };
-                self.push_stmt(Statement::Assign {
-                    place: Place::local(result_local),
-                    value: RValue::Use(value),
-                });
                 self.drop_locals(prev_locals);
-                return Operand::Place(Place::local(result_local));
+                return value;
             }
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);

@@ -37,8 +37,6 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-const LOWER: bool = false;
-
 fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
@@ -86,7 +84,7 @@ fn main() {
         print(fib(35));
     "#;
 
-    if LOWER {
+    if cfg!(feature = "lower") {
         let mut diagnostics = Diagnostics::new();
         if lower(source, &mut diagnostics).is_err() {
             diagnostics.print(source);
@@ -114,7 +112,7 @@ mod tests {
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
 
-        if LOWER {
+        if cfg!(feature = "lower") {
             let result = lower(source, &mut diagnostics);
             diagnostics.print(source);
             result.expect("ok");
