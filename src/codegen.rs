@@ -246,7 +246,7 @@ impl<'a> Codegen<'a> {
                     self.code.write(Opcode::Return);
                 }
             }
-            _ => todo!(),
+            _ => {}
         }
     }
 
