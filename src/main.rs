@@ -683,4 +683,14 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_empty_tuple_struct() {
+        let source = r#"
+            struct Foo();
+            let foo = Foo();
+            print(foo);
+        "#;
+        run_ok(source);
+    }
 }
