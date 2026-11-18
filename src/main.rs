@@ -45,16 +45,32 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn helper(source: &str) {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Error {
+        Parse,
+        Bind,
+        TypeCheck,
+    }
+
+    fn check(source: &str) -> Result<(), Error> {
         let mut arena = NodeArena::new();
         let mut parser = Parser::new(source, &mut arena);
-        let nodes = parser.parse().unwrap();
+        let nodes = parser.parse().ok_or(Error::Parse)?;
 
         let binder = Binder::new(&arena);
-        let bind_ctx = binder.bind(&nodes).unwrap();
+        let bind_ctx = binder.bind(&nodes).ok_or(Error::Bind)?;
 
         let mut checker = TypeChecker::new(source, &arena, bind_ctx);
-        checker.check(&nodes).unwrap();
+        checker.check(&nodes).ok_or(Error::TypeCheck)?;
+        Ok(())
+    }
+
+    fn check_ok(source: &str) {
+        check(source).unwrap();
+    }
+
+    fn check_err(source: &str, error: Error) {
+        assert_eq!(check(source).unwrap_err(), error);
     }
 
     #[test]
@@ -71,7 +87,7 @@ mod tests {
             }
             foo(foo(1, 2), x);
         "#;
-        helper(source);
+        check_ok(source)
     }
 
     #[test]
@@ -81,7 +97,7 @@ mod tests {
             let x = 1;
             1 + foo(x);
         "#;
-        helper(source);
+        check_ok(source)
     }
 
     #[test]
@@ -92,11 +108,10 @@ mod tests {
             let a: (number, (number, number)) = (1, (2, 3));
             foo(a.0, (a.1).0);
         "#;
-        helper(source);
+        check_ok(source)
     }
 
     #[test]
-    #[should_panic]
     fn test_tuples_fail_mismatch_inner() {
         let source = r#"
             fn foo(a: number, b: number) -> number { 1 }
@@ -104,7 +119,7 @@ mod tests {
             let a: (number, (number)) = (1, (2, 3));
             foo(a.0, (a.1).0);
         "#;
-        helper(source);
+        check_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -121,11 +136,10 @@ mod tests {
             };
             bar(foo);
         "#;
-        helper(source);
+        check_ok(source)
     }
 
     #[test]
-    #[should_panic]
     fn test_struct_non_existent_field() {
         let source = r#"
             struct Foo {
@@ -136,11 +150,10 @@ mod tests {
                 b: 20
             };
         "#;
-        helper(source);
+        check_err(source, Error::TypeCheck);
     }
 
     #[test]
-    #[should_panic]
     fn test_struct_missing_field() {
         let source = r#"
             struct Foo {
@@ -149,11 +162,10 @@ mod tests {
             let foo = struct Foo {
             };
         "#;
-        helper(source);
+        check_err(source, Error::TypeCheck);
     }
 
     #[test]
-    #[should_panic]
     fn test_struct_wrong_type() {
         let source = r#"
             struct Foo {
@@ -163,6 +175,33 @@ mod tests {
                 a: true
             };
         "#;
-        helper(source);
+        check_err(source, Error::TypeCheck);
+    }
+
+    #[test]
+    fn test_bad_addition() {
+        let source = r#"
+            true + 1;
+        "#;
+        check_err(source, Error::TypeCheck);
+    }
+
+    #[test]
+    fn test_missing_declaration() {
+        let source = r#"
+            let a = b + 1;
+        "#;
+        check_err(source, Error::Bind);
+    }
+
+    #[test]
+    fn test_duplicate_field_in_struct() {
+        let source = r#"
+            struct Foo {
+                a: number,
+                a: number
+            }
+        "#;
+        check_err(source, Error::Parse);
     }
 }
