@@ -152,8 +152,28 @@ fn expression_statement(p: &mut Parser) -> NodeId {
 fn ty(p: &mut Parser) -> NodeId {
     match p.token {
         Identifier => variable(p),
+        Fn => fn_ty(p),
         _ => p.error("Expected a type"),
     }
+}
+
+fn fn_ty(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    p.consume(OpenParen, "Expect '(' after 'fn' type.");
+    let mut params = Vec::new();
+    if p.token != CloseParen {
+        loop {
+            params.push(ty(p));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseParen, "Expect ')' after parameters.");
+    let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
+    p.nodes
+        .alloc(Node::FnType(params, return_ty), start.to(p.prev_span))
 }
 
 fn expression(p: &mut Parser) -> NodeId {

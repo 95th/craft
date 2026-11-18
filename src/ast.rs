@@ -25,6 +25,9 @@ pub enum Node {
 
     // Items
     Fn(String, Vec<NodeId>, Option<NodeId>, NodeId),
+
+    // Type
+    FnType(Vec<NodeId>, Option<NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +176,19 @@ impl fmt::Display for NodeDisplay<'_> {
                     write!(f, " -> {}", return_ty.display(arena))?;
                 }
                 write!(f, " {}", body.display(arena))
+            }
+            Node::FnType(params, return_ty) => {
+                write!(f, "fn(")?;
+                let mut sep = "";
+                for param in params {
+                    write!(f, "{sep}{}", param.display(arena))?;
+                    sep = ", ";
+                }
+                write!(f, ")")?;
+                if let Some(return_ty) = return_ty {
+                    write!(f, " -> {}", return_ty.display(arena))?;
+                }
+                Ok(())
             }
             Node::Param(name, ty) => write!(f, "{name}: {}", ty.display(arena)),
             Node::Call(target, args) => {

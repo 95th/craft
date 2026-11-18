@@ -277,6 +277,11 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
             );
             c.types.alloc(Type::Var)
         }
+        Node::FnType(ref params, ret) => {
+            let params = params.iter().map(|t| check_node(c, *t)).collect();
+            let ret = ret.map(|t| check_node(c, t)).unwrap_or(c.common_types.unit);
+            c.types.alloc(Type::Fn(params, ret))
+        }
     }
 }
 

@@ -227,9 +227,12 @@ fn bind_block(b: &mut Binder, nodes: &[NodeId], expr: Option<NodeId>) {
 }
 
 fn declare_item(b: &mut Binder, node: NodeId) {
-    if let Node::Fn(name, ..) = node.get(b.nodes) {
-        let name = b.interner.intern(name);
-        b.declare_fn(name, SymbolKind::Fn, node);
+    match node.get(b.nodes) {
+        Node::Fn(name, ..) => {
+            let name = b.interner.intern(name);
+            b.declare_fn(name, SymbolKind::Fn, node);
+        }
+        _ => (),
     }
 }
 
@@ -335,6 +338,14 @@ fn bind_ty(b: &mut Binder, node: NodeId) {
             } else {
                 println!("Cannot find type '{name}' in this scope.");
                 b.has_error = true;
+            }
+        }
+        Node::FnType(ref params, ret) => {
+            for p in params {
+                bind_ty(b, *p);
+            }
+            if let Some(ret) = ret {
+                bind_ty(b, ret);
             }
         }
         _ => unreachable!(),
