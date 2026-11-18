@@ -359,6 +359,19 @@ fn check_node_inner(c: &mut TypeChecker, node: NodeId) -> TypeId {
             };
             *ty
         }
+        Node::For(init, cond, incr, body) => {
+            if let Some(init) = init {
+                check_node(c, init);
+            }
+            if let Some(cond) = cond {
+                check_node(c, cond);
+            }
+            if let Some(incr) = incr {
+                check_node(c, incr);
+            }
+            check_node(c, body);
+            c.common_types.unit
+        }
     }
 }
 

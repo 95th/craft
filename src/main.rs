@@ -230,4 +230,30 @@ mod tests {
         }
         check_ok(&s);
     }
+
+    #[test]
+    fn test_for() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                if i == 1 {
+                    break;
+                }
+                if i == 2 {
+                    continue;
+                }
+                i;
+            }
+        "#;
+        check_ok(source);
+    }
+
+    #[test]
+    fn test_for_init_var_outside() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+            }
+            i;
+        "#;
+        check_err(source, Error::Bind);
+    }
 }

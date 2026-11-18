@@ -14,6 +14,7 @@ pub enum Node {
     If(NodeId, NodeId, Option<NodeId>),
     Block(Vec<NodeId>, Option<NodeId>),
     While(NodeId, NodeId),
+    For(Option<NodeId>, Option<NodeId>, Option<NodeId>, NodeId),
     Break,
     Continue,
     Call(NodeId, Vec<NodeId>),
@@ -167,6 +168,21 @@ impl fmt::Display for NodeDisplay<'_> {
             }
             Node::While(cond, body) => {
                 write!(f, "while {} {}", cond.display(arena), body.display(arena))
+            }
+            Node::For(init, cond, incr, body) => {
+                write!(f, "for (");
+                if let Some(init) = init {
+                    write!(f, "{}", init.display(arena));
+                }
+                write!(f, ";");
+                if let Some(cond) = cond {
+                    write!(f, "{}", cond.display(arena));
+                }
+                write!(f, ";");
+                if let Some(incr) = incr {
+                    write!(f, "{}", incr.display(arena));
+                }
+                write!(f, ") {}", body.display(arena))
             }
             Node::Break => write!(f, "break"),
             Node::Continue => write!(f, "continue"),

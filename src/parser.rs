@@ -432,6 +432,40 @@ fn while_expr(p: &mut Parser) -> NodeId {
         .alloc(Node::While(cond, body), start.to(p.prev_span))
 }
 
+fn for_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    p.consume(OpenParen, "Expect '(' after 'for'.");
+    let init = if p.eat(Semicolon) {
+        None
+    } else if p.token == Let {
+        Some(declaration(p))
+    } else {
+        let expr = expression(p);
+        p.consume(Semicolon, "Expect ';' after 'for' initializer.");
+        Some(expr)
+    };
+
+    let cond = if p.eat(Semicolon) {
+        None
+    } else {
+        let expr = expression(p);
+        p.consume(Semicolon, "Expect ';' after 'for' condition.");
+        Some(expr)
+    };
+    let incr = if p.eat(CloseParen) {
+        None
+    } else {
+        let expr = expression(p);
+        p.consume(CloseParen, "Expect ')' after 'for' clauses.");
+        Some(expr)
+    };
+    p.consume(OpenBrace, "Expect '{' before 'for' body.");
+    let body = block_expr(p);
+    p.nodes
+        .alloc(Node::For(init, cond, incr, body), start.to(p.prev_span))
+}
+
 fn struct_expr(p: &mut Parser) -> NodeId {
     p.advance();
     let start = p.prev_span;
@@ -514,6 +548,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Identifier => variable(p),
         If => if_expr(p),
         While => while_expr(p),
+        For => for_expr(p),
         Struct => struct_expr(p),
         OpenBrace => {
             p.advance();
@@ -553,16 +588,17 @@ impl Token {
 }
 
 fn is_expr(p: &Parser, node: NodeId) -> bool {
-    !matches!(
-        node.get(p.nodes),
-        Node::Let(..) | Node::Semi(..) | Node::Fn(..) | Node::Param(..)
-    )
+    node != NodeId::ERROR
+        && !matches!(
+            node.get(p.nodes),
+            Node::Let(..) | Node::Semi(..) | Node::Fn(..) | Node::Param(..)
+        )
 }
 
 fn expr_requires_semi(p: &Parser, node: NodeId) -> bool {
     !matches!(
         node.get(p.nodes),
-        Node::If(..) | Node::While(..) | Node::Block(..)
+        Node::If(..) | Node::While(..) | Node::Block(..) | Node::For(..)
     )
 }
 

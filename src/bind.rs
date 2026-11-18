@@ -346,6 +346,20 @@ fn bind_expr_inner(b: &mut Binder, node: NodeId) {
         Node::StructField(target, _) => {
             bind_expr(b, target);
         }
+        Node::For(init, cond, incr, body) => b.with_value_scope(true, |b| {
+            if let Some(init) = init {
+                bind_statement(b, init);
+            }
+            if let Some(cond) = cond {
+                bind_expr(b, cond);
+            }
+            if let Some(incr) = incr {
+                bind_expr(b, incr);
+            }
+            b.loop_depth += 1;
+            bind_expr(b, body);
+            b.loop_depth -= 1;
+        }),
         ref node => unreachable!("{node:?}"),
     }
 }
