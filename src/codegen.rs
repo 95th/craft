@@ -99,7 +99,7 @@ impl<'a> Codegen<'a> {
                     self.code.write_u8(args.len() as u8);
                 }
             }
-            _ => todo!(),
+            _ => {}
         }
     }
 }
