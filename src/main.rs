@@ -2,6 +2,7 @@ use crate::{ast::NodeArena, bind::Binder, parser::Parser};
 
 mod ast;
 mod bind;
+mod interner;
 mod parser;
 mod scanner;
 
