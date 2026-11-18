@@ -277,7 +277,7 @@ mod tests {
             }
             fn foo(n: number) -> number { n + 1 }
             let f = Foo { f: foo };
-            f.f();
+            f.f(true);
         "#;
         check_ok(source);
     }

@@ -309,7 +309,7 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
             }
             for (&arg, param) in args.iter().zip(params) {
                 let arg_ty = check_expr(c, arg);
-                c.unify(param, arg_ty, c.ast.exprs.span(node));
+                c.unify(param, arg_ty, c.ast.exprs.span(arg));
             }
             ret
         }
