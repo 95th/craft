@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use ena::unify::InPlaceUnificationTable;
 use rustc_hash::FxHashMap;
 
@@ -28,7 +30,7 @@ pub struct TypeChecker<'a> {
     type_bindings: FxHashMap<SymbolId, TyId>,
     value_bindings: FxHashMap<SymbolId, TyId>,
     struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
-    tuple_struct_properties: FxHashMap<SymbolId, Vec<TyId>>,
+    tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     expr_types: FxHashMap<ExprId, TyId>,
     type_params: FxHashMap<TyId, Vec<TyId>>,
 }
@@ -67,7 +69,7 @@ impl<'a> TypeChecker<'a> {
             .new_key(Ty::TypeParam(self.bind_ctx.print_function));
         let print_fn_ty = self
             .types
-            .new_key(Ty::Fn(vec![print_arg_ty], self.common_types.unit));
+            .new_key(Ty::Fn([print_arg_ty].into(), self.common_types.unit));
         self.value_bindings
             .insert(self.bind_ctx.print_function, print_fn_ty);
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
@@ -102,8 +104,8 @@ impl<'a> TypeChecker<'a> {
         match (self.types.probe_value(lhs), self.types.probe_value(rhs)) {
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
                 let mut result = true;
-                for (a, b) in a.into_iter().zip(b) {
-                    if !self.can_unify(a, b) {
+                for (a, b) in a.iter().zip(b.iter()) {
+                    if !self.can_unify(*a, *b) {
                         result = false;
                     }
                 }
@@ -114,8 +116,8 @@ impl<'a> TypeChecker<'a> {
                     return false;
                 }
                 let mut result = true;
-                for (a, b) in a_params.into_iter().zip(b_params) {
-                    if !self.can_unify(a, b) {
+                for (a, b) in a_params.iter().zip(b_params.iter()) {
+                    if !self.can_unify(*a, *b) {
                         result = false;
                     }
                 }
@@ -226,6 +228,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 let ty = check_type(c, *ty);
                 arg_tys.push(ty);
             }
+            let arg_tys: Rc<[TyId]> = arg_tys.into();
             c.tuple_struct_properties
                 .insert(type_symbol, arg_tys.clone());
 
@@ -359,9 +362,9 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 );
                 return c.types.new_key(Ty::Unknown);
             }
-            for (&arg, param) in args.iter().zip(params) {
+            for (&arg, param) in args.iter().zip(params.iter()) {
                 let arg_ty = check_expr(c, arg);
-                c.unify(param, arg_ty, c.ast.exprs.span(arg));
+                c.unify(*param, arg_ty, c.ast.exprs.span(arg));
             }
             ret
         }
@@ -535,18 +538,12 @@ fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
 fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> TyId {
     match c.types.probe_value(ty) {
         Ty::Fn(params, ret) => {
-            let params = params
-                .into_iter()
-                .map(|p| substitute(c, p, subst))
-                .collect();
+            let params = params.iter().map(|p| substitute(c, *p, subst)).collect();
             let ret = substitute(c, ret, subst);
             c.types.new_key(Ty::Fn(params, ret))
         }
         Ty::Tuple(params) => {
-            let params = params
-                .into_iter()
-                .map(|p| substitute(c, p, subst))
-                .collect();
+            let params = params.iter().map(|p| substitute(c, *p, subst)).collect();
             c.types.new_key(Ty::Tuple(params))
         }
         Ty::TypeParam(_) => subst.get(&ty).copied().unwrap_or(ty),
@@ -580,9 +577,9 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
                 buf.push_str(">");
             }
             let mut sep = "";
-            for p in params {
+            for p in params.iter() {
                 buf.push_str(sep);
-                print_type(p, c, buf);
+                print_type(*p, c, buf);
                 sep = ", ";
             }
             buf.push_str(") -> ");
@@ -596,9 +593,9 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
         Ty::Tuple(types) => {
             buf.push_str("(");
             let mut sep = "";
-            for t in types {
+            for t in types.iter() {
                 buf.push_str(sep);
-                print_type(t, c, buf);
+                print_type(*t, c, buf);
                 sep = ", ";
             }
             buf.push_str(")")

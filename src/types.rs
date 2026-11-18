@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use ena::unify::{InPlaceUnificationTable, NoError, UnifyKey, UnifyValue};
 
 use crate::bind::SymbolId;
@@ -11,8 +13,8 @@ pub enum Ty {
     String,
     Named(SymbolId),
     TypeParam(SymbolId),
-    Fn(Vec<TyId>, TyId),
-    Tuple(Vec<TyId>),
+    Fn(Rc<[TyId]>, TyId),
+    Tuple(Rc<[TyId]>),
     Array(TyId),
 }
 
