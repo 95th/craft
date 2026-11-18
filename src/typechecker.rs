@@ -2,16 +2,18 @@ use core::fmt;
 use std::collections::HashMap;
 
 use crate::{
+    Error,
     arena::Arena,
     ast::{BinaryOp, Node, NodeArena, NodeId, Span},
     bind::{BindCtx, SymbolId},
+    diagnostics::Diagnostic,
     interner::StrId,
     types::{CommonTypes, Type, TypeId},
 };
 
 pub struct TypeChecker<'a> {
-    source: &'a str,
     nodes: &'a NodeArena,
+    diagnostics: &'a mut Vec<Diagnostic>,
     bind_ctx: BindCtx,
     types: Arena<Type>,
     common_types: CommonTypes,
@@ -22,12 +24,16 @@ pub struct TypeChecker<'a> {
 }
 
 impl<'a> TypeChecker<'a> {
-    pub fn new(source: &'a str, nodes: &'a NodeArena, bind_ctx: BindCtx) -> Self {
+    pub fn new(
+        nodes: &'a NodeArena,
+        diagnostics: &'a mut Vec<Diagnostic>,
+        bind_ctx: BindCtx,
+    ) -> Self {
         let mut types = Arena::new();
         let common_types = CommonTypes::new(&mut types);
         Self {
-            source,
             nodes,
+            diagnostics,
             bind_ctx,
             types,
             common_types,
@@ -38,7 +44,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    pub fn check(&mut self, nodes: &[NodeId]) -> Option<()> {
+    pub fn check(&mut self, nodes: &[NodeId]) -> Result<(), Error> {
         self.binding_types
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
@@ -46,7 +52,11 @@ impl<'a> TypeChecker<'a> {
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
         check_scope(self, nodes);
-        if self.has_error { None } else { Some(()) }
+        if self.has_error {
+            Err(Error::TypeCheck)
+        } else {
+            Ok(())
+        }
     }
 
     fn unify(&mut self, lhs: TypeId, rhs: TypeId, span: Span) {
@@ -106,7 +116,10 @@ impl<'a> TypeChecker<'a> {
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.has_error = true;
-        println!("Error at '{}': {}", span.text(self.source), message.into());
+        self.diagnostics.push(Diagnostic {
+            span,
+            message: message.into(),
+        });
     }
 }
 

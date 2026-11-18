@@ -1,17 +1,40 @@
-use crate::{ast::NodeArena, bind::Binder, parser::Parser, typechecker::TypeChecker};
+use crate::{
+    ast::NodeArena, bind::Binder, diagnostics::Diagnostic, parser::Parser, typechecker::TypeChecker,
+};
 
 mod arena;
 mod ast;
 mod bind;
+mod diagnostics;
 mod interner;
 mod parser;
 mod scanner;
 mod typechecker;
 mod types;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Error {
+    Parse,
+    Bind,
+    TypeCheck,
+}
+
 #[inline(always)]
 fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
+}
+
+fn compile(source: &str, diagnostics: &mut Vec<Diagnostic>) -> Result<(), Error> {
+    let mut arena = NodeArena::new();
+    let mut parser = Parser::new(source, &mut arena, diagnostics);
+    let nodes = parser.parse()?;
+
+    let binder = Binder::new(&arena, diagnostics);
+    let bind_ctx = binder.bind(&nodes)?;
+
+    let mut checker = TypeChecker::new(&arena, diagnostics, bind_ctx);
+    checker.check(&nodes)?;
+    Ok(())
 }
 
 fn main() {
@@ -21,7 +44,7 @@ fn main() {
         }
 
         fn bar(f: Foo) -> number {
-            f.a + 10
+            f.a + 10 > 1
         }
 
         let foo = struct Foo {
@@ -30,52 +53,24 @@ fn main() {
         bar(foo);
     "#;
 
-    let mut arena = NodeArena::new();
-    let mut parser = Parser::new(source, &mut arena);
-    let nodes = parser.parse().unwrap();
-
-    // for node in nodes.iter() {
-    //     println!("{}", node.display(&arena));
-    // }
-    // arena.dump(source);
-
-    let binder = Binder::new(&arena);
-    let bind_ctx = binder.bind(&nodes).unwrap();
-
-    let mut checker = TypeChecker::new(source, &arena, bind_ctx);
-    checker.check(&nodes);
+    let mut diagnostics = Vec::new();
+    if compile(source, &mut diagnostics).is_err() {
+        for d in diagnostics {
+            d.print(source);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Error {
-        Parse,
-        Bind,
-        TypeCheck,
-    }
-
-    fn check(source: &str) -> Result<(), Error> {
-        let mut arena = NodeArena::new();
-        let mut parser = Parser::new(source, &mut arena);
-        let nodes = parser.parse().ok_or(Error::Parse)?;
-
-        let binder = Binder::new(&arena);
-        let bind_ctx = binder.bind(&nodes).ok_or(Error::Bind)?;
-
-        let mut checker = TypeChecker::new(source, &arena, bind_ctx);
-        checker.check(&nodes).ok_or(Error::TypeCheck)?;
-        Ok(())
-    }
-
     fn check_ok(source: &str) {
-        check(source).unwrap();
+        compile(source, &mut Vec::new()).unwrap();
     }
 
     fn check_err(source: &str, error: Error) {
-        assert_eq!(check(source).unwrap_err(), error);
+        assert_eq!(compile(source, &mut Vec::new()).unwrap_err(), error);
     }
 
     #[test]

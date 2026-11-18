@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
+    Error,
     arena::{Arena, Idx},
     ast::{Node, NodeArena, NodeId},
+    diagnostics::Diagnostic,
     interner::{StrId, StrInterner},
 };
 
@@ -32,6 +34,7 @@ pub struct BindCtx {
 
 pub struct Binder<'a> {
     nodes: &'a NodeArena,
+    diagnostics: &'a mut Vec<Diagnostic>,
     scopes: Arena<Scope>,
     type_scope: ScopeId,
     fn_scope: ScopeId,
@@ -48,9 +51,10 @@ pub struct Binder<'a> {
 }
 
 impl<'a> Binder<'a> {
-    pub fn new(nodes: &'a NodeArena) -> Self {
+    pub fn new(nodes: &'a NodeArena, diagnostics: &'a mut Vec<Diagnostic>) -> Self {
         Self {
             nodes,
+            diagnostics,
             scopes: Arena::new(),
             type_scope: ScopeId::MAX,
             fn_scope: ScopeId::MAX,
@@ -67,7 +71,7 @@ impl<'a> Binder<'a> {
         }
     }
 
-    pub fn bind(mut self, nodes: &[NodeId]) -> Option<BindCtx> {
+    pub fn bind(mut self, nodes: &[NodeId]) -> Result<BindCtx, Error> {
         self.type_scope = self.create_scope(None);
         self.fn_scope = self.create_scope(None);
         self.value_scope = self.create_scope(None);
@@ -76,9 +80,9 @@ impl<'a> Binder<'a> {
         bind_block(&mut self, nodes, None);
 
         if self.has_error {
-            return None;
+            return Err(Error::Bind);
         }
-        Some(BindCtx {
+        Ok(BindCtx {
             scopes: self.scopes,
             symbols: self.symbols,
             interner: self.interner,
@@ -102,10 +106,13 @@ impl<'a> Binder<'a> {
 
     fn declare_type(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
-            println!(
-                "Another type with name '{}' already defined in this scope.",
-                self.interner.lookup(name)
-            );
+            self.diagnostics.push(Diagnostic {
+                span: declaration.span(self.nodes),
+                message: format!(
+                    "Another type with name '{}' already defined in this scope.",
+                    self.interner.lookup(name)
+                ),
+            });
             self.has_error = true;
             return *s;
         }
@@ -114,10 +121,13 @@ impl<'a> Binder<'a> {
 
     fn declare_value(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
-            println!(
-                "Another variable with name '{}' already defined in this scope.",
-                self.interner.lookup(name)
-            );
+            self.diagnostics.push(Diagnostic {
+                span: declaration.span(self.nodes),
+                message: format!(
+                    "Another variable with name '{}' already defined in this scope.",
+                    self.interner.lookup(name)
+                ),
+            });
             self.has_error = true;
             return *s;
         }
@@ -126,10 +136,13 @@ impl<'a> Binder<'a> {
 
     fn declare_fn(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.fn_scope].symbols.get(&name) {
-            println!(
-                "Another function with name '{}' already defined in this scope.",
-                self.interner.lookup(name)
-            );
+            self.diagnostics.push(Diagnostic {
+                span: declaration.span(self.nodes),
+                message: format!(
+                    "Another function with name '{}' already defined in this scope.",
+                    self.interner.lookup(name)
+                ),
+            });
             self.has_error = true;
             return *s;
         }
@@ -276,7 +289,10 @@ fn bind_expr_inner(b: &mut Binder, node: NodeId) {
             if let Some(symbol) = b.lookup_value(name_id) {
                 b.bindings[node.idx()] = Some(symbol);
             } else {
-                println!("Cannot find value '{name}' in this scope.");
+                b.diagnostics.push(Diagnostic {
+                    span: node.span(b.nodes),
+                    message: format!("Cannot find value '{name}' in this scope."),
+                });
                 b.has_error = true;
             }
         }
@@ -312,14 +328,20 @@ fn bind_expr_inner(b: &mut Binder, node: NodeId) {
         }
         Node::Break | Node::Continue => {
             if b.loop_depth == 0 {
-                println!("Cannot '{}' outside of a loop", node.display(b.nodes));
+                b.diagnostics.push(Diagnostic {
+                    span: node.span(b.nodes),
+                    message: format!("Cannot '{}' outside of a loop", node.display(b.nodes)),
+                });
                 b.has_error = true;
             }
         }
         Node::Unit => {}
         Node::Return(expr) => {
             if b.fn_depth == 0 {
-                println!("Cannot 'return' outside of a function");
+                b.diagnostics.push(Diagnostic {
+                    span: node.span(b.nodes),
+                    message: "Cannot 'return' outside of a function".into(),
+                });
                 b.has_error = true;
             }
             if let Some(expr) = expr {
@@ -339,7 +361,10 @@ fn bind_expr_inner(b: &mut Binder, node: NodeId) {
             if let Some(symbol) = b.lookup_type(name_id) {
                 b.bindings[node.idx()] = Some(symbol);
             } else {
-                println!("Cannot find value '{name}' in this scope.");
+                b.diagnostics.push(Diagnostic {
+                    span: node.span(b.nodes),
+                    message: format!("Cannot find value '{name}' in this scope."),
+                });
                 b.has_error = true;
             }
         }
@@ -371,7 +396,10 @@ fn bind_ty(b: &mut Binder, node: NodeId) {
             if let Some(symbol) = b.lookup_type(name_id) {
                 b.bindings[node.idx()] = Some(symbol);
             } else {
-                println!("Cannot find type '{name}' in this scope.");
+                b.diagnostics.push(Diagnostic {
+                    span: node.span(b.nodes),
+                    message: format!("Cannot find type '{name}' in this scope."),
+                });
                 b.has_error = true;
             }
         }

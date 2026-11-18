@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
+    Error,
     ast::{BinaryOp, Node, NodeArena, NodeId, Span},
+    diagnostics::Diagnostic,
     scanner::{
         Scanner,
         Token::{self, *},
@@ -9,9 +11,9 @@ use crate::{
 };
 
 pub struct Parser<'a> {
-    source: &'a str,
     scanner: Scanner<'a>,
     nodes: &'a mut NodeArena,
+    diagnostics: &'a mut Vec<Diagnostic>,
     token: Token,
     prev_span: Span,
     had_error: bool,
@@ -19,11 +21,15 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str, nodes: &'a mut NodeArena) -> Self {
+    pub fn new(
+        source: &'a str,
+        nodes: &'a mut NodeArena,
+        diagnostics: &'a mut Vec<Diagnostic>,
+    ) -> Self {
         Self {
-            source,
             scanner: Scanner::new(source),
             nodes,
+            diagnostics,
             token: Error,
             prev_span: Span::new(0, 0),
             had_error: false,
@@ -31,13 +37,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Option<Vec<NodeId>> {
+    pub fn parse(&mut self) -> Result<Vec<NodeId>, Error> {
         self.advance();
         let mut nodes = Vec::new();
         while self.token != Token::Eof {
             nodes.push(declaration(self));
         }
-        if self.had_error { None } else { Some(nodes) }
+        if self.had_error {
+            Err(Error::Parse)
+        } else {
+            Ok(nodes)
+        }
     }
 
     fn eat(&mut self, token: Token) -> bool {
@@ -80,7 +90,10 @@ impl<'a> Parser<'a> {
         }
         self.panic_mode = true;
         self.had_error = true;
-        print!("Error at '{}': {message}", span.text(self.source));
+        self.diagnostics.push(Diagnostic {
+            message: message.into(),
+            span,
+        });
         NodeId::ERROR
     }
 }
