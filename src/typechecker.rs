@@ -209,7 +209,6 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::Binary(lhs, op, rhs) => {
             let lhs_ty = check_expr(c, lhs);
             let rhs_ty = check_expr(c, rhs);
-            c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
             match op {
                 BinaryOp::Add
                 | BinaryOp::Sub
@@ -218,6 +217,7 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
                 | BinaryOp::BitOr
                 | BinaryOp::BitAnd => {
                     c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
+                    c.unify(c.common_types.number, rhs_ty, c.ast.exprs.span(rhs));
                     c.common_types.number
                 }
                 BinaryOp::Greater
@@ -225,11 +225,16 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
                 | BinaryOp::Less
                 | BinaryOp::LessEqual => {
                     c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
+                    c.unify(c.common_types.number, rhs_ty, c.ast.exprs.span(rhs));
                     c.common_types.boolean
                 }
-                BinaryOp::Equal | BinaryOp::NotEqual => c.common_types.boolean,
+                BinaryOp::Equal | BinaryOp::NotEqual => {
+                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                    c.common_types.boolean
+                }
                 BinaryOp::Or | BinaryOp::And => {
                     c.unify(c.common_types.boolean, lhs_ty, c.ast.exprs.span(lhs));
+                    c.unify(c.common_types.boolean, rhs_ty, c.ast.exprs.span(rhs));
                     c.common_types.boolean
                 }
             }
