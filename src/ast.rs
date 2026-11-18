@@ -89,6 +89,10 @@ impl NodeArena {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.nodes.truncate(len);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

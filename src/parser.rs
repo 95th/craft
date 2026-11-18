@@ -10,6 +10,16 @@ use crate::{
     },
 };
 
+struct Checkpoint<'a> {
+    scanner: Scanner<'a>,
+    nodes: usize,
+    diagnostics: usize,
+    token: Token,
+    prev_span: Span,
+    had_error: bool,
+    panic_mode: bool,
+}
+
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
     nodes: &'a mut NodeArena,
@@ -57,6 +67,35 @@ impl<'a> Parser<'a> {
         } else {
             false
         }
+    }
+
+    fn lookahead<T>(&mut self, callback: impl FnOnce(&mut Self) -> T) -> T {
+        let checkpoint = self.checkpoint();
+        let result = callback(self);
+        self.restore(checkpoint);
+        result
+    }
+
+    fn checkpoint(&self) -> Checkpoint<'a> {
+        Checkpoint {
+            scanner: self.scanner.clone(),
+            nodes: self.nodes.len(),
+            diagnostics: self.diagnostics.len(),
+            token: self.token,
+            prev_span: self.prev_span,
+            had_error: self.had_error,
+            panic_mode: self.panic_mode,
+        }
+    }
+
+    fn restore(&mut self, c: Checkpoint<'a>) {
+        self.scanner = c.scanner;
+        self.nodes.truncate(c.nodes);
+        self.diagnostics.truncate(c.diagnostics);
+        self.token = c.token;
+        self.prev_span = c.prev_span;
+        self.had_error = c.had_error;
+        self.panic_mode = c.panic_mode;
     }
 
     fn advance(&mut self) {
@@ -194,7 +233,7 @@ fn expression_statement(p: &mut Parser) -> NodeId {
 
 fn ty(p: &mut Parser) -> NodeId {
     match p.token {
-        Identifier => variable(p),
+        Identifier => variable(p, false),
         Fn => fn_ty(p),
         OpenParen => tuple_ty(p),
         _ => p.error("Expected a type"),
@@ -405,9 +444,41 @@ fn return_expr(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::Return(value), start.to(p.prev_span))
 }
 
-fn variable(p: &mut Parser) -> NodeId {
+fn variable(p: &mut Parser, allow_struct: bool) -> NodeId {
     let name = p.scanner.token_text().to_string();
     p.advance();
+
+    if allow_struct
+        && p.token == OpenBrace
+        && p.lookahead(|p| {
+            p.advance();
+            p.eat(CloseBrace) || p.eat(Identifier) && p.eat(Colon)
+        })
+    {
+        let start = p.prev_span;
+        p.advance(); // eat the '{'
+        let mut fields = HashMap::new();
+        if p.token != CloseBrace {
+            loop {
+                let name = p.scanner.token_text();
+                p.consume(Identifier, "Expect struct field name.");
+                let name_span = p.prev_span;
+                p.consume(Colon, "Expect ':' after field name.");
+                let expr = expression(p);
+                if fields.insert(name.to_string(), expr).is_some() {
+                    p.error_at(&format!("Duplicate field: {name}"), name_span);
+                };
+                if !p.eat(Comma) {
+                    break;
+                }
+            }
+        }
+        p.consume(CloseBrace, "Expect '}' after struct fields.");
+        return p
+            .nodes
+            .alloc(Node::Struct(name, fields), start.to(p.prev_span));
+    }
+
     p.nodes.alloc(Node::Variable(name), p.prev_span)
 }
 
@@ -479,33 +550,6 @@ fn for_expr(p: &mut Parser) -> NodeId {
         .alloc(Node::For(init, cond, incr, body), start.to(p.prev_span))
 }
 
-fn struct_expr(p: &mut Parser) -> NodeId {
-    p.advance();
-    let start = p.prev_span;
-    let name = p.scanner.token_text().to_string();
-    p.consume(Identifier, "Expect struct name.");
-    p.consume(OpenBrace, "Expect '{' after struct name");
-    let mut fields = HashMap::new();
-    if p.token != CloseBrace {
-        loop {
-            let name = p.scanner.token_text();
-            p.consume(Identifier, "Expect struct field name.");
-            let name_span = p.prev_span;
-            p.consume(Colon, "Expect ':' after field name.");
-            let expr = expression(p);
-            if fields.insert(name.to_string(), expr).is_some() {
-                p.error_at(&format!("Duplicate field: {name}"), name_span);
-            };
-            if !p.eat(Comma) {
-                break;
-            }
-        }
-    }
-    p.consume(CloseBrace, "Expect '}' after struct fields.");
-    p.nodes
-        .alloc(Node::Struct(name, fields), start.to(p.prev_span))
-}
-
 fn block_expr(p: &mut Parser) -> NodeId {
     let start = p.prev_span;
     let mut nodes = Vec::new();
@@ -558,11 +602,10 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Break => break_expr(p),
         Continue => continue_expr(p),
         Return => return_expr(p),
-        Identifier => variable(p),
+        Identifier => variable(p, true),
         If => if_expr(p),
         While => while_expr(p),
         For => for_expr(p),
-        Struct => struct_expr(p),
         OpenBrace => {
             p.advance();
             block_expr(p)

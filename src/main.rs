@@ -47,7 +47,7 @@ fn main() {
             f.a + 10 > 1
         }
 
-        let foo = struct Foo {
+        let foo = Foo {
             a: 10
         };
         bar(foo);
@@ -66,11 +66,21 @@ mod tests {
     use super::*;
 
     fn check_ok(source: &str) {
-        compile(source, &mut Vec::new()).unwrap();
+        let mut diagnostics = Vec::new();
+        let result = compile(source, &mut diagnostics);
+        for d in diagnostics {
+            d.print(source);
+        }
+        result.expect("ok");
     }
 
     fn check_err(source: &str, error: Error) {
-        assert_eq!(compile(source, &mut Vec::new()).unwrap_err(), error);
+        let mut diagnostics = Vec::new();
+        let result = compile(source, &mut diagnostics);
+        for d in diagnostics {
+            d.print(source);
+        }
+        assert_eq!(result.unwrap_err(), error);
     }
 
     #[test]
@@ -131,7 +141,7 @@ mod tests {
             fn bar(f: Foo) -> number {
                 f.a + 10
             }
-            let foo = struct Foo {
+            let foo = Foo {
                 a: 10
             };
             bar(foo);
@@ -145,7 +155,7 @@ mod tests {
             struct Foo {
                 a: number
             }
-            let foo = struct Foo {
+            let foo = Foo {
                 a: 10,
                 b: 20
             };
@@ -159,7 +169,7 @@ mod tests {
             struct Foo {
                 a: number
             }
-            let foo = struct Foo {
+            let foo = Foo {
             };
         "#;
         check_err(source, Error::TypeCheck);
@@ -171,7 +181,7 @@ mod tests {
             struct Foo {
                 a: number
             }
-            let foo = struct Foo {
+            let foo = Foo {
                 a: true
             };
         "#;

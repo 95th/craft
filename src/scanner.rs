@@ -58,6 +58,7 @@ pub enum Token {
     Struct,
 }
 
+#[derive(Clone)]
 pub struct Scanner<'a> {
     source: &'a str,
     current: Chars<'a>,
