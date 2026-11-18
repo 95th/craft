@@ -70,7 +70,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn expression(p: &mut Parser) -> NodeId {
+fn expression(p: &mut Parser) -> NodeId {
     parse_precedence(p, Precedence::ASSIGNMENT)
 }
 
@@ -89,8 +89,9 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
         Slash => BinaryOp::Div,
         _ => unreachable!(),
     };
+    let precedence = precedence_of(p.token);
     p.advance();
-    let rhs = parse_precedence(p, precedence_of(p.token) + 1);
+    let rhs = parse_precedence(p, precedence + 1);
     p.nodes.alloc(Node::Binary(lhs, op, rhs))
 }
 
