@@ -282,7 +282,12 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
                 bind_expr(b, else_clause)
             }
         }
-        Node::Block(ref nodes) => b.with_scope(ScopeKind::Block, |b| bind_scope(b, nodes)),
+        Node::Block(ref nodes, expr) => b.with_scope(ScopeKind::Block, |b| {
+            bind_scope(b, nodes);
+            if let Some(expr) = expr {
+                bind_expr(b, expr);
+            }
+        }),
         Node::Negate(expr) | Node::Not(expr) => bind_expr(b, expr),
         Node::Call(callee, ref args) => {
             for arg in args {

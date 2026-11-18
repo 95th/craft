@@ -22,10 +22,20 @@ fn main() {
     //     }
     //     foo(foo(1, 2), x);
     // "#;
+    // let source = r#"
+    //     fn foo(x: number) -> number { x + 1 }
+    //     let x = 1;
+    //     1 + foo(x);
+    // "#;
     let source = r#"
-        fn foo(x: number) -> number { x }
-        let x = 1;
-        1 + foo(x);
+        fn fib(n: number) {
+            if n < 2 {
+                return n;
+            }
+            fib(n - 1) + fib(n - 2)
+        }
+
+        fib(10);
     "#;
 
     let mut arena = NodeArena::new();

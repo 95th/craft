@@ -87,7 +87,7 @@ fn declaration(p: &mut Parser) -> NodeId {
     match p.token {
         Let => let_declaration(p),
         Fn => fn_declaration(p),
-        _ => statement(p),
+        _ => expression_statement(p),
     }
 }
 
@@ -137,23 +137,6 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
         Node::Fn(name, params, return_ty, body),
         start.to(p.prev_span),
     )
-}
-
-fn statement(p: &mut Parser) -> NodeId {
-    match p.token {
-        While => while_statement(p),
-        _ => expression_statement(p),
-    }
-}
-
-fn while_statement(p: &mut Parser) -> NodeId {
-    p.advance();
-    let start = p.prev_span;
-    let cond = expression(p);
-    p.consume(OpenBrace, "Expect '{' after 'while' condition.");
-    let body = block_expr(p);
-    p.nodes
-        .alloc(Node::While(cond, body), start.to(p.prev_span))
 }
 
 fn expression_statement(p: &mut Parser) -> NodeId {
@@ -321,14 +304,40 @@ fn if_expr(p: &mut Parser) -> NodeId {
     )
 }
 
+fn while_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let cond = expression(p);
+    p.consume(OpenBrace, "Expect '{' after 'while' condition.");
+    let body = block_expr(p);
+    p.nodes
+        .alloc(Node::While(cond, body), start.to(p.prev_span))
+}
+
 fn block_expr(p: &mut Parser) -> NodeId {
     let start = p.prev_span;
     let mut nodes = Vec::new();
-    while p.token != CloseBrace && p.token != Eof {
-        nodes.push(declaration(p));
+    let mut trailing_expr = None;
+    if p.token != CloseBrace && p.token != Eof {
+        loop {
+            let node = declaration(p);
+            if p.token == CloseBrace || p.token == Eof {
+                if is_expr(p, node) {
+                    trailing_expr = Some(node);
+                } else {
+                    nodes.push(node);
+                }
+                break;
+            }
+            nodes.push(node);
+            if is_expr(p, node) && expr_requires_semi(p, node) {
+                p.error_at("Expect ';' after expression", node.span(p.nodes));
+            }
+        }
     }
     p.consume(CloseBrace, "Expect '}' after block.");
-    p.nodes.alloc(Node::Block(nodes), start.to(p.prev_span))
+    p.nodes
+        .alloc(Node::Block(nodes, trailing_expr), start.to(p.prev_span))
 }
 
 fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
@@ -357,6 +366,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Return => return_expr(p),
         Identifier => variable(p),
         If => if_expr(p),
+        While => while_expr(p),
         OpenBrace => {
             p.advance();
             block_expr(p)
@@ -374,6 +384,7 @@ fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
         _ => lhs,
     }
 }
+
 impl Token {
     fn precedence(self) -> Precedence {
         match self {
@@ -390,6 +401,20 @@ impl Token {
             _ => Precedence::None,
         }
     }
+}
+
+fn is_expr(p: &Parser, node: NodeId) -> bool {
+    !matches!(
+        node.get(p.nodes),
+        Node::Let(..) | Node::Semi(..) | Node::Fn(..) | Node::Param(..)
+    )
+}
+
+fn expr_requires_semi(p: &Parser, node: NodeId) -> bool {
+    !matches!(
+        node.get(p.nodes),
+        Node::If(..) | Node::While(..) | Node::Block(..)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

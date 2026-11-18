@@ -8,19 +8,23 @@ pub enum Node {
     Not(NodeId),
     Negate(NodeId),
     Binary(NodeId, BinaryOp, NodeId),
-    Let(String, Option<NodeId>, NodeId),
     Variable(String),
     Assign(NodeId, NodeId),
     If(NodeId, NodeId, Option<NodeId>),
-    Block(Vec<NodeId>),
-    Semi(NodeId),
+    Block(Vec<NodeId>, Option<NodeId>),
     While(NodeId, NodeId),
     Break,
     Continue,
-    Fn(String, Vec<NodeId>, Option<NodeId>, NodeId),
-    Param(String, NodeId),
     Call(NodeId, Vec<NodeId>),
     Return(Option<NodeId>),
+
+    // Statements
+    Let(String, Option<NodeId>, NodeId),
+    Semi(NodeId),
+    Param(String, NodeId),
+
+    // Items
+    Fn(String, Vec<NodeId>, Option<NodeId>, NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,10 +143,13 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 Ok(())
             }
-            Node::Block(nodes) => {
+            Node::Block(nodes, expr) => {
                 write!(f, "{{ ")?;
                 for node in nodes {
                     write!(f, "{}", node.display(arena))?;
+                }
+                if let Some(expr) = expr {
+                    write!(f, "{}", expr.display(arena))?;
                 }
                 write!(f, " }}")
             }

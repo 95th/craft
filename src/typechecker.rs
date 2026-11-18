@@ -186,9 +186,13 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
                 c.common_types.unit
             }
         }
-        Node::Block(ref nodes) => {
+        Node::Block(ref nodes, expr) => {
             check_scope(c, nodes);
-            c.common_types.unit
+            if let Some(expr) = expr {
+                check_node(c, expr)
+            } else {
+                c.common_types.unit
+            }
         }
         Node::Semi(expr) => {
             check_node(c, expr);
@@ -212,7 +216,8 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
             c.unify(c.binding_types[&fn_symbol], fn_ty);
 
             let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
-            check_node(c, body);
+            let body = check_node(c, body);
+            c.unify(body, return_ty);
             c.containing_return_ty = prev_containing_return_ty;
             c.common_types.unit
         }
