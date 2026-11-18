@@ -844,4 +844,19 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_generic_printer() {
+        let source = r#"
+            fn foo<T>(n: T) {
+                print(n);
+            }
+
+            foo(1);
+            foo("Hello");
+            foo(30.0);
+            foo(foo);
+        "#;
+        run_ok(source);
+    }
 }
