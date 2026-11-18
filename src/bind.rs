@@ -9,16 +9,8 @@ use crate::{
 type ScopeId = Idx<Scope>;
 
 pub struct Symbol {
-    pub kind: SymbolKind,
     pub name: StrId,
     pub declaration: NodeId,
-}
-
-pub enum SymbolKind {
-    Fn,
-    Var,
-    Param,
-    Type,
 }
 
 pub type SymbolId = Idx<Symbol>;
@@ -105,10 +97,10 @@ impl<'a> Binder<'a> {
 
     fn declare_default_type(&mut self, name: &str) -> SymbolId {
         let name = self.interner.intern(name);
-        self.declare_type(name, SymbolKind::Type, NodeId::ERROR)
+        self.declare_type(name, NodeId::ERROR)
     }
 
-    fn declare_type(&mut self, name: StrId, kind: SymbolKind, declaration: NodeId) -> SymbolId {
+    fn declare_type(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
             println!(
                 "Another type with name '{}' already defined in this scope.",
@@ -117,10 +109,10 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.type_scope, name, kind, declaration)
+        self.declare_symbol(self.type_scope, name, declaration)
     }
 
-    fn declare_value(&mut self, name: StrId, kind: SymbolKind, declaration: NodeId) -> SymbolId {
+    fn declare_value(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
             println!(
                 "Another variable with name '{}' already defined in this scope.",
@@ -129,10 +121,10 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.value_scope, name, kind, declaration)
+        self.declare_symbol(self.value_scope, name, declaration)
     }
 
-    fn declare_fn(&mut self, name: StrId, kind: SymbolKind, declaration: NodeId) -> SymbolId {
+    fn declare_fn(&mut self, name: StrId, declaration: NodeId) -> SymbolId {
         if let Some(s) = self.scopes[self.fn_scope].symbols.get(&name) {
             println!(
                 "Another function with name '{}' already defined in this scope.",
@@ -141,21 +133,11 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.fn_scope, name, kind, declaration)
+        self.declare_symbol(self.fn_scope, name, declaration)
     }
 
-    fn declare_symbol(
-        &mut self,
-        scope: ScopeId,
-        name: StrId,
-        kind: SymbolKind,
-        declaration: NodeId,
-    ) -> SymbolId {
-        let symbol = self.symbols.alloc(Symbol {
-            kind,
-            name,
-            declaration,
-        });
+    fn declare_symbol(&mut self, scope: ScopeId, name: StrId, declaration: NodeId) -> SymbolId {
+        let symbol = self.symbols.alloc(Symbol { name, declaration });
         if declaration != NodeId::ERROR {
             self.bindings[declaration.idx()] = Some(symbol);
         }
@@ -235,11 +217,11 @@ fn declare_item(b: &mut Binder, node: NodeId) {
     match node.get(b.nodes) {
         Node::Fn(name, ..) => {
             let name = b.interner.intern(name);
-            b.declare_fn(name, SymbolKind::Fn, node);
+            b.declare_fn(name, node);
         }
         Node::Struct(name, ..) => {
             let name = b.interner.intern(name);
-            b.declare_type(name, SymbolKind::Type, node);
+            b.declare_type(name, node);
         }
         _ => (),
     }
@@ -253,7 +235,7 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
                 bind_ty(b, ty);
             }
             let name = b.interner.intern(name);
-            b.declare_value(name, SymbolKind::Var, node);
+            b.declare_value(name, node);
         }
         Node::Fn(_, ref params, return_ty, body) => b.with_value_scope(false, |b| {
             for param in params {
@@ -271,7 +253,7 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
         Node::Param(ref name, ty) => {
             bind_ty(b, ty);
             let name = b.interner.intern(name);
-            b.declare_value(name, SymbolKind::Param, node);
+            b.declare_value(name, node);
         }
         Node::Semi(expr) => bind_expr(b, expr),
         Node::Struct(_, ref fields) => {
@@ -324,12 +306,13 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
             }
             bind_expr(b, callee);
         }
-        Node::Break | Node::Continue | Node::Unit => {
+        Node::Break | Node::Continue => {
             if b.loop_depth == 0 {
                 println!("Cannot '{}' outside of a loop", node.display(b.nodes));
                 b.has_error = true;
             }
         }
+        Node::Unit => {}
         Node::Return(expr) => {
             if b.fn_depth == 0 {
                 println!("Cannot 'return' outside of a function");
