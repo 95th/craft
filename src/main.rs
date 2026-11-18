@@ -37,6 +37,8 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
+const LOWER: bool = true;
+
 fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
@@ -84,25 +86,30 @@ fn main() {
         print(fib(35));
     "#;
 
-    let start = Instant::now();
-    let mut diagnostics = Diagnostics::new();
-    match compile(source, &mut diagnostics) {
-        Ok(code) => {
-            let mut vm = VM::new(code);
-            vm.run();
-        }
-        Err(_) => {
+    if LOWER {
+        let mut diagnostics = Diagnostics::new();
+        if lower(source, &mut diagnostics).is_err() {
             diagnostics.print(source);
         }
+    } else {
+        let start = Instant::now();
+        let mut diagnostics = Diagnostics::new();
+        match compile(source, &mut diagnostics) {
+            Ok(code) => {
+                let mut vm = VM::new(code);
+                vm.run();
+            }
+            Err(_) => {
+                diagnostics.print(source);
+            }
+        }
+        println!("Took {:?}", start.elapsed());
     }
-    println!("Took {:?}", start.elapsed());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const LOWER: bool = false;
 
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
@@ -995,6 +1002,18 @@ mod tests {
                 a = 20;
             }
             print(a + 10);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_unreachable_in_loop() {
+        let source = r#"
+            for(let i = 0; i < 10; i = i + 1) {
+                print(i);
+                continue;
+                print(i + 1);
+            }
         "#;
         run_ok(source);
     }

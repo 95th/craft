@@ -11,9 +11,12 @@ use crate::{
     types::{Ty, TyId},
 };
 
+#[derive(Clone, Copy)]
 struct LoopContext {
-    start: BasicBlockId,
-    end: BasicBlockId,
+    continue_target: BasicBlockId,
+    continue_locals: usize,
+    break_target: BasicBlockId,
+    break_locals: usize,
 }
 
 pub struct Lowering<'a> {
@@ -24,6 +27,7 @@ pub struct Lowering<'a> {
     function_worklist: VecDeque<SymbolId>,
     loop_contexts: Vec<LoopContext>,
     local_stack: Vec<LocalId>,
+    local_symbols: FxHashMap<SymbolId, LocalId>,
 }
 
 impl<'a> Lowering<'a> {
@@ -36,6 +40,7 @@ impl<'a> Lowering<'a> {
             function_worklist: VecDeque::new(),
             loop_contexts: Vec::new(),
             local_stack: Vec::new(),
+            local_symbols: FxHashMap::default(),
         }
     }
 
@@ -53,6 +58,8 @@ impl<'a> Lowering<'a> {
             }
             let function = self.tcx.bcx.symbols[symbol].declaration;
             let prev_body = std::mem::replace(&mut self.body, Body::new());
+            self.local_symbols = FxHashMap::default();
+            self.local_stack = Vec::new();
             self.body.entry = self.create_block();
             self.current_block = self.body.entry;
             self.lower_function(function);
@@ -105,7 +112,7 @@ impl<'a> Lowering<'a> {
             ast::Stmt::Let { init, .. } => {
                 let local = self.lower_expr_to_local(init);
                 let symbol = self.ast.stmts.value_binding(stmt);
-                self.body.local_symbols.insert(symbol, local);
+                self.local_symbols.insert(symbol, local);
             }
             ast::Stmt::Expr { expr, .. } => {
                 self.lower_expr(expr);
@@ -114,7 +121,7 @@ impl<'a> Lowering<'a> {
                 let symbol = self.ast.stmts.value_binding(stmt);
                 let ty = self.tcx.value_bindings[&symbol];
                 let local = self.create_local(ty);
-                self.body.local_symbols.insert(symbol, local);
+                self.local_symbols.insert(symbol, local);
             }
             _ => {}
         }
@@ -230,7 +237,7 @@ impl<'a> Lowering<'a> {
                 let symbol = &self.tcx.bcx.symbols[symbol_id];
                 return match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
-                        Operand::Place(Place::local(self.body.local_symbols[&symbol_id]))
+                        Operand::Place(Place::local(self.local_symbols[&symbol_id]))
                     }
                     SymbolKind::Fn => {
                         self.function_worklist.push_back(symbol_id);
@@ -248,15 +255,16 @@ impl<'a> Lowering<'a> {
                 let result_local = self.create_local(ty);
 
                 let then_block = self.create_block();
-                let else_block = self.create_block();
+                let else_block = else_clause.map(|_| self.create_block());
                 let merge_block = self.create_block();
+
                 self.set_terminator(Terminator::Branch {
                     cond,
                     then_block,
-                    else_block,
+                    else_block: else_block.unwrap_or(merge_block),
                 });
                 self.add_edge(self.current_block, then_block);
-                self.add_edge(self.current_block, else_block);
+                self.add_edge(self.current_block, else_block.unwrap_or(merge_block));
 
                 self.current_block = then_block;
                 let then_value = self.lower_expr(then_clause);
@@ -264,25 +272,17 @@ impl<'a> Lowering<'a> {
                     place: Place::local(result_local),
                     value: RValue::Use(then_value),
                 });
-                if self.body.basic_blocks[self.current_block]
-                    .terminator
-                    .is_none()
-                {
-                    self.add_edge(self.current_block, merge_block);
-                }
+                self.add_edge(self.current_block, merge_block);
 
-                self.current_block = else_block;
-                if let Some(else_clause) = else_clause {
+                if let Some(else_clause) = else_clause
+                    && let Some(else_block) = else_block
+                {
+                    self.current_block = else_block;
                     let else_value = self.lower_expr(else_clause);
                     self.push_stmt(Statement::Assign {
                         place: Place::local(result_local),
                         value: RValue::Use(else_value),
                     });
-                }
-                if self.body.basic_blocks[self.current_block]
-                    .terminator
-                    .is_none()
-                {
                     self.add_edge(self.current_block, merge_block);
                 }
 
@@ -293,7 +293,7 @@ impl<'a> Lowering<'a> {
                 let place = match self.ast.exprs[lhs] {
                     ast::Expr::Variable(_) => {
                         let symbol = self.ast.exprs.value_binding(lhs);
-                        let local = self.body.local_symbols[&symbol];
+                        let local = self.local_symbols[&symbol];
                         Place::local(local)
                     }
                     ast::Expr::TupleField { obj, index } => {
@@ -335,13 +335,16 @@ impl<'a> Lowering<'a> {
                 return Operand::Constant(Constant::Unit);
             }
             ast::Expr::While { cond, body } => {
+                let locals = self.local_stack.len();
                 let cond_block = self.create_block();
                 let body_block = self.create_block();
                 let merge_block = self.create_block();
 
                 self.loop_contexts.push(LoopContext {
-                    start: cond_block,
-                    end: merge_block,
+                    continue_target: cond_block,
+                    break_target: merge_block,
+                    continue_locals: locals,
+                    break_locals: locals,
                 });
 
                 self.add_edge(self.current_block, cond_block);
@@ -375,38 +378,56 @@ impl<'a> Lowering<'a> {
                 if let Some(init) = init {
                     self.lower_stmt(init);
                 }
-                let cond_block = self.create_block();
+                let continue_locals = self.local_stack.len();
+                let cond_block = cond.map(|_| self.create_block());
                 let body_block = self.create_block();
+                let incr_block = incr.map(|_| self.create_block());
                 let merge_block = self.create_block();
 
-                self.loop_contexts.push(LoopContext {
-                    start: cond_block,
-                    end: merge_block,
-                });
-
-                let terminator = if let Some(cond) = cond {
+                if let Some(cond) = cond
+                    && let Some(cond_block) = cond_block
+                {
                     self.add_edge(self.current_block, cond_block);
                     self.current_block = cond_block;
                     let cond = self.lower_expr(cond);
-                    Terminator::Branch {
+                    self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
                         else_block: merge_block,
-                    }
+                    });
+                    self.add_edge(self.current_block, body_block);
+                    self.add_edge(self.current_block, merge_block);
                 } else {
-                    Terminator::Jump { target: body_block }
-                };
-                self.set_terminator(terminator);
-                self.add_edge(self.current_block, body_block);
-                self.add_edge(self.current_block, merge_block);
+                    self.add_edge(self.current_block, body_block);
+                }
 
                 self.current_block = body_block;
+                let continue_target = incr_block.or(cond_block).unwrap_or(body_block);
+
+                self.loop_contexts.push(LoopContext {
+                    continue_target,
+                    continue_locals,
+                    break_target: merge_block,
+                    break_locals: prev_locals,
+                });
+
                 self.lower_expr(body);
-                if let Some(incr) = incr {
+                self.set_terminator(Terminator::Jump {
+                    target: continue_target,
+                });
+                self.add_edge(self.current_block, continue_target);
+
+                if let Some(incr) = incr
+                    && let Some(incr_block) = incr_block
+                {
+                    self.current_block = incr_block;
                     self.lower_expr(incr);
+                    let incr_target = cond_block.unwrap_or(body_block);
+                    self.set_terminator(Terminator::Jump {
+                        target: incr_target,
+                    });
+                    self.add_edge(self.current_block, incr_target);
                 }
-                self.set_terminator(Terminator::Jump { target: cond_block });
-                self.add_edge(self.current_block, cond_block);
 
                 self.current_block = merge_block;
                 self.loop_contexts.pop();
@@ -414,15 +435,27 @@ impl<'a> Lowering<'a> {
                 return Operand::Constant(Constant::Unit);
             }
             ast::Expr::Break => {
-                let loop_end = self.loop_contexts.last().unwrap().end;
-                self.set_terminator(Terminator::Jump { target: loop_end });
+                let context = *self.loop_contexts.last().unwrap();
+                for i in context.break_locals..self.local_stack.len() {
+                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
+                }
+                self.set_terminator(Terminator::Jump {
+                    target: context.break_target,
+                });
+                self.add_edge(self.current_block, context.break_target);
 
                 self.current_block = self.create_block();
                 return Operand::Constant(Constant::Unit);
             }
             ast::Expr::Continue => {
-                let loop_start = self.loop_contexts.last().unwrap().start;
-                self.set_terminator(Terminator::Jump { target: loop_start });
+                let context = *self.loop_contexts.last().unwrap();
+                for i in context.continue_locals..self.local_stack.len() {
+                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
+                }
+                self.set_terminator(Terminator::Jump {
+                    target: context.continue_target,
+                });
+                self.add_edge(self.current_block, context.continue_target);
 
                 self.current_block = self.create_block();
                 return Operand::Constant(Constant::Unit);
@@ -437,6 +470,10 @@ impl<'a> Lowering<'a> {
                     place: Place::local(LocalId::RETURN),
                     value: RValue::Use(value),
                 });
+                // 0 is the RETURN slot
+                for i in 1..self.local_stack.len() {
+                    self.push_stmt(Statement::StorageDead(self.local_stack[i]));
+                }
                 return Operand::Constant(Constant::Unit);
             }
             ast::Expr::Unit => return Operand::Constant(Constant::Unit),
@@ -513,11 +550,10 @@ impl LocalId {
 }
 
 pub struct Body {
-    basic_blocks: Arena<BasicBlock>,
-    entry: BasicBlockId,
-    locals: Arena<Local>,
-    local_symbols: FxHashMap<SymbolId, LocalId>,
-    functions: FxHashMap<SymbolId, Body>,
+    pub basic_blocks: Arena<BasicBlock>,
+    pub entry: BasicBlockId,
+    pub locals: Arena<Local>,
+    pub functions: FxHashMap<SymbolId, Body>,
 }
 
 impl Body {
@@ -525,7 +561,6 @@ impl Body {
         Self {
             basic_blocks: Arena::new(),
             locals: Arena::new(),
-            local_symbols: FxHashMap::default(),
             entry: BasicBlockId::MAX,
             functions: FxHashMap::default(),
         }
@@ -533,13 +568,13 @@ impl Body {
 }
 
 pub struct Local {
-    ty: TyId,
+    pub ty: TyId,
 }
 
 pub struct BasicBlock {
-    statements: Vec<Statement>,
-    terminator: Option<Terminator>,
-    successors: Vec<BasicBlockId>,
+    pub statements: Vec<Statement>,
+    pub terminator: Option<Terminator>,
+    pub successors: Vec<BasicBlockId>,
 }
 
 pub enum Statement {
@@ -583,21 +618,25 @@ pub enum RValue {
     },
 }
 
+#[derive(Clone, Copy)]
 pub enum Operand {
     Place(Place),
     Constant(Constant),
 }
 
+#[derive(Clone, Copy)]
 pub struct Place {
-    local: LocalId,
-    projection: Option<Projection>,
+    pub local: LocalId,
+    pub projection: Option<Projection>,
 }
 
+#[derive(Clone, Copy)]
 pub enum Projection {
     Field(u16),
     Index(LocalId),
 }
 
+#[derive(Clone, Copy)]
 pub enum Constant {
     Unit,
     Bool(bool),
