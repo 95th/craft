@@ -55,6 +55,7 @@ pub enum Token {
     Loop,
     True,
     False,
+    Struct,
 }
 
 pub struct Scanner<'a> {
@@ -181,6 +182,7 @@ impl<'a> Scanner<'a> {
             "loop" => Loop,
             "true" => True,
             "false" => False,
+            "struct" => Struct,
             _ => Identifier,
         }
     }

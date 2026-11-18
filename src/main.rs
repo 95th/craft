@@ -27,11 +27,25 @@ fn main() {
     //     let x = 1;
     //     1 + foo(x);
     // "#;
+    // let source = r#"
+    //     fn foo(a: number, b: number) -> number { 1 }
+    //     let f: fn(number, number) -> number = foo;
+    //     let a: (number, (number)) = (1, (2, 3));
+    //     foo(a.0, (a.1).0);
+    // "#;
+
     let source = r#"
-        fn foo(a: number, b: number) -> number { 1 }
-        let f: fn(number, number) -> number = foo;
-        let a: (number, (number)) = (1, (2, 3));
-        foo(a.0, (a.1).0);
+        struct Foo {
+            a: number
+        }
+
+        fn bar(f: Foo) {
+        }
+
+        let foo = struct Foo {
+            a: true
+        };
+        bar(foo);
     "#;
 
     let mut arena = NodeArena::new();

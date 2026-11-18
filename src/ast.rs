@@ -1,4 +1,5 @@
 use core::fmt;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum Node {
@@ -31,6 +32,7 @@ pub enum Node {
     FnType(Vec<NodeId>, Option<NodeId>),
     Unit,
     Tuple(Vec<NodeId>),
+    Struct(String, HashMap<String, NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +223,15 @@ impl fmt::Display for NodeDisplay<'_> {
                 write!(f, ")")
             }
             Node::TupleField(target, name) => write!(f, "{}.{}", target.display(arena), name),
+            Node::Struct(name, fields) => {
+                write!(f, "struct {name} {{ ")?;
+                let mut sep = "";
+                for (field_name, field_ty) in fields {
+                    write!(f, "{sep}{field_name}: {}", field_ty.display(arena))?;
+                    sep = ", ";
+                }
+                write!(f, " }}")
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ use crate::{
     arena::Arena,
     ast::{BinaryOp, Node, NodeArena, NodeId, Span},
     bind::{BindCtx, SymbolId},
+    interner::StrId,
     types::{CommonTypes, Type, TypeId},
 };
 
@@ -17,6 +18,7 @@ pub struct TypeChecker<'a> {
     has_error: bool,
     containing_return_ty: Option<TypeId>,
     binding_types: HashMap<SymbolId, TypeId>,
+    struct_properties: HashMap<SymbolId, HashMap<StrId, TypeId>>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -32,6 +34,7 @@ impl<'a> TypeChecker<'a> {
             has_error: false,
             containing_return_ty: None,
             binding_types: HashMap::new(),
+            struct_properties: HashMap::new(),
         }
     }
 
@@ -126,6 +129,18 @@ fn declare_item(c: &mut TypeChecker, node: NodeId) {
             let fn_ty = c.types.alloc(Type::Fn(param_tys, return_ty));
             let fn_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
             c.binding_types.insert(fn_symbol, fn_ty);
+        }
+        Node::Struct(_, ref fields) => {
+            let mut properties = HashMap::new();
+            for (name, ty) in fields {
+                let name = c.bind_ctx.interner.intern(name);
+                let ty = check_node(c, *ty);
+                properties.insert(name, ty);
+            }
+            let struct_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+            let struct_ty = c.types.alloc(Type::Named(struct_symbol));
+            c.binding_types.insert(struct_symbol, struct_ty);
+            c.struct_properties.insert(struct_symbol, properties);
         }
         _ => {}
     }
@@ -292,6 +307,31 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
                 return c.types.alloc(Type::Var);
             }
             types[index as usize]
+        }
+        Node::Struct(_, ref fields) => {
+            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+            let declared = c.struct_properties[&symbol].clone();
+            for (field_name, field_ty) in fields {
+                let name = c.bind_ctx.interner.intern(field_name);
+                let ty = check_node(c, *field_ty);
+                if let Some(declared_ty) = declared.get(&name) {
+                    c.unify(*declared_ty, ty, field_ty.span(c.nodes));
+                } else {
+                    c.error(
+                        format!("Unknown field: {field_name}"),
+                        field_ty.span(c.nodes),
+                    );
+                }
+            }
+
+            for (name, _) in declared {
+                let name = c.bind_ctx.interner.lookup(name);
+                if !fields.contains_key(name) {
+                    c.error(format!("Missing field: {name}"), node.span(c.nodes));
+                }
+            }
+
+            c.binding_types[&symbol]
         }
     }
 }

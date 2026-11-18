@@ -237,6 +237,10 @@ fn declare_item(b: &mut Binder, node: NodeId) {
             let name = b.interner.intern(name);
             b.declare_fn(name, SymbolKind::Fn, node);
         }
+        Node::Struct(name, ..) => {
+            let name = b.interner.intern(name);
+            b.declare_type(name, SymbolKind::Type, node);
+        }
         _ => (),
     }
 }
@@ -270,6 +274,11 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
             b.declare_value(name, SymbolKind::Param, node);
         }
         Node::Semi(expr) => bind_expr(b, expr),
+        Node::Struct(_, ref fields) => {
+            for (_, ty) in fields {
+                bind_ty(b, *ty)
+            }
+        }
         _ => bind_expr(b, node),
     }
 }
@@ -337,6 +346,15 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
         }
         Node::TupleField(target, _) => {
             bind_expr(b, target);
+        }
+        Node::Struct(ref name, ..) => {
+            let name_id = b.interner.intern(name);
+            if let Some(symbol) = b.lookup_type(name_id) {
+                b.bindings[node.idx()] = Some(symbol);
+            } else {
+                println!("Cannot find value '{name}' in this scope.");
+                b.has_error = true;
+            }
         }
         ref node => unreachable!("{node:?}"),
     }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     ast::{BinaryOp, Node, NodeArena, NodeId, Span},
     scanner::{
@@ -87,6 +89,7 @@ fn declaration(p: &mut Parser) -> NodeId {
     match p.token {
         Let => let_declaration(p),
         Fn => fn_declaration(p),
+        Struct => struct_declaration(p),
         _ => expression_statement(p),
     }
 }
@@ -137,6 +140,33 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
         Node::Fn(name, params, return_ty, body),
         start.to(p.prev_span),
     )
+}
+
+fn struct_declaration(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let name = p.scanner.token_text().to_string();
+    p.consume(Identifier, "Expect struct name.");
+    p.consume(OpenBrace, "Expect '{' after struct name.");
+    let mut fields = HashMap::new();
+    if p.token != CloseBrace {
+        loop {
+            let name = p.scanner.token_text();
+            p.consume(Identifier, "Expect struct field name.");
+            let name_span = p.prev_span;
+            p.consume(Colon, "Expect ':' after field name.");
+            let ty = ty(p);
+            if fields.insert(name.to_string(), ty).is_some() {
+                p.error_at(&format!("Duplicate field: {name}"), name_span);
+            };
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseBrace, "Expect '}' after struct fields.");
+    p.nodes
+        .alloc(Node::Struct(name, fields), start.to(p.prev_span))
 }
 
 fn expression_statement(p: &mut Parser) -> NodeId {
@@ -394,6 +424,33 @@ fn while_expr(p: &mut Parser) -> NodeId {
         .alloc(Node::While(cond, body), start.to(p.prev_span))
 }
 
+fn struct_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let name = p.scanner.token_text().to_string();
+    p.consume(Identifier, "Expect struct name.");
+    p.consume(OpenBrace, "Expect '{' after struct name");
+    let mut fields = HashMap::new();
+    if p.token != CloseBrace {
+        loop {
+            let name = p.scanner.token_text();
+            p.consume(Identifier, "Expect struct field name.");
+            let name_span = p.prev_span;
+            p.consume(Colon, "Expect ':' after field name.");
+            let expr = expression(p);
+            if fields.insert(name.to_string(), expr).is_some() {
+                p.error_at(&format!("Duplicate field: {name}"), name_span);
+            };
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseBrace, "Expect '}' after struct fields.");
+    p.nodes
+        .alloc(Node::Struct(name, fields), start.to(p.prev_span))
+}
+
 fn block_expr(p: &mut Parser) -> NodeId {
     let start = p.prev_span;
     let mut nodes = Vec::new();
@@ -447,6 +504,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Identifier => variable(p),
         If => if_expr(p),
         While => while_expr(p),
+        Struct => struct_expr(p),
         OpenBrace => {
             p.advance();
             block_expr(p)
