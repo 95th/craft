@@ -29,6 +29,7 @@ impl AstNodes {
 pub enum Expr {
     Bool(bool),
     Number(f64),
+    Int(i128),
     String(String),
     Not(ExprId),
     Negate(ExprId),
@@ -186,7 +187,7 @@ impl AstNodes {
     fn visit_expr(&self, expr: ExprId, visitor: &mut impl AstVisitor) {
         visitor.visit_expr(expr, self);
         match self.exprs[expr] {
-            Expr::Bool(_) | Expr::Number(_) | Expr::String(_) => {}
+            Expr::Unit | Expr::Bool(_) | Expr::Number(_) | Expr::Int(_) | Expr::String(_) => {}
             Expr::Not(expr) => self.visit_expr(expr, visitor),
             Expr::Negate(expr) => self.visit_expr(expr, visitor),
             Expr::Binary(lhs, _, rhs) => {
@@ -241,7 +242,7 @@ impl AstNodes {
                     self.visit_expr(expr, visitor);
                 }
             }
-            Expr::Unit => {}
+
             Expr::TupleField(expr, _) => {
                 self.visit_expr(expr, visitor);
             }

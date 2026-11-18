@@ -94,6 +94,21 @@ impl<'a> Codegen<'a> {
             Expr::Bool(b) => self
                 .code
                 .write(if b { Opcode::True } else { Opcode::False }),
+            Expr::Int(n) => {
+                let ty = self.ty_ctx.expr_types[&expr];
+                match self.ty_ctx.types.probe_value(ty) {
+                    Ty::I64 => {
+                        self.code.write(Opcode::Const);
+                        self.code
+                            .write_u64(u64::from_ne_bytes((n as i64).to_ne_bytes()));
+                    }
+                    Ty::U64 => {
+                        self.code.write(Opcode::Const);
+                        self.code.write_u64(n as u64);
+                    }
+                    t => unreachable!("{t:?}"),
+                }
+            }
             Expr::Number(n) => {
                 self.code.write(Opcode::Const);
                 self.code.write_u64(n.to_bits());
@@ -109,7 +124,12 @@ impl<'a> Codegen<'a> {
             }
             Expr::Negate(expr) => {
                 self.process_expr(expr);
-                self.code.write(Opcode::Negate)
+                let ty = self.ty_ctx.expr_types[&expr];
+                match self.ty_ctx.types.probe_value(ty) {
+                    Ty::I64 => self.code.write(Opcode::I64Neg),
+                    Ty::Number => self.code.write(Opcode::F64Neg),
+                    t => unreachable!("{t:?}"),
+                }
             }
             Expr::Variable(_) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
@@ -200,20 +220,56 @@ impl<'a> Codegen<'a> {
             Expr::Binary(lhs, op, rhs) => {
                 self.process_expr(lhs);
                 self.process_expr(rhs);
-                match op {
-                    BinaryOp::Add => self.code.write(Opcode::Add),
-                    BinaryOp::Sub => self.code.write(Opcode::Sub),
-                    BinaryOp::Mul => self.code.write(Opcode::Mul),
-                    BinaryOp::Div => self.code.write(Opcode::Div),
-                    BinaryOp::Greater => self.code.write(Opcode::Greater),
-                    BinaryOp::GreaterEqual => self.code.write(Opcode::GreaterEqual),
-                    BinaryOp::Less => self.code.write(Opcode::Less),
-                    BinaryOp::LessEqual => self.code.write(Opcode::LessEqual),
-                    BinaryOp::Equal => self.code.write(Opcode::Equal),
-                    BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
-                    BinaryOp::BitOr => self.code.write(Opcode::BitOr),
-                    BinaryOp::BitAnd => self.code.write(Opcode::BitAnd),
-                    _ => {}
+                let ty = self.ty_ctx.expr_types[&lhs];
+                match self.ty_ctx.types.probe_value(ty) {
+                    Ty::Number => match op {
+                        BinaryOp::Add => self.code.write(Opcode::F64Add),
+                        BinaryOp::Sub => self.code.write(Opcode::F64Sub),
+                        BinaryOp::Mul => self.code.write(Opcode::F64Mul),
+                        BinaryOp::Div => self.code.write(Opcode::F64Div),
+                        BinaryOp::Greater => self.code.write(Opcode::F64Greater),
+                        BinaryOp::GreaterEqual => self.code.write(Opcode::F64GreaterEqual),
+                        BinaryOp::Less => self.code.write(Opcode::F64Less),
+                        BinaryOp::LessEqual => self.code.write(Opcode::F64LessEqual),
+                        BinaryOp::Equal => self.code.write(Opcode::F64Equal),
+                        BinaryOp::NotEqual => self.code.write(Opcode::F64NotEqual),
+                        _ => {}
+                    },
+                    Ty::I64 => match op {
+                        BinaryOp::Add => self.code.write(Opcode::I64Add),
+                        BinaryOp::Sub => self.code.write(Opcode::I64Sub),
+                        BinaryOp::Mul => self.code.write(Opcode::I64Mul),
+                        BinaryOp::Div => self.code.write(Opcode::I64Div),
+                        BinaryOp::Greater => self.code.write(Opcode::I64Greater),
+                        BinaryOp::GreaterEqual => self.code.write(Opcode::I64GreaterEqual),
+                        BinaryOp::Less => self.code.write(Opcode::I64Less),
+                        BinaryOp::LessEqual => self.code.write(Opcode::I64LessEqual),
+                        BinaryOp::Equal => self.code.write(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                        BinaryOp::BitOr => self.code.write(Opcode::I64Or),
+                        BinaryOp::BitAnd => self.code.write(Opcode::I64And),
+                        _ => {}
+                    },
+                    Ty::U64 => match op {
+                        BinaryOp::Add => self.code.write(Opcode::U64Add),
+                        BinaryOp::Sub => self.code.write(Opcode::U64Sub),
+                        BinaryOp::Mul => self.code.write(Opcode::U64Mul),
+                        BinaryOp::Div => self.code.write(Opcode::U64Div),
+                        BinaryOp::Greater => self.code.write(Opcode::U64Greater),
+                        BinaryOp::GreaterEqual => self.code.write(Opcode::U64GreaterEqual),
+                        BinaryOp::Less => self.code.write(Opcode::U64Less),
+                        BinaryOp::LessEqual => self.code.write(Opcode::U64LessEqual),
+                        BinaryOp::Equal => self.code.write(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                        BinaryOp::BitOr => self.code.write(Opcode::U64Or),
+                        BinaryOp::BitAnd => self.code.write(Opcode::U64And),
+                        _ => {}
+                    },
+                    _ => match op {
+                        BinaryOp::Equal => self.code.write(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                        _ => {}
+                    },
                 }
             }
             Expr::Call(callee, ref args) => {
@@ -225,6 +281,8 @@ impl<'a> Codegen<'a> {
                     let ty = self.ty_ctx.expr_types[&args[0]];
                     match self.ty_ctx.types.probe_value(ty) {
                         Ty::Number => self.code.write(Opcode::PrintNumber),
+                        Ty::I64 => self.code.write(Opcode::PrintI64),
+                        Ty::U64 => self.code.write(Opcode::PrintU64),
                         Ty::String => self.code.write(Opcode::PrintString),
                         Ty::Bool => self.code.write(Opcode::PrintBool),
                         _ => self.code.write(Opcode::PrintObj),

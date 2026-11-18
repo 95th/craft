@@ -7,9 +7,12 @@ use crate::bind::SymbolId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
     Unknown,
+    UnknownInt,
     Unit,
     Bool,
     Number,
+    I64,
+    U64,
     String,
     Named(SymbolId),
     TypeParam(SymbolId),
@@ -21,6 +24,8 @@ pub enum Ty {
 pub struct CommonTypes {
     pub boolean: TyId,
     pub number: TyId,
+    pub i64: TyId,
+    pub u64: TyId,
     pub unit: TyId,
     pub string: TyId,
 }
@@ -30,6 +35,8 @@ impl CommonTypes {
         Self {
             boolean: table.new_key(Ty::Bool),
             number: table.new_key(Ty::Number),
+            i64: table.new_key(Ty::I64),
+            u64: table.new_key(Ty::U64),
             unit: table.new_key(Ty::Unit),
             string: table.new_key(Ty::String),
         }
@@ -59,7 +66,11 @@ impl UnifyValue for Ty {
         match (value1, value2) {
             (Ty::Unknown, Ty::Unknown) => Ok(Ty::Unknown),
             (known, Ty::Unknown) | (Ty::Unknown, known) => Ok(known.clone()),
-            // We must've checked the compatibility in try_unify. Simply take any of them.
+
+            (Ty::UnknownInt, Ty::UnknownInt) => Ok(Ty::UnknownInt),
+            (known, Ty::UnknownInt) | (Ty::UnknownInt, known) => Ok(known.clone()),
+
+            // We must've checked the compatibility in can_unify. Simply take any of them.
             _ => Ok(value1.clone()),
         }
     }

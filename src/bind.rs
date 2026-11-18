@@ -36,6 +36,8 @@ pub struct BindCtx {
     pub symbols: Arena<Symbol>,
     pub interner: StrInterner,
     pub number_type: SymbolId,
+    pub i64_type: SymbolId,
+    pub u64_type: SymbolId,
     pub string_type: SymbolId,
     pub bool_type: SymbolId,
     pub print_function: SymbolId,
@@ -52,6 +54,8 @@ pub struct Binder<'a> {
     interner: StrInterner,
     has_error: bool,
     number_type: SymbolId,
+    i64_type: SymbolId,
+    u64_type: SymbolId,
     string_type: SymbolId,
     bool_type: SymbolId,
     print_function: SymbolId,
@@ -73,6 +77,8 @@ impl<'a> Binder<'a> {
             interner: StrInterner::new(),
             has_error: false,
             number_type: SymbolId::MAX,
+            i64_type: SymbolId::MAX,
+            u64_type: SymbolId::MAX,
             string_type: SymbolId::MAX,
             bool_type: SymbolId::MAX,
             print_function: SymbolId::MAX,
@@ -98,6 +104,8 @@ impl<'a> Binder<'a> {
             symbols: self.symbols,
             interner: self.interner,
             number_type: self.number_type,
+            i64_type: self.i64_type,
+            u64_type: self.u64_type,
             string_type: self.string_type,
             bool_type: self.bool_type,
             print_function: self.print_function,
@@ -105,6 +113,8 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_default_types(&mut self) {
+        self.i64_type = self.declare_default_type("i64");
+        self.u64_type = self.declare_default_type("u64");
         self.number_type = self.declare_default_type("number");
         self.string_type = self.declare_default_type("string");
         self.bool_type = self.declare_default_type("bool");
@@ -345,7 +355,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             bind_expr(b, left);
             bind_expr(b, right);
         }
-        Expr::Bool(_) | Expr::Number(_) | Expr::String(_) => {}
+        Expr::Unit | Expr::Bool(_) | Expr::Number(_) | Expr::Int(_) | Expr::String(_) => {}
         Expr::If(cond, then_clause, else_clause) => {
             bind_expr(b, cond);
             bind_expr(b, then_clause);
@@ -374,7 +384,6 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                 b.has_error = true;
             }
         }
-        Expr::Unit => {}
         Expr::Return(expr) => {
             if b.fn_depth == 0 {
                 b.diagnostics

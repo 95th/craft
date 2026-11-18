@@ -514,29 +514,42 @@ fn index(p: &mut Parser, lhs: ExprId) -> ExprId {
 fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
     let name = p.scanner.token_text();
-    if p.eat(NumberLiteral) {
+    if p.eat(IntegerLiteral) {
         let start = p.ast.exprs.span(lhs);
-        if let Some((a, b)) = name.split_once('.') {
-            let a_index = a.parse().unwrap();
-            let a_span = Span::new(
-                p.prev_span.start as usize,
-                p.prev_span.start as usize + a.len(),
-            );
-            let a_expr = p
-                .ast
-                .exprs
-                .alloc(Expr::TupleField(lhs, a_index), start.to(a_span));
+        let Ok(index) = name.parse() else {
+            p.error_at("literal out of range", p.prev_span);
+            return ExprId::MAX;
+        };
+        p.ast
+            .exprs
+            .alloc(Expr::TupleField(lhs, index), start.to(p.prev_span))
+    } else if p.eat(NumberLiteral) {
+        let start = p.ast.exprs.span(lhs);
+        let (int, fract) = name.split_once('.').unwrap();
+        let int_span = Span::new(
+            p.prev_span.start as usize,
+            p.prev_span.start as usize + int.len(),
+        );
+        let Ok(int_index) = int.parse() else {
+            p.error_at("literal out of range", int_span);
+            return ExprId::MAX;
+        };
+        let expr = p
+            .ast
+            .exprs
+            .alloc(Expr::TupleField(lhs, int_index), start.to(int_span));
 
-            let b_index = b.parse().unwrap();
-            p.ast
-                .exprs
-                .alloc(Expr::TupleField(a_expr, b_index), start.to(p.prev_span))
-        } else {
-            let index = name.parse().unwrap();
-            p.ast
-                .exprs
-                .alloc(Expr::TupleField(lhs, index), start.to(p.prev_span))
-        }
+        let Ok(fract_index) = fract.parse() else {
+            p.error_at(
+                "literal out of range",
+                Span::new(int_span.end as usize + 1, p.prev_span.end as usize),
+            );
+            return ExprId::MAX;
+        };
+
+        p.ast
+            .exprs
+            .alloc(Expr::TupleField(expr, fract_index), start.to(p.prev_span))
     } else if p.eat(Identifier) {
         p.ast.exprs.alloc(
             Expr::StructField(lhs, name.to_string()),
@@ -558,6 +571,17 @@ fn unary(p: &mut Parser) -> ExprId {
         Minus => p.ast.exprs.alloc(Expr::Negate(expr), start.to(p.prev_span)),
         _ => unreachable!(),
     }
+}
+
+fn integer(p: &mut Parser) -> ExprId {
+    let text = p.scanner.token_text();
+    let Ok(n) = text.parse() else {
+        p.error("literal out of range");
+        p.advance();
+        return ExprId::MAX;
+    };
+    p.advance();
+    p.ast.exprs.alloc(Expr::Int(n), p.prev_span)
 }
 
 fn number(p: &mut Parser) -> ExprId {
@@ -769,6 +793,7 @@ fn parse_prefix(p: &mut Parser) -> Option<ExprId> {
         OpenParen => tuple(p),
         OpenBracket => array(p),
         Minus | Bang => unary(p),
+        IntegerLiteral => integer(p),
         NumberLiteral => number(p),
         StringLiteral => string(p),
         True | False => boolean(p),

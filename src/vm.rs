@@ -62,6 +62,12 @@ impl CallFrame {
     }
 }
 
+macro_rules! cast {
+    ($expr:expr, $t:ident) => {
+        $t::from_ne_bytes($expr.to_ne_bytes())
+    };
+}
+
 pub struct VM {
     code: Vec<u8>,
     stack: Vec<u64>,
@@ -93,62 +99,199 @@ impl VM {
                     let value = self.stack.pop().unwrap();
                     self.stack.push((value == FALSE) as u64)
                 }
-                Opcode::Negate => {
-                    let value = self.stack.pop().unwrap();
-                    let value = -f64::from_bits(value);
-                    self.stack.push(value.to_bits());
-                }
                 Opcode::Const => {
                     let value = self.frame.read_u64();
                     self.stack.push(value);
                 }
-                Opcode::Add => {
+                Opcode::F64Neg => {
+                    let value = self.stack.pop().unwrap();
+                    let value = -f64::from_bits(value);
+                    self.stack.push(value.to_bits());
+                }
+                Opcode::F64Add => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) + f64::from_bits(b);
                     self.stack.push(value.to_bits());
                 }
-                Opcode::Sub => {
+                Opcode::F64Sub => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) - f64::from_bits(b);
                     self.stack.push(value.to_bits());
                 }
-                Opcode::Mul => {
+                Opcode::F64Mul => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) * f64::from_bits(b);
                     self.stack.push(value.to_bits());
                 }
-                Opcode::Div => {
+                Opcode::F64Div => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) / f64::from_bits(b);
                     self.stack.push(value.to_bits());
                 }
-                Opcode::Greater => {
+                Opcode::F64Greater => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) > f64::from_bits(b);
                     self.stack.push(value as u64);
                 }
-                Opcode::GreaterEqual => {
+                Opcode::F64GreaterEqual => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) >= f64::from_bits(b);
                     self.stack.push(value as u64);
                 }
-                Opcode::Less => {
+                Opcode::F64Less => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) < f64::from_bits(b);
                     self.stack.push(value as u64);
                 }
-                Opcode::LessEqual => {
+                Opcode::F64LessEqual => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let value = f64::from_bits(a) <= f64::from_bits(b);
                     self.stack.push(value as u64);
+                }
+                Opcode::F64Equal => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = f64::from_bits(a) == f64::from_bits(b);
+                    self.stack.push(value as u64);
+                }
+                Opcode::F64NotEqual => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = f64::from_bits(a) != f64::from_bits(b);
+                    self.stack.push(value as u64);
+                }
+                Opcode::I64Neg => {
+                    let value = self.stack.pop().unwrap();
+                    let value = -cast!(value, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64Add => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) + cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64Sub => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) - cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64Mul => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) * cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64Div => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) / cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64Greater => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) > cast!(b, i64);
+                    self.stack.push(value as u64);
+                }
+                Opcode::I64GreaterEqual => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) >= cast!(b, i64);
+                    self.stack.push(value as u64);
+                }
+                Opcode::I64Less => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) < cast!(b, i64);
+                    self.stack.push(value as u64);
+                }
+                Opcode::I64LessEqual => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) <= cast!(b, i64);
+                    self.stack.push(value as u64);
+                }
+                Opcode::I64Or => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) | cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::I64And => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = cast!(a, i64) & cast!(b, i64);
+                    self.stack.push(cast!(value, u64));
+                }
+                Opcode::U64Add => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a + b;
+                    self.stack.push(value);
+                }
+                Opcode::U64Sub => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a - b;
+                    self.stack.push(value);
+                }
+                Opcode::U64Mul => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a * b;
+                    self.stack.push(value);
+                }
+                Opcode::U64Div => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a / b;
+                    self.stack.push(value);
+                }
+                Opcode::U64Greater => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a > b;
+                    self.stack.push(value as u64);
+                }
+                Opcode::U64GreaterEqual => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a >= b;
+                    self.stack.push(value as u64);
+                }
+                Opcode::U64Less => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a < b;
+                    self.stack.push(value as u64);
+                }
+                Opcode::U64LessEqual => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a <= b;
+                    self.stack.push(value as u64);
+                }
+                Opcode::U64Or => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a | b;
+                    self.stack.push(value);
+                }
+                Opcode::U64And => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let value = a & b;
+                    self.stack.push(value);
                 }
                 Opcode::Equal => {
                     let b = self.stack.pop().unwrap();
@@ -161,18 +304,6 @@ impl VM {
                     let a = self.stack.pop().unwrap();
                     let value = a != b;
                     self.stack.push(value as u64);
-                }
-                Opcode::BitOr => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let value = f64::from_bits(a) as usize | f64::from_bits(b) as usize;
-                    self.stack.push((value as f64).to_bits());
-                }
-                Opcode::BitAnd => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let value = f64::from_bits(a) as u64 & f64::from_bits(b) as u64;
-                    self.stack.push((value as f64).to_bits());
                 }
                 Opcode::GetLocal => {
                     let index = self.frame.read_u8() as usize;
@@ -200,6 +331,15 @@ impl VM {
                 Opcode::PrintNumber => {
                     let value = self.stack.pop().unwrap();
                     let value = f64::from_bits(value);
+                    println!("{value}");
+                }
+                Opcode::PrintI64 => {
+                    let value = self.stack.pop().unwrap();
+                    let value = cast!(value, i64);
+                    println!("{value}");
+                }
+                Opcode::PrintU64 => {
+                    let value = self.stack.pop().unwrap();
                     println!("{value}");
                 }
                 Opcode::PrintString => {
@@ -257,8 +397,7 @@ impl VM {
                 Opcode::RepeatStruct => {
                     let count = self.stack.pop().unwrap();
                     let value = self.stack.pop().unwrap();
-                    let count = number_to_usize(count);
-                    let data = vec![value; count];
+                    let data = vec![value; count as usize];
                     let data = bits_to_bytes(&data[..]);
                     let obj = self.heap.alloc(ObjKind::Struct, data);
                     self.stack.push(obj as u64);
@@ -276,9 +415,8 @@ impl VM {
                     self.heap.set_field(obj, index, value);
                 }
                 Opcode::StructIndex => {
-                    let count = self.stack.pop().unwrap();
+                    let index = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap() as usize;
-                    let index = number_to_usize(count);
                     let value = self.heap.get_field(obj, index as usize);
                     self.stack.push(value);
                 }
@@ -286,7 +424,6 @@ impl VM {
                     let value = self.stack.pop().unwrap();
                     let index = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap() as usize;
-                    let index = number_to_usize(index);
                     self.heap.set_field(obj, index as usize, value);
                 }
             }
@@ -299,14 +436,6 @@ impl VM {
             CallFrame::new(&self.code, function as usize, self.stack.len() - arg_count),
         ))
     }
-}
-
-fn number_to_usize(n: u64) -> usize {
-    let n = f64::from_bits(n);
-    if n.fract() != 0.0 || !n.is_finite() || n < 0.0 {
-        panic!("Value must be an integer");
-    }
-    n as usize
 }
 
 fn bits_to_bytes(data: &[u64]) -> &[u8] {

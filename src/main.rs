@@ -107,7 +107,7 @@ mod tests {
             let x = 1 + 2 / 3 - 4 * 5 * (1 - 2);
             x = 12;
             let y = if x == 12 || x == 2 && x > 1 { x + 1 } else if x > 12 { x + 2 } else { x + 3 };
-            fn foo(a: number, b: number) -> number {
+            fn foo(a: i64, b: i64) -> i64 {
                 if a > b {
                     return 0;
                 }
@@ -133,9 +133,9 @@ mod tests {
     #[test]
     fn test_fn_return() {
         let source = r#"
-            fn foo(x: number) -> number { x + 1 }
-            let x = 1;
-            1 + foo(x);
+            fn foo(x: number) -> number { x + 1.0 }
+            let x = 1.0;
+            1.0 + foo(x);
         "#;
         run_ok(source)
     }
@@ -160,9 +160,9 @@ mod tests {
     #[test]
     fn test_tuple_2() {
         let source = r#"
-            fn foo(a: number, b: number) -> number { 1 }
+            fn foo(a: number, b: number) -> number { 1.0 }
             let f: fn(number, number) -> number = foo;
-            let a: (number, (number, number)) = (1, (2, 3));
+            let a: (number, (number, number)) = (1.0, (2.0, 3.0));
             foo(a.0, a.1.0);
         "#;
         run_ok(source)
@@ -186,9 +186,9 @@ mod tests {
     #[test]
     fn test_tuples_fail_mismatch_inner() {
         let source = r#"
-            fn foo(a: number, b: number) -> number { 1 }
+            fn foo(a: number, b: number) -> number { 1.0 }
             let f: fn(number, number) -> number = foo;
-            let a: (number, (number)) = (1, (2, 3));
+            let a: (number, (number)) = (1.0, (2.0, 3.0));
             foo(a.0, (a.1).0);
         "#;
         check_err(source, Error::TypeCheck);
@@ -201,10 +201,10 @@ mod tests {
                 a: number
             }
             fn bar(f: Foo) -> number {
-                f.a + 10
+                f.a + 10.0
             }
             let foo = Foo {
-                a: 10
+                a: 10.0
             };
             bar(foo);
         "#;
@@ -215,7 +215,7 @@ mod tests {
     fn test_struct_multiple_fields() {
         let source = r#"
             struct Foo {
-                a: number,
+                a: u64,
                 b: string,
                 c: bool
             }
@@ -236,7 +236,7 @@ mod tests {
     fn test_struct_assign_fields() {
         let source = r#"
             struct Foo {
-                a: number,
+                a: i64,
                 b: string,
                 c: bool
             }
@@ -443,9 +443,9 @@ mod tests {
             struct Foo {
                 f: fn(number) -> number
             }
-            fn foo(n: number) -> number { n + 1 }
+            fn foo(n: number) -> number { n + 1.0 }
             let f = Foo { f: foo };
-            f.f(10);
+            f.f(10.0);
         "#;
         run_ok(source);
     }
@@ -485,12 +485,12 @@ mod tests {
     #[test]
     fn test_assign_block() {
         let source = r#"
-            let a = 10;
-            a = a + 1 - 4 / 2 * 1.2;
+            let a = 10.0;
+            a = a + 1.0 - 4.0 / 2.0 * 1.2;
             print(a);
             a = {
-                let b = 20;
-                b + 1
+                let b = 20.0;
+                b + 1.0
             };
             print(a);
         "#;
@@ -562,9 +562,9 @@ mod tests {
                 print(n);
             }
 
-            foo(10);
-            foo(20);
-            foo(30);
+            foo(10.0);
+            foo(20.0);
+            foo(30.0);
         "#;
         run_ok(source);
     }
@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn test_recursion() {
         let source = r#"
-            fn fib(n: number) -> number {
+            fn fib(n: u64) -> u64 {
                 if n < 2 {
                     return n;
                 }
@@ -601,8 +601,8 @@ mod tests {
             }
 
             let f: fn(number, bool) -> (number, bool) = foo;
-            print(f(10, true).0);
-            print(f(20, false).0);
+            print(f(10.0, true).0);
+            print(f(20.0, false).0);
         "#;
         run_ok(source);
     }
@@ -645,12 +645,27 @@ mod tests {
                 a
             }
             fn bar(n: number) -> number {
-                n + 1
+                n + 1.0
+            }
+            let x = if true { foo } else { bar };
+            print(x(10.0));
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_generic_unify_with_regular_fail() {
+        let source = r#"
+            fn foo<T>(a: T) -> T {
+                a
+            }
+            fn bar(n: number) -> number {
+                n + 1.0
             }
             let x = if true { foo } else { bar };
             print(x(10));
         "#;
-        run_ok(source);
+        check_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -674,8 +689,8 @@ mod tests {
         let source = r#"
             struct Bar(number);
             struct Foo(number, string, Bar);
-            let bar = Bar(10);
-            let foo = Foo(20, "hello", bar);
+            let bar = Bar(10.0);
+            let foo = Foo(20.0, "hello", bar);
             print(foo.0);
             print(foo.1);
             print(foo.2);
@@ -697,7 +712,7 @@ mod tests {
     #[test]
     fn test_array() {
         let source = r#"
-            let a = [1, 2, 3];
+            let a = [1.0, 2.0, 3.0];
             print(a);
 
             let b: [number] = a;
@@ -706,7 +721,56 @@ mod tests {
             fn foo(n: number) -> [number] {
                 [n; 20]
             }
-            print(foo(10)[1]);
+            print(foo(10.0)[1]);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_integer() {
+        let source = r#"
+            let a = 1;
+            let b = [1, 2, 3];
+            print(b[a]);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_negative_u64() {
+        let source = r#"
+            let a: u64 = 10;
+            print(-a);
+        "#;
+        check_err(source, Error::TypeCheck);
+    }
+
+    #[test]
+    fn test_negative_integer_default() {
+        let source = r#"
+            let a = -1;
+            print(a);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_negative_u64_late_resolution() {
+        let source = r#"
+            let a = 10;
+            print(-a);
+            let b: u64 = a;
+        "#;
+        check_err(source, Error::TypeCheck);
+    }
+
+    #[test]
+    fn test_repro_codegen_number_where_int_type_expected() {
+        let source = r#"
+            fn foo(n: u64) -> [u64] {
+                [n; 20]
+            }
+            print(foo(10000000012028230)[1]);
         "#;
         run_ok(source);
     }

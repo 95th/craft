@@ -39,6 +39,7 @@ pub enum Token {
     CloseBracket,
     Identifier,
 
+    IntegerLiteral,
     NumberLiteral,
     StringLiteral,
 
@@ -152,14 +153,20 @@ impl<'a> Scanner<'a> {
 
         if self.peek_char() == Some('.') {
             self.current.next();
+            if !self.peek_char().is_some_and(|d| d.is_ascii_digit()) {
+                self.error_message = "expect digit after '.'";
+                return Error;
+            }
+            self.current.next();
             while let Some(c) = self.peek_char()
                 && c.is_ascii_digit()
             {
                 self.current.next();
             }
+            NumberLiteral
+        } else {
+            IntegerLiteral
         }
-
-        NumberLiteral
     }
 
     fn scan_identifier(&mut self) -> Token {

@@ -33,6 +33,8 @@ pub struct TypeChecker<'a> {
     tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     expr_types: FxHashMap<ExprId, TyId>,
     type_params: FxHashMap<TyId, Vec<TyId>>,
+    integer_literals: Vec<(ExprId, TyId)>,
+    deferred_negation_checks: Vec<(ExprId, TyId)>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -53,12 +55,18 @@ impl<'a> TypeChecker<'a> {
             tuple_struct_properties: FxHashMap::default(),
             expr_types: FxHashMap::default(),
             type_params: FxHashMap::default(),
+            integer_literals: Vec::new(),
+            deferred_negation_checks: Vec::new(),
         }
     }
 
     pub fn check(mut self, nodes: &[StmtId]) -> Result<TyContext, Error> {
         self.type_bindings
             .insert(self.bind_ctx.number_type, self.common_types.number);
+        self.type_bindings
+            .insert(self.bind_ctx.i64_type, self.common_types.i64);
+        self.type_bindings
+            .insert(self.bind_ctx.u64_type, self.common_types.u64);
         self.type_bindings
             .insert(self.bind_ctx.string_type, self.common_types.string);
         self.type_bindings
@@ -75,6 +83,7 @@ impl<'a> TypeChecker<'a> {
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
 
         check_scope(&mut self, nodes);
+        deferred_check_integers(&mut self);
         if self.has_error {
             Err(Error::TypeCheck)
         } else {
@@ -89,7 +98,7 @@ impl<'a> TypeChecker<'a> {
 
     fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
         if self.can_unify(lhs, rhs) {
-            self.types.union(lhs, rhs);
+            self.unify_recursively(lhs, rhs);
         } else {
             let lhs = lhs.display(self);
             let rhs = rhs.display(self);
@@ -128,13 +137,81 @@ impl<'a> TypeChecker<'a> {
             }
             (Ty::Array(a), Ty::Array(b)) => self.can_unify(a, b),
             (Ty::Unknown, _) | (_, Ty::Unknown) => true,
+            (Ty::UnknownInt, Ty::I64 | Ty::U64)
+            | (Ty::I64 | Ty::U64, Ty::UnknownInt)
+            | (Ty::UnknownInt, Ty::UnknownInt) => true,
             _ => false,
+        }
+    }
+
+    fn unify_recursively(&mut self, lhs: TyId, rhs: TyId) {
+        if self.types.unioned(lhs, rhs) {
+            return;
+        }
+        let lhs_ty = self.types.probe_value(lhs);
+        let rhs_ty = self.types.probe_value(rhs);
+        self.types.union(lhs, rhs);
+        match (lhs_ty, rhs_ty) {
+            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
+                for (a, b) in a.iter().zip(b.iter()) {
+                    self.unify_recursively(*a, *b);
+                }
+            }
+            (Ty::Fn(.., a_params, a_ret), Ty::Fn(.., b_params, b_ret)) => {
+                for (a, b) in a_params.iter().zip(b_params.iter()) {
+                    self.unify_recursively(*a, *b);
+                }
+                self.unify_recursively(a_ret, b_ret);
+            }
+            (Ty::Array(a), Ty::Array(b)) => self.unify_recursively(a, b),
+            _ => {}
         }
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.has_error = true;
         self.diagnostics.push(message, span);
+    }
+}
+
+fn deferred_check_integers(c: &mut TypeChecker) {
+    for (expr, ty) in std::mem::take(&mut c.integer_literals) {
+        match c.types.probe_value(ty) {
+            Ty::UnknownInt => {
+                c.types.union_value(ty, Ty::I64);
+                check_literal_range_i64(c, expr);
+            }
+            Ty::I64 => check_literal_range_i64(c, expr),
+            Ty::U64 => check_literal_range_u64(c, expr),
+            _ => unreachable!(),
+        }
+    }
+
+    for (expr, ty) in std::mem::take(&mut c.deferred_negation_checks) {
+        if let Ty::U64 = c.types.probe_value(ty) {
+            c.error(
+                format!("expect `i64` or `number`, found `u64`"),
+                c.ast.exprs.span(expr),
+            );
+        }
+    }
+}
+
+fn check_literal_range_i64(c: &mut TypeChecker, expr: ExprId) {
+    let Expr::Int(n) = c.ast.exprs[expr] else {
+        unreachable!();
+    };
+    if n < i64::MIN as i128 || n > i64::MAX as i128 {
+        c.error("literal out of range", c.ast.exprs.span(expr));
+    }
+}
+
+fn check_literal_range_u64(c: &mut TypeChecker, expr: ExprId) {
+    let Expr::Int(n) = c.ast.exprs[expr] else {
+        unreachable!();
+    };
+    if n < 0 || n > u64::MAX as i128 {
+        c.error("literal out of range", c.ast.exprs.span(expr));
     }
 }
 
@@ -257,6 +334,11 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
 fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
     match c.ast.exprs[node] {
         Expr::Bool(_) => c.common_types.boolean,
+        Expr::Int(_) => {
+            let ty = c.types.new_key(Ty::UnknownInt);
+            c.integer_literals.push((node, ty));
+            ty
+        }
         Expr::Number(_) => c.common_types.number,
         Expr::String(_) => c.common_types.string,
         Expr::Assign(lhs, rhs) => {
@@ -269,22 +351,35 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             let lhs_ty = check_expr(c, lhs);
             let rhs_ty = check_expr(c, rhs);
             match op {
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::BitOr
-                | BinaryOp::BitAnd => {
-                    c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
-                    c.unify(c.common_types.number, rhs_ty, c.ast.exprs.span(rhs));
-                    c.common_types.number
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                    match c.types.probe_value(lhs_ty) {
+                        Ty::I64 | Ty::U64 | Ty::Number | Ty::UnknownInt => lhs_ty,
+                        _ => {
+                            c.error("expected i64, u64 or number", c.ast.exprs.span(lhs));
+                            c.types.new_key(Ty::Unknown)
+                        }
+                    }
+                }
+                BinaryOp::BitOr | BinaryOp::BitAnd => {
+                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                    match c.types.probe_value(lhs_ty) {
+                        Ty::I64 | Ty::U64 | Ty::UnknownInt => lhs_ty,
+                        _ => {
+                            c.error("expect i64 or u64", c.ast.exprs.span(lhs));
+                            c.types.new_key(Ty::Unknown)
+                        }
+                    }
                 }
                 BinaryOp::Greater
                 | BinaryOp::GreaterEqual
                 | BinaryOp::Less
                 | BinaryOp::LessEqual => {
-                    c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
-                    c.unify(c.common_types.number, rhs_ty, c.ast.exprs.span(rhs));
+                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                    match c.types.probe_value(lhs_ty) {
+                        Ty::I64 | Ty::U64 | Ty::Number | Ty::UnknownInt => {}
+                        _ => c.error("expect i64, u64 or number", c.ast.exprs.span(lhs)),
+                    }
                     c.common_types.boolean
                 }
                 BinaryOp::Equal | BinaryOp::NotEqual => {
@@ -305,8 +400,18 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Negate(expr) => {
             let ty = check_expr(c, expr);
-            c.unify(c.common_types.number, ty, c.ast.exprs.span(expr));
-            c.common_types.number
+            match c.types.probe_value(ty) {
+                Ty::I64 | Ty::Number => ty,
+                Ty::UnknownInt => {
+                    c.deferred_negation_checks.push((expr, ty));
+                    ty
+                }
+                _ => {
+                    let message = format!("expect `i64` or `number`, found `{}`", ty.display(c));
+                    c.error(message, c.ast.exprs.span(expr));
+                    c.types.new_key(Ty::Unknown)
+                }
+            }
         }
         Expr::Variable(..) => {
             let symbol = c.ast.exprs.value_binding(node);
@@ -357,7 +462,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             };
             if args.len() != params.len() {
                 c.error(
-                    format!("expected {} arguments, found {}", params.len(), args.len()),
+                    format!("expect {} arguments, found {}", params.len(), args.len()),
                     c.ast.exprs.span(node),
                 );
                 return c.types.new_key(Ty::Unknown);
@@ -462,7 +567,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 check_stmt(c, init);
             }
             if let Some(cond) = cond {
-                check_expr(c, cond);
+                let ty = check_expr(c, cond);
+                c.unify(c.common_types.boolean, ty, c.ast.exprs.span(cond));
             }
             if let Some(incr) = incr {
                 check_expr(c, incr);
@@ -481,13 +587,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::ArrayRepeat(expr, count) => {
             let element_ty = check_expr(c, expr);
             let count_ty = check_expr(c, count);
-            c.unify(c.common_types.number, count_ty, c.ast.exprs.span(expr));
+            c.unify(c.common_types.u64, count_ty, c.ast.exprs.span(count));
             c.types.new_key(Ty::Array(element_ty))
         }
         Expr::ArrayIndex(expr, index) => {
             let array_ty = check_expr(c, expr);
             let index_ty = check_expr(c, index);
-            c.unify(c.common_types.number, index_ty, c.ast.exprs.span(expr));
+            c.unify(c.common_types.u64, index_ty, c.ast.exprs.span(index));
 
             match c.types.probe_value(array_ty) {
                 Ty::Array(element_ty) => element_ty,
@@ -588,6 +694,9 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
         Ty::Unit => buf.push_str("()"),
         Ty::Bool => buf.push_str("bool"),
         Ty::Number => buf.push_str("number"),
+        Ty::I64 => buf.push_str("i64"),
+        Ty::U64 => buf.push_str("u64"),
+        Ty::UnknownInt => buf.push_str("{integer}"),
         Ty::String => buf.push_str("string"),
         Ty::Unknown => buf.push_str("<cannot infer>"),
         Ty::Tuple(types) => {
