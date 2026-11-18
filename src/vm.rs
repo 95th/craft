@@ -1,5 +1,8 @@
 use crate::chunk::{Code, Opcode};
 
+const TRUE: u64 = 1;
+const FALSE: u64 = 0;
+
 pub struct VM {
     code: Vec<u8>,
     ip: usize,
@@ -20,11 +23,11 @@ impl VM {
             let instr: Opcode = unsafe { std::mem::transmute(self.code[self.ip]) };
             self.ip += 1;
             match instr {
-                Opcode::True => self.stack.push(1),
-                Opcode::False => self.stack.push(0),
+                Opcode::True => self.stack.push(TRUE),
+                Opcode::False => self.stack.push(FALSE),
                 Opcode::Not => {
                     let value = self.stack.pop().unwrap();
-                    self.stack.push((value == 0) as u64)
+                    self.stack.push((value == FALSE) as u64)
                 }
                 Opcode::Negate => {
                     let value = self.stack.pop().unwrap();
@@ -152,7 +155,7 @@ impl VM {
                 Opcode::JumpIfFalse => {
                     let value = self.stack.pop().unwrap();
                     let offset = self.read_u16() as usize;
-                    if value == 0 {
+                    if value == FALSE {
                         self.ip += offset;
                     }
                 }
