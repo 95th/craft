@@ -165,7 +165,8 @@ mod tests {
     fn test_struct_missing_field() {
         let source = r#"
             struct Foo {
-                a: number
+                a: number,
+                b: number
             }
             let foo = Foo {
             };
@@ -211,6 +212,15 @@ mod tests {
             }
         "#;
         check_err(source, Error::Parse);
+    }
+
+    #[test]
+    fn test_duplicate_struct() {
+        let source = r#"
+            struct Foo {}
+            struct Foo {}
+        "#;
+        check_err(source, Error::Bind);
     }
 
     #[test]

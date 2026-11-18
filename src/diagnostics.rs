@@ -10,10 +10,10 @@ pub fn print_diagnostics(source: &str, diagnostics: Vec<Diagnostic>) {
     for d in diagnostics {
         let start = find_line(&lines, d.span.start as usize);
         let end = find_line(&lines, d.span.end as usize);
-        println!("```");
         let mut line_number = start + 1;
         let mut i = d.span.start as usize;
         for &(start_index, line) in lines[start..=end].iter() {
+            println!();
             println!("{line_number:5} | {line}");
             print!("      | ");
             for _ in start_index..i {
@@ -23,11 +23,9 @@ pub fn print_diagnostics(source: &str, diagnostics: Vec<Diagnostic>) {
                 print!("^");
             }
             i = start_index + line.len() + 1;
-            println!();
             line_number += 1;
         }
-        println!("```");
-        println!("Error: {}", d.message);
+        println!(" {}", d.message);
     }
 }
 

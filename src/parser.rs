@@ -191,11 +191,11 @@ fn let_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
-    p.consume(Identifier, "Expect variable name.");
+    p.consume(Identifier, "expect identifier");
     let type_annotation = if p.eat(Colon) { Some(ty(p)) } else { None };
-    p.consume(Equal, "Expect '=' before initializer.");
+    p.consume(Equal, "expect '='");
     let init = expression(p);
-    p.consume(Semicolon, "Expect ';' after initializer.");
+    p.consume(Semicolon, "expect ';'");
     p.ast.stmts.alloc(
         Stmt::Let(name, type_annotation, init),
         start.to(p.prev_span),
@@ -206,15 +206,15 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
-    p.consume(Identifier, "Expect function name.");
-    p.consume(OpenParen, "Expect '(' after function name.");
+    p.consume(Identifier, "expect identifier");
+    p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
         loop {
             let name = p.scanner.token_text().to_string();
-            p.consume(Identifier, "Expect parameter name.");
+            p.consume(Identifier, "expect identifier");
             let param_span = p.prev_span;
-            p.consume(Colon, "Expect ':' after parameter name.");
+            p.consume(Colon, "expect ':'");
             let ty = ty(p);
             params.push(
                 p.ast
@@ -226,9 +226,9 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
             }
         }
     }
-    p.consume(CloseParen, "Expect ')' after function parameters.");
+    p.consume(CloseParen, "expect ')'");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.consume(OpenBrace, "Expect '{' before function body");
+    p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast.stmts.alloc(
         Stmt::Fn(name, params, return_ty, body),
@@ -240,25 +240,25 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
-    p.consume(Identifier, "Expect struct name.");
-    p.consume(OpenBrace, "Expect '{' after struct name.");
+    p.consume(Identifier, "expect identifier");
+    p.consume(OpenBrace, "expect '{'");
     let mut fields = HashMap::new();
     if p.token != CloseBrace {
         loop {
             let name = p.scanner.token_text();
-            p.consume(Identifier, "Expect struct field name.");
+            p.consume(Identifier, "expect identifier");
             let name_span = p.prev_span;
-            p.consume(Colon, "Expect ':' after field name.");
+            p.consume(Colon, "expect ':'");
             let ty = ty(p);
             if fields.insert(name.to_string(), ty).is_some() {
-                p.error_at(&format!("Duplicate field: {name}"), name_span);
+                p.error_at("duplicate field", name_span);
             };
             if !p.eat(Comma) {
                 break;
             }
         }
     }
-    p.consume(CloseBrace, "Expect '}' after struct fields.");
+    p.consume(CloseBrace, "expect '}'");
     p.ast
         .stmts
         .alloc(Stmt::Struct(name, fields), start.to(p.prev_span))
@@ -279,7 +279,7 @@ fn ty(p: &mut Parser) -> TypeId {
         Fn => fn_ty(p),
         OpenParen => tuple_ty(p),
         _ => {
-            p.error("Expected a type");
+            p.error("unexpected token");
             TypeId::MAX
         }
     }
@@ -294,7 +294,7 @@ fn named_ty(p: &mut Parser) -> TypeId {
 fn fn_ty(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
-    p.consume(OpenParen, "Expect '(' after 'fn' type.");
+    p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
         loop {
@@ -304,7 +304,7 @@ fn fn_ty(p: &mut Parser) -> TypeId {
             }
         }
     }
-    p.consume(CloseParen, "Expect ')' after parameters.");
+    p.consume(CloseParen, "expect ')'");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
     p.ast
         .types
@@ -332,7 +332,7 @@ fn tuple_ty(p: &mut Parser) -> TypeId {
             }
         }
     }
-    p.consume(CloseParen, "Expect ')' after tuple types.");
+    p.consume(CloseParen, "expect ')'");
     p.ast.types.alloc(Type::Tuple(types), start.to(p.prev_span))
 }
 
@@ -357,11 +357,11 @@ fn tuple(p: &mut Parser) -> ExprId {
                     break;
                 }
             }
-            p.consume(CloseParen, "Expect ')' after tuple values.");
+            p.consume(CloseParen, "expect ')'");
             return p.ast.exprs.alloc(Expr::Tuple(exprs), start.to(p.prev_span));
         }
 
-        p.consume(CloseParen, "Expect ')' after grouping.");
+        p.consume(CloseParen, "expect ')'");
         expr
     })
 }
@@ -403,7 +403,7 @@ fn assignment(p: &mut Parser, lhs: ExprId) -> ExprId {
             .exprs
             .alloc(Expr::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
         _ => {
-            p.error_at("Invalid assignment target", lhs_span);
+            p.error_at("invalid assignment target", lhs_span);
             ExprId::MAX
         }
     }
@@ -420,7 +420,7 @@ fn call(p: &mut Parser, lhs: ExprId) -> ExprId {
             }
         }
     }
-    p.consume(CloseParen, "Expect ')' after arguments.");
+    p.consume(CloseParen, "expect ')'");
     p.ast
         .exprs
         .alloc(Expr::Call(lhs, args), p.ast.exprs.span(lhs).to(p.prev_span))
@@ -458,7 +458,7 @@ fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
             p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else {
-        p.error("Expect identifier or integer property name.");
+        p.error("unexpected token");
         ExprId::MAX
     }
 }
@@ -534,19 +534,19 @@ fn variable(p: &mut Parser) -> ExprId {
         if p.token != CloseBrace {
             loop {
                 let name = p.scanner.token_text();
-                p.consume(Identifier, "Expect struct field name.");
+                p.consume(Identifier, "expect identifier");
                 let name_span = p.prev_span;
-                p.consume(Colon, "Expect ':' after field name.");
+                p.consume(Colon, "expect ':'");
                 let expr = expression(p);
                 if fields.insert(name.to_string(), expr).is_some() {
-                    p.error_at(&format!("Duplicate field: {name}"), name_span);
+                    p.error_at("duplicate field", name_span);
                 };
                 if !p.eat(Comma) {
                     break;
                 }
             }
         }
-        p.consume(CloseBrace, "Expect '}' after struct fields.");
+        p.consume(CloseBrace, "expect '}'");
         return p
             .ast
             .exprs
@@ -560,7 +560,7 @@ fn if_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     let cond = p.with_restriction(Restrictions::DisallowStruct, expression);
-    p.consume(OpenBrace, "Expect '{' after 'if' condition.");
+    p.consume(OpenBrace, "expect '{'");
     let then_clause = block_expr(p);
     let else_clause = if p.eat(Else) {
         Some(match p.token {
@@ -570,7 +570,7 @@ fn if_expr(p: &mut Parser) -> ExprId {
             }
             If => if_expr(p),
             _ => {
-                p.error("Expect 'if' or '{' after else.");
+                p.error("unexpected token");
                 ExprId::MAX
             }
         })
@@ -587,7 +587,7 @@ fn while_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     let cond = p.with_restriction(Restrictions::DisallowStruct, expression);
-    p.consume(OpenBrace, "Expect '{' after 'while' condition.");
+    p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast
         .exprs
@@ -597,14 +597,14 @@ fn while_expr(p: &mut Parser) -> ExprId {
 fn for_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
-    p.consume(OpenParen, "Expect '(' after 'for'.");
+    p.consume(OpenParen, "expect '('");
     let init = if p.eat(Semicolon) {
         None
     } else if p.token == Let {
         Some(let_declaration(p))
     } else {
         let expr = expression(p);
-        p.consume(Semicolon, "Expect ';' after init expresssion.");
+        p.consume(Semicolon, "expect ';'");
         let stmt = p.ast.stmts.alloc(
             Stmt::Expr(expr, true),
             p.ast.exprs.span(expr).to(p.prev_span),
@@ -615,17 +615,17 @@ fn for_expr(p: &mut Parser) -> ExprId {
         None
     } else {
         let expr = expression(p);
-        p.consume(Semicolon, "Expect ';' after 'for' condition.");
+        p.consume(Semicolon, "expect ';'");
         Some(expr)
     };
     let incr = if p.eat(CloseParen) {
         None
     } else {
         let expr = expression(p);
-        p.consume(CloseParen, "Expect ')' after 'for' clauses.");
+        p.consume(CloseParen, "expect ')'");
         Some(expr)
     };
-    p.consume(OpenBrace, "Expect '{' before 'for' body.");
+    p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast
         .exprs
@@ -650,11 +650,11 @@ fn block_expr(p: &mut Parser) -> ExprId {
                 }
                 nodes.push(stmt);
                 if expr_requires_semi(p, stmt) {
-                    p.error_at("Expect ';' after expression", p.ast.stmts.span(stmt));
+                    p.error_at("expect ';'", p.ast.stmts.span(stmt));
                 }
             }
         }
-        p.consume(CloseBrace, "Expect '}' after block.");
+        p.consume(CloseBrace, "expect '}'");
         p.ast
             .exprs
             .alloc(Expr::Block(nodes, trailing_expr), start.to(p.prev_span))
@@ -664,7 +664,7 @@ fn block_expr(p: &mut Parser) -> ExprId {
 fn parse_precedence(p: &mut Parser, precedence: u8) -> ExprId {
     crate::stack_safe(|| {
         let Some(mut expr) = parse_prefix(p) else {
-            p.error("Expect expression.");
+            p.error("unexpected token");
             p.advance();
             return ExprId::MAX;
         };

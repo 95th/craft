@@ -115,10 +115,7 @@ impl<'a> Binder<'a> {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
             self.diagnostics.push(Diagnostic {
                 span: self.ast.stmts.span(declaration),
-                message: format!(
-                    "Another type with name '{}' already defined in this scope.",
-                    self.interner.lookup(name)
-                ),
+                message: "already defined in this scope.".into(),
             });
             self.has_error = true;
             return *s;
@@ -130,10 +127,7 @@ impl<'a> Binder<'a> {
         if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
             self.diagnostics.push(Diagnostic {
                 span: self.ast.stmts.span(declaration),
-                message: format!(
-                    "Another variable with name '{}' already defined in this scope.",
-                    self.interner.lookup(name)
-                ),
+                message: "already defined in this scope.".into(),
             });
             self.has_error = true;
             return *s;
@@ -145,10 +139,7 @@ impl<'a> Binder<'a> {
         if let Some(s) = self.scopes[self.fn_scope].symbols.get(&name) {
             self.diagnostics.push(Diagnostic {
                 span: self.ast.stmts.span(declaration),
-                message: format!(
-                    "Another function with name '{}' already defined in this scope.",
-                    self.interner.lookup(name)
-                ),
+                message: "already defined in this scope.".into(),
             });
             self.has_error = true;
             return *s;
@@ -295,7 +286,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             } else {
                 b.diagnostics.push(Diagnostic {
                     span: b.ast.exprs.span(node),
-                    message: format!("Cannot find value '{name}' in this scope."),
+                    message: "not found in this scope.".into(),
                 });
                 b.has_error = true;
             }
@@ -334,7 +325,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             if b.loop_depth == 0 {
                 b.diagnostics.push(Diagnostic {
                     span: b.ast.exprs.span(node),
-                    message: "Cannot use outside of a loop".into(),
+                    message: "cannot use outside of a loop".into(),
                 });
                 b.has_error = true;
             }
@@ -344,7 +335,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             if b.fn_depth == 0 {
                 b.diagnostics.push(Diagnostic {
                     span: b.ast.exprs.span(node),
-                    message: "Cannot 'return' outside of a function".into(),
+                    message: "Cannot use outside of a function".into(),
                 });
                 b.has_error = true;
             }
@@ -367,7 +358,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             } else {
                 b.diagnostics.push(Diagnostic {
                     span: b.ast.exprs.span(node),
-                    message: format!("Cannot find value '{name}' in this scope."),
+                    message: "not found in this scope.".into(),
                 });
                 b.has_error = true;
             }
@@ -405,7 +396,7 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
             } else {
                 b.diagnostics.push(Diagnostic {
                     span: b.ast.types.span(node),
-                    message: format!("Cannot find type '{name}' in this scope."),
+                    message: "not found in this scope.".into(),
                 });
                 b.has_error = true;
             }

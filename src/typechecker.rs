@@ -59,7 +59,7 @@ impl<'a> TypeChecker<'a> {
         if !self.try_unify(lhs, rhs) {
             self.error(
                 format!(
-                    "Type mismatch: Expected '{}' but got '{}'",
+                    "expected `{}`, found `{}`",
                     lhs.display(self),
                     rhs.display(self)
                 ),
@@ -293,16 +293,12 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::Call(callee, ref args) => {
             let callee_ty = check_expr(c, callee);
             let Ty::Fn(params, ret) = c.types[callee_ty].clone() else {
-                c.error("Callee must be a callable.", c.ast.exprs.span(node));
+                c.error("call expression requires function", c.ast.exprs.span(node));
                 return c.types.alloc(Ty::Var);
             };
             if args.len() != params.len() {
                 c.error(
-                    format!(
-                        "Expected {} arguments, but got {}",
-                        params.len(),
-                        args.len()
-                    ),
+                    format!("expected {} arguments, found {}", params.len(), args.len()),
                     c.ast.exprs.span(node),
                 );
                 return c.types.alloc(Ty::Var);
@@ -334,11 +330,11 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::TupleField(expr, index) => {
             let expr_ty = check_expr(c, expr);
             let Ty::Tuple(ref types) = c.types[expr_ty] else {
-                c.error("Expect expr to be a tuple", c.ast.exprs.span(expr));
+                c.error("expected a tuple", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
             if index as usize >= types.len() {
-                c.error(format!("Field {index} not found"), c.ast.exprs.span(node));
+                c.error("unknown field", c.ast.exprs.span(node));
                 return c.types.alloc(Ty::Var);
             }
             types[index as usize]
@@ -346,24 +342,29 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::Struct(_, ref fields) => {
             let symbol = c.bind_ctx.expr_bindings[node].unwrap();
             let declared = c.struct_properties[&symbol].clone();
-            for (field_name, &value) in fields {
-                let name = c.bind_ctx.interner.intern(field_name);
+            for (name, &value) in fields {
+                let name = c.bind_ctx.interner.intern(name);
                 let ty = check_expr(c, value);
                 if let Some(declared_ty) = declared.get(&name) {
                     c.unify(*declared_ty, ty, c.ast.exprs.span(value));
                 } else {
-                    c.error(
-                        format!("Unknown field: {field_name}"),
-                        c.ast.exprs.span(value),
-                    );
+                    c.error("unknown field", c.ast.exprs.span(value));
                 }
             }
 
+            let mut missing = Vec::new();
             for (name, _) in declared {
                 let name = c.bind_ctx.interner.lookup(name);
                 if !fields.contains_key(name) {
-                    c.error(format!("Missing field: {name}"), c.ast.exprs.span(node));
+                    missing.push(name);
                 }
+            }
+            if !missing.is_empty() {
+                missing.sort();
+                c.error(
+                    format!("missing: {}", missing.join(", ")),
+                    c.ast.exprs.span(node),
+                );
             }
 
             c.binding_types[&symbol]
@@ -371,26 +372,17 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::StructField(expr, ref name) => {
             let expr_ty = check_expr(c, expr);
             let Ty::Named(symbol) = c.types[expr_ty] else {
-                c.error(
-                    "Expect expr to be a struct instance",
-                    c.ast.exprs.span(expr),
-                );
+                c.error("expected a struct instance", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
             let Some(properties) = c.struct_properties.get(&symbol) else {
-                c.error(
-                    "Expect expr to be a struct instance",
-                    c.ast.exprs.span(expr),
-                );
+                c.error("expected a struct instance", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
 
             let name_id = c.bind_ctx.interner.intern(name);
             let Some(ty) = properties.get(&name_id) else {
-                c.error(
-                    format!("Properties does not exist: '{name}'"),
-                    c.ast.exprs.span(expr),
-                );
+                c.error("unknown field", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
             *ty
