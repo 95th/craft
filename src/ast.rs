@@ -15,6 +15,7 @@ pub enum Node {
     If(NodeId, NodeId, Option<NodeId>),
     Block(Vec<NodeId>),
     ExprStatement(NodeId),
+    While(NodeId, NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,17 @@ impl NodeArena {
         self.nodes.push(node);
         self.spans.push(span);
         NodeId::new(self.nodes.len() - 1)
+    }
+
+    pub fn dump(&self, source: &str) {
+        for i in 0..self.nodes.len() {
+            println!(
+                "{:?}: {:?} -> {}",
+                self.nodes[i],
+                self.spans[i].text(source),
+                NodeId::new(i).display(self)
+            )
+        }
     }
 }
 
@@ -121,6 +133,9 @@ impl fmt::Display for NodeDisplay<'_> {
             }
             Node::ExprStatement(node) => {
                 write!(f, "{};", node.display(arena))
+            }
+            Node::While(cond, body) => {
+                write!(f, "while {} {}", cond.display(arena), body.display(arena))
             }
         }
     }

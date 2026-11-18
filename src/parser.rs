@@ -11,6 +11,7 @@ pub struct Parser<'a> {
     scanner: Scanner<'a>,
     nodes: &'a mut NodeArena,
     token: Token,
+    prev_span: Span,
     had_error: bool,
     panic_mode: bool,
 }
@@ -22,6 +23,7 @@ impl<'a> Parser<'a> {
             scanner: Scanner::new(source),
             nodes,
             token: Error,
+            prev_span: Span::new(0, 0),
             had_error: false,
             panic_mode: false,
         }
@@ -36,7 +38,17 @@ impl<'a> Parser<'a> {
         if self.had_error { None } else { Some(nodes) }
     }
 
+    fn eat(&mut self, token: Token) -> bool {
+        if self.token == token {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     fn advance(&mut self) {
+        self.prev_span = self.scanner.span();
         loop {
             self.token = self.scanner.scan_token();
             if self.token == Error {
@@ -79,8 +91,8 @@ fn declaration(p: &mut Parser) -> NodeId {
 }
 
 fn let_declaration(p: &mut Parser) -> NodeId {
-    let start = p.scanner.span();
     p.advance();
+    let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "Expect variable name.");
     let type_annotation = if p.token == Colon {
@@ -91,9 +103,11 @@ fn let_declaration(p: &mut Parser) -> NodeId {
     };
     p.consume(Equal, "Expect '=' before initializer.");
     let init = expression(p);
-    let span = start.to(p.scanner.span());
     p.consume(Semicolon, "Expect ';' after initializer.");
-    p.nodes.alloc(Node::Let(name, type_annotation, init), span)
+    p.nodes.alloc(
+        Node::Let(name, type_annotation, init),
+        start.to(p.prev_span),
+    )
 }
 
 fn fn_declaration(p: &mut Parser) -> NodeId {
@@ -101,16 +115,31 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
 }
 
 fn statement(p: &mut Parser) -> NodeId {
-    expression_statement(p)
+    match p.token {
+        While => while_statement(p),
+        _ => expression_statement(p),
+    }
+}
+
+fn while_statement(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let cond = expression(p);
+    if p.token != OpenBrace {
+        p.error("Expect '{' after 'while' condition.");
+        return p.nodes.alloc(Node::Error, p.scanner.span());
+    }
+    let body = block_expr(p);
+    p.nodes
+        .alloc(Node::While(cond, body), start.to(p.prev_span))
 }
 
 fn expression_statement(p: &mut Parser) -> NodeId {
     let expr = expression(p);
-    if p.token == Semicolon {
-        p.advance();
+    if p.eat(Semicolon) {
         p.nodes.alloc(
             Node::ExprStatement(expr),
-            expr.span(p.nodes).to(p.scanner.span()),
+            expr.span(p.nodes).to(p.prev_span),
         )
     } else {
         expr
@@ -155,71 +184,65 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
     let rhs = parse_precedence(p, precedence + 1);
     p.nodes.alloc(
         Node::Binary(lhs, op, rhs),
-        lhs.span(p.nodes).to(rhs.span(p.nodes)),
+        lhs.span(p.nodes).to(p.prev_span),
     )
 }
 
 fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
     p.advance();
     let rhs = expression(p);
+    let lhs_span = lhs.span(p.nodes);
     match lhs.get(p.nodes) {
-        Node::Variable(..) => p.nodes.alloc(
-            Node::Assign(lhs, rhs),
-            lhs.span(p.nodes).to(rhs.span(p.nodes)),
-        ),
+        Node::Variable(..) => p
+            .nodes
+            .alloc(Node::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
         _ => {
-            p.error_at("Invalid assignment target", lhs.span(p.nodes));
-            p.nodes.alloc(Node::Error, lhs.span(p.nodes))
+            p.error_at("Invalid assignment target", lhs_span);
+            p.nodes.alloc(Node::Error, lhs_span)
         }
     }
 }
 
 fn unary(p: &mut Parser) -> NodeId {
-    let start = p.scanner.span();
     let op = p.token;
     p.advance();
+    let start = p.prev_span;
     let expr = parse_precedence(p, Precedence::Unary as u8);
     match op {
-        Bang => p.nodes.alloc(Node::Not(expr), start.to(expr.span(p.nodes))),
-        Minus => p
-            .nodes
-            .alloc(Node::Negate(expr), start.to(expr.span(p.nodes))),
+        Bang => p.nodes.alloc(Node::Not(expr), start.to(p.prev_span)),
+        Minus => p.nodes.alloc(Node::Negate(expr), start.to(p.prev_span)),
         _ => unreachable!(),
     }
 }
 
 fn number(p: &mut Parser) -> NodeId {
-    let span = p.scanner.span();
     let n = p.scanner.token_text().parse().unwrap();
     p.advance();
-    p.nodes.alloc(Node::Number(n), span)
+    p.nodes.alloc(Node::Number(n), p.prev_span)
 }
 
 fn string(p: &mut Parser) -> NodeId {
-    let span = p.scanner.span();
     let text = p.scanner.token_text();
     let text = text[1..text.len() - 1].to_string();
     p.advance();
-    p.nodes.alloc(Node::String(text), span)
+    p.nodes.alloc(Node::String(text), p.prev_span)
 }
 
 fn boolean(p: &mut Parser) -> NodeId {
-    let span = p.scanner.span();
     let value = p.token == Token::True;
     p.advance();
-    p.nodes.alloc(Node::Bool(value), span)
+    p.nodes.alloc(Node::Bool(value), p.prev_span)
 }
 
 fn variable(p: &mut Parser) -> NodeId {
-    let span = p.scanner.span();
     let name = p.scanner.token_text().to_string();
     p.advance();
-    p.nodes.alloc(Node::Variable(name), span)
+    p.nodes.alloc(Node::Variable(name), p.prev_span)
 }
 
 fn if_expr(p: &mut Parser) -> NodeId {
-    let start = p.scanner.span();
     p.advance();
+    let start = p.prev_span;
     let cond = expression(p);
     if p.token != OpenBrace {
         p.error("Expect '{' after 'if' condition.");
@@ -241,28 +264,26 @@ fn if_expr(p: &mut Parser) -> NodeId {
     };
     p.nodes.alloc(
         Node::If(cond, then_clause, else_clause),
-        start.to(p.scanner.span()),
+        start.to(p.prev_span),
     )
 }
 
 fn block_expr(p: &mut Parser) -> NodeId {
-    let start = p.scanner.span();
     p.advance();
+    let start = p.prev_span;
     let mut nodes = Vec::new();
     while p.token != CloseBrace && p.token != Eof {
         nodes.push(declaration(p));
     }
     p.consume(CloseBrace, "Expect '}' after block.");
-    p.nodes
-        .alloc(Node::Block(nodes), start.to(p.scanner.span()))
+    p.nodes.alloc(Node::Block(nodes), start.to(p.prev_span))
 }
 
 fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
-        let span = p.scanner.span();
         p.error("Expect expression.");
         p.advance();
-        return p.nodes.alloc(Node::Error, span);
+        return p.nodes.alloc(Node::Error, p.prev_span);
     };
 
     while precedence <= p.token.precedence() as u8 {

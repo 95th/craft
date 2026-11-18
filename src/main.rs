@@ -17,4 +17,6 @@ fn main() {
     for node in nodes {
         println!("{}", node.display(&arena));
     }
+
+    arena.dump(source);
 }
