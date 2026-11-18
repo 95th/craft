@@ -132,7 +132,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_string(&mut self) -> Token {
-        while let Some(c) = self.current.next() {
+        for c in self.current.by_ref() {
             if c == '"' {
                 return StringLiteral;
             }

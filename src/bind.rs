@@ -217,12 +217,9 @@ fn bind_scope(b: &mut Binder, nodes: &[NodeId]) {
 }
 
 fn declare_item(b: &mut Binder, node: NodeId) {
-    match node.get(b.nodes) {
-        Node::Fn(name, ..) => {
-            let name = b.interner.intern(name);
-            b.declare_value(name, SymbolKind::Fn, node);
-        }
-        _ => {}
+    if let Node::Fn(name, ..) = node.get(b.nodes) {
+        let name = b.interner.intern(name);
+        b.declare_value(name, SymbolKind::Fn, node);
     }
 }
 
