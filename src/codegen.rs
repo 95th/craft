@@ -159,13 +159,12 @@ impl<'a> Codegen<'a> {
                     self.code.op_set_struct_property(index);
                     self.code.op_unit();
                 }
-                Expr::StructField(expr, ref name) => {
+                Expr::StructField(expr, name) => {
                     let ty = self.ty_ctx.expr_types[&expr];
                     let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                         unreachable!();
                     };
                     let properties = &self.ty_ctx.struct_properties[&symbol];
-                    let name = self.ty_ctx.bind_ctx.interner.intern(name);
                     let index = properties.get_index_of(&name).unwrap();
                     self.process_expr(expr);
                     self.process_expr(rhs);
@@ -374,7 +373,6 @@ impl<'a> Codegen<'a> {
                 let properties = &self.ty_ctx.struct_properties[&symbol];
                 let mut exprs = Vec::with_capacity(properties.len());
                 for (name, _) in properties {
-                    let name = self.ty_ctx.bind_ctx.interner.lookup(*name);
                     exprs.push(fields[name]);
                 }
                 for &expr in exprs.iter() {
@@ -382,13 +380,12 @@ impl<'a> Codegen<'a> {
                 }
                 self.code.op_struct(exprs.len() as u16);
             }
-            Expr::StructField(expr, ref name) => {
+            Expr::StructField(expr, name) => {
                 let ty = self.ty_ctx.expr_types[&expr];
                 let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                     unreachable!();
                 };
                 let properties = &self.ty_ctx.struct_properties[&symbol];
-                let name = self.ty_ctx.bind_ctx.interner.intern(name);
                 let index = properties.get_index_of(&name).unwrap();
                 self.process_expr(expr);
                 self.code.op_get_struct_property(index as u16);

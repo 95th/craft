@@ -3,6 +3,7 @@ use core::fmt;
 use crate::{
     FxIndexMap,
     arena::{AstArena, AstId},
+    interner::StrId,
 };
 
 pub type ExprId = AstId<Expr>;
@@ -34,7 +35,7 @@ pub enum Expr {
     Not(ExprId),
     Negate(ExprId),
     Binary(ExprId, BinaryOp, ExprId),
-    Variable(String),
+    Variable(StrId),
     Assign(ExprId, ExprId),
     If(ExprId, ExprId, Option<ExprId>),
     Block(Vec<StmtId>, Option<ExprId>),
@@ -47,8 +48,8 @@ pub enum Expr {
     Unit,
     TupleField(ExprId, u16),
     Tuple(Vec<ExprId>),
-    Struct(String, FxIndexMap<String, ExprId>),
-    StructField(ExprId, String),
+    Struct(StrId, FxIndexMap<StrId, ExprId>),
+    StructField(ExprId, StrId),
     Array(Vec<ExprId>),
     ArrayRepeat(ExprId, ExprId),
     ArrayIndex(ExprId, ExprId),
@@ -56,18 +57,18 @@ pub enum Expr {
 
 #[derive(Debug)]
 pub enum Stmt {
-    Let(String, Option<TypeId>, ExprId),
+    Let(StrId, Option<TypeId>, ExprId),
     Expr(ExprId, bool),
-    Param(String, TypeId),
-    Fn(String, Vec<StmtId>, Vec<StmtId>, Option<TypeId>, ExprId),
-    Struct(String, FxIndexMap<String, TypeId>),
-    TupleStruct(String, Vec<TypeId>),
-    TypeParam(String),
+    Param(StrId, TypeId),
+    Fn(StrId, Vec<StmtId>, Vec<StmtId>, Option<TypeId>, ExprId),
+    Struct(StrId, FxIndexMap<StrId, TypeId>),
+    TupleStruct(StrId, Vec<TypeId>),
+    TypeParam(StrId),
 }
 
 #[derive(Debug)]
 pub enum Type {
-    Named(String),
+    Named(StrId),
     FnType(Vec<TypeId>, Option<TypeId>),
     Unit,
     Tuple(Vec<TypeId>),

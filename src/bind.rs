@@ -35,7 +35,6 @@ pub struct Scope {
 
 pub struct BindCtx {
     pub symbols: Arena<Symbol>,
-    pub interner: StrInterner,
     pub f64_type: SymbolId,
     pub i64_type: SymbolId,
     pub u64_type: SymbolId,
@@ -52,7 +51,7 @@ pub struct Binder<'a> {
     fn_scope: ScopeId,
     value_scope: ScopeId,
     symbols: Arena<Symbol>,
-    interner: StrInterner,
+    interner: &'a mut StrInterner,
     has_error: bool,
     f64_type: SymbolId,
     i64_type: SymbolId,
@@ -66,7 +65,11 @@ pub struct Binder<'a> {
 }
 
 impl<'a> Binder<'a> {
-    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Diagnostics) -> Self {
+    pub fn new(
+        ast: &'a AstNodes,
+        interner: &'a mut StrInterner,
+        diagnostics: &'a mut Diagnostics,
+    ) -> Self {
         Self {
             ast,
             diagnostics,
@@ -75,7 +78,7 @@ impl<'a> Binder<'a> {
             fn_scope: ScopeId::MAX,
             value_scope: ScopeId::MAX,
             symbols: Arena::new(),
-            interner: StrInterner::new(),
+            interner,
             has_error: false,
             f64_type: SymbolId::MAX,
             i64_type: SymbolId::MAX,
@@ -103,7 +106,6 @@ impl<'a> Binder<'a> {
         }
         Ok(BindCtx {
             symbols: self.symbols,
-            interner: self.interner,
             f64_type: self.f64_type,
             i64_type: self.i64_type,
             u64_type: self.u64_type,
@@ -272,17 +274,14 @@ fn bind_block(b: &mut Binder, nodes: &[StmtId], expr: Option<ExprId>) {
 }
 
 fn declare_item(b: &mut Binder, stmt: StmtId) {
-    match &b.ast.stmts[stmt] {
+    match b.ast.stmts[stmt] {
         Stmt::Fn(name, ..) => {
-            let name = b.interner.intern(name);
             b.declare_fn(name, stmt);
         }
         Stmt::Struct(name, ..) => {
-            let name = b.interner.intern(name);
             b.declare_type(name, SymbolKind::Struct, stmt);
         }
         Stmt::TupleStruct(name, ..) => {
-            let name = b.interner.intern(name);
             b.declare_type(name, SymbolKind::Struct, stmt);
             b.declare_fn(name, stmt);
         }
@@ -292,8 +291,7 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
 
 fn bind_statement(b: &mut Binder, stmt: StmtId) {
     match b.ast.stmts[stmt] {
-        Stmt::Let(ref name, ty, init) => {
-            let name = b.interner.intern(name);
+        Stmt::Let(name, ty, init) => {
             bind_expr(b, init);
             if let Some(ty) = ty {
                 bind_ty(b, ty);
@@ -320,13 +318,11 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
                 b.local_count = prev_local_count;
             })
         }),
-        Stmt::Param(ref name, ty) => {
+        Stmt::Param(name, ty) => {
             bind_ty(b, ty);
-            let name = b.interner.intern(name);
             b.declare_value(name, SymbolKind::Param, stmt);
         }
-        Stmt::TypeParam(ref name) => {
-            let name = b.interner.intern(name);
+        Stmt::TypeParam(name) => {
             b.declare_type(name, SymbolKind::TypeParam, stmt);
         }
         Stmt::Expr(expr, _) => bind_expr(b, expr),
@@ -345,9 +341,8 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
 
 fn bind_expr(b: &mut Binder, node: ExprId) {
     match b.ast.exprs[node] {
-        Expr::Variable(ref name) => {
-            let name_id = b.interner.intern(name);
-            if let Some(symbol) = b.lookup_value(name_id) {
+        Expr::Variable(name) => {
+            if let Some(symbol) = b.lookup_value(name) {
                 b.ast.exprs.bind_value(node, symbol);
             } else {
                 b.diagnostics
@@ -410,9 +405,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::TupleField(target, _) => {
             bind_expr(b, target);
         }
-        Expr::Struct(ref name, ref fields) => {
-            let name_id = b.interner.intern(name);
-            if let Some(symbol) = b.lookup_type(name_id) {
+        Expr::Struct(name, ref fields) => {
+            if let Some(symbol) = b.lookup_type(name) {
                 b.ast.exprs.bind_value(node, symbol);
             } else {
                 b.diagnostics
@@ -459,9 +453,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
 
 fn bind_ty(b: &mut Binder, node: TypeId) {
     match b.ast.types[node] {
-        Type::Named(ref name) => {
-            let name_id = b.interner.intern(name);
-            if let Some(symbol) = b.lookup_type(name_id) {
+        Type::Named(name) => {
+            if let Some(symbol) = b.lookup_type(name) {
                 b.ast.types.bind_type(node, symbol);
             } else {
                 b.diagnostics

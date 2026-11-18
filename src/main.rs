@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
-    heap::Heap, parser::Parser, typechecker::TypeChecker, vm::VM,
+    heap::Heap, interner::StrInterner, parser::Parser, typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -37,17 +37,18 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
-    let mut ast = AstNodes::new();
-    let mut parser = Parser::new(source, &mut ast, diagnostics);
+    let ast = &mut AstNodes::new();
+    let interner = &mut StrInterner::new();
+    let mut parser = Parser::new(source, ast, interner, diagnostics);
     let nodes = parser.parse()?;
 
-    let binder = Binder::new(&ast, diagnostics);
+    let binder = Binder::new(ast, interner, diagnostics);
     let bind_ctx = binder.bind(&nodes)?;
 
-    let checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
+    let checker = TypeChecker::new(ast, interner, diagnostics, bind_ctx);
     let ty_ctx = checker.check(&nodes)?;
 
-    let codegen = Codegen::new(&ast, heap, ty_ctx);
+    let codegen = Codegen::new(ast, heap, ty_ctx);
     let code = codegen.generate(&nodes);
     Ok(code)
 }

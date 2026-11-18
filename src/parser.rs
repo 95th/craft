@@ -2,6 +2,7 @@ use crate::{
     Error, FxIndexMap,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostics,
+    interner::{StrId, StrInterner},
     scanner::{
         Scanner,
         Token::{self, *},
@@ -31,6 +32,7 @@ struct Checkpoint<'a> {
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
     ast: &'a mut AstNodes,
+    interner: &'a mut StrInterner,
     diagnostics: &'a mut Diagnostics,
     token: Token,
     prev_span: Span,
@@ -40,10 +42,16 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str, ast: &'a mut AstNodes, diagnostics: &'a mut Diagnostics) -> Self {
+    pub fn new(
+        source: &'a str,
+        ast: &'a mut AstNodes,
+        interner: &'a mut StrInterner,
+        diagnostics: &'a mut Diagnostics,
+    ) -> Self {
         Self {
             scanner: Scanner::new(source),
             ast,
+            interner,
             diagnostics,
             token: Error,
             prev_span: Span::new(0, 0),
@@ -64,6 +72,10 @@ impl<'a> Parser<'a> {
         } else {
             Ok(nodes)
         }
+    }
+
+    fn token_text(&mut self) -> StrId {
+        self.interner.intern(self.scanner.token_text())
     }
 
     fn eat(&mut self, token: Token) -> bool {
@@ -181,7 +193,7 @@ fn declaration(p: &mut Parser) -> StmtId {
 fn let_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
-    let name = p.scanner.token_text().to_string();
+    let name = p.token_text();
     p.consume(Identifier, "expect identifier");
     let type_annotation = if p.eat(Colon) { Some(ty(p)) } else { None };
     p.consume(Equal, "expect '='");
@@ -197,7 +209,7 @@ fn type_params(p: &mut Parser) -> Vec<StmtId> {
     let mut type_params = Vec::new();
     if p.eat(Less) {
         loop {
-            let name = p.scanner.token_text().to_string();
+            let name = p.token_text();
             p.consume(Identifier, "expect identifier");
             type_params.push(p.ast.stmts.alloc(Stmt::TypeParam(name), p.prev_span));
             if !p.eat(Comma) {
@@ -212,14 +224,14 @@ fn type_params(p: &mut Parser) -> Vec<StmtId> {
 fn fn_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
-    let name = p.scanner.token_text().to_string();
+    let name = p.token_text();
     p.consume(Identifier, "expect identifier");
     let type_params = type_params(p);
     p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
         loop {
-            let name = p.scanner.token_text().to_string();
+            let name = p.token_text();
             p.consume(Identifier, "expect identifier");
             let param_span = p.prev_span;
             p.consume(Colon, "expect ':'");
@@ -247,7 +259,7 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
 fn struct_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
-    let name = p.scanner.token_text().to_string();
+    let name = p.token_text();
     p.consume(Identifier, "expect identifier");
 
     if p.eat(OpenParen) {
@@ -272,12 +284,12 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
     let mut fields = FxIndexMap::default();
     if p.token != CloseBrace {
         loop {
-            let name = p.scanner.token_text();
+            let name = p.token_text();
             p.consume(Identifier, "expect identifier");
             let name_span = p.prev_span;
             p.consume(Colon, "expect ':'");
             let ty = ty(p);
-            if fields.insert(name.to_string(), ty).is_some() {
+            if fields.insert(name, ty).is_some() {
                 p.error_at("duplicate field", name_span);
             };
             if !p.eat(Comma) {
@@ -314,7 +326,7 @@ fn ty(p: &mut Parser) -> TypeId {
 }
 
 fn named_ty(p: &mut Parser) -> TypeId {
-    let name = p.scanner.token_text().to_string();
+    let name = p.token_text();
     p.advance();
     p.ast.types.alloc(Type::Named(name), p.prev_span)
 }
@@ -552,7 +564,7 @@ fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
             .alloc(Expr::TupleField(expr, fract_index), start.to(p.prev_span))
     } else if p.eat(Identifier) {
         p.ast.exprs.alloc(
-            Expr::StructField(lhs, name.to_string()),
+            Expr::StructField(lhs, p.interner.intern(name)),
             p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else {
@@ -639,7 +651,7 @@ fn return_expr(p: &mut Parser) -> ExprId {
 }
 
 fn variable(p: &mut Parser) -> ExprId {
-    let name = p.scanner.token_text().to_string();
+    let name = p.token_text();
     p.advance();
 
     if !p.restrictions.contains(Restrictions::DisallowStruct)
@@ -654,12 +666,12 @@ fn variable(p: &mut Parser) -> ExprId {
         let mut fields = FxIndexMap::default();
         if p.token != CloseBrace {
             loop {
-                let name = p.scanner.token_text();
+                let name = p.token_text();
                 p.consume(Identifier, "expect identifier");
                 let name_span = p.prev_span;
                 p.consume(Colon, "expect ':'");
                 let expr = expression(p);
-                if fields.insert(name.to_string(), expr).is_some() {
+                if fields.insert(name, expr).is_some() {
                     p.error_at("duplicate field", name_span);
                 };
                 if !p.eat(Comma) {

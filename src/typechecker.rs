@@ -8,7 +8,7 @@ use crate::{
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     bind::{BindCtx, SymbolId},
     diagnostics::Diagnostics,
-    interner::StrId,
+    interner::{StrId, StrInterner},
     types::{CommonTypes, Ty, TyId},
 };
 
@@ -21,6 +21,7 @@ pub struct TyContext {
 
 pub struct TypeChecker<'a> {
     ast: &'a AstNodes,
+    interner: &'a StrInterner,
     diagnostics: &'a mut Diagnostics,
     bind_ctx: BindCtx,
     types: InPlaceUnificationTable<TyId>,
@@ -38,11 +39,17 @@ pub struct TypeChecker<'a> {
 }
 
 impl<'a> TypeChecker<'a> {
-    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Diagnostics, bind_ctx: BindCtx) -> Self {
+    pub fn new(
+        ast: &'a AstNodes,
+        interner: &'a StrInterner,
+        diagnostics: &'a mut Diagnostics,
+        bind_ctx: BindCtx,
+    ) -> Self {
         let mut types = InPlaceUnificationTable::new();
         let common_types = CommonTypes::new(&mut types);
         Self {
             ast,
+            interner,
             diagnostics,
             bind_ctx,
             types,
@@ -294,9 +301,8 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         Stmt::Struct(.., ref fields) => {
             let symbol = c.ast.stmts.type_binding(node);
             let mut properties = FxIndexMap::default();
-            for (name, ty) in fields.iter() {
-                let name = c.bind_ctx.interner.intern(name);
-                let ty = check_type(c, *ty);
+            for (&name, &ty) in fields.iter() {
+                let ty = check_type(c, ty);
                 properties.insert(name, ty);
             }
             c.struct_properties.insert(symbol, properties);
@@ -534,9 +540,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             let symbol = c.ast.exprs.value_binding(node);
             let declared = c.struct_properties[&symbol].clone();
             for (name, &value) in fields {
-                let name = c.bind_ctx.interner.intern(name);
                 let ty = check_expr(c, value);
-                if let Some(&declared_ty) = declared.get(&name) {
+                if let Some(&declared_ty) = declared.get(name) {
                     c.unify(declared_ty, ty, c.ast.exprs.span(value));
                 } else {
                     c.error("unknown field", c.ast.exprs.span(value));
@@ -545,9 +550,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
             let mut missing = Vec::new();
             for (name, _) in declared {
-                let name = c.bind_ctx.interner.lookup(name);
-                if !fields.contains_key(name) {
-                    missing.push(name);
+                if !fields.contains_key(&name) {
+                    missing.push(c.interner.lookup(name));
                 }
             }
             if !missing.is_empty() {
@@ -560,7 +564,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
             c.type_bindings[&symbol]
         }
-        Expr::StructField(expr, ref name) => {
+        Expr::StructField(expr, name) => {
             let expr_ty = check_expr(c, expr);
             let Ty::Named(symbol) = c.types.probe_value(expr_ty) else {
                 c.error("expect a struct instance", c.ast.exprs.span(expr));
@@ -571,8 +575,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 return c.types.new_key(Ty::Unknown);
             };
 
-            let name_id = c.bind_ctx.interner.intern(name);
-            let Some(&ty) = properties.get(&name_id) else {
+            let Some(&ty) = properties.get(&name) else {
                 c.error("unknown field", c.ast.exprs.span(expr));
                 return c.types.new_key(Ty::Unknown);
             };
@@ -688,7 +691,7 @@ impl TyId {
 fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
     match c.types.probe_value(ty) {
         Ty::Named(symbol) | Ty::TypeParam(symbol) => {
-            buf.push_str(c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name))
+            buf.push_str(c.interner.lookup(c.bind_ctx.symbols[symbol].name))
         }
         Ty::Fn(params, ret) => {
             buf.push_str("fn(");
