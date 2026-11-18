@@ -16,6 +16,7 @@ pub enum Ty {
     String,
     Var,
     Tuple(Vec<TyId>),
+    Array(TyId),
 }
 
 pub struct CommonTypes {

@@ -24,6 +24,7 @@ pub enum Opcode {
     Jump,
     Loop,
     Struct,
+    RepeatStruct,
     StructProperty,
     SetStructProperty,
 

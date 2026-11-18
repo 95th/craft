@@ -350,6 +350,18 @@ impl<'a> Codegen<'a> {
                 self.code.write(Opcode::StructProperty);
                 self.code.write_u16(index as u16);
             }
+            Expr::Array(ref args) => {
+                for &arg in args {
+                    self.process_expr(arg);
+                }
+                self.code.write(Opcode::Struct);
+                self.code.write_u16(args.len() as u16);
+            }
+            Expr::ArrayRepeat(expr, count) => {
+                self.process_expr(expr);
+                self.process_expr(count);
+                self.code.write(Opcode::RepeatStruct);
+            }
         }
     }
 

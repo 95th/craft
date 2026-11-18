@@ -693,4 +693,21 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_array() {
+        let source = r#"
+            let a = [1, 2, 3];
+            print(a);
+
+            let b: [number] = a;
+            print(b);
+
+            fn foo(n: number) -> [number] {
+                [n; 20]
+            }
+            print(foo(10));
+        "#;
+        run_ok(source);
+    }
 }

@@ -424,6 +424,15 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             bind_expr(b, body);
             b.loop_depth -= 1;
         }),
+        Expr::Array(ref elements) => {
+            for e in elements {
+                bind_expr(b, *e);
+            }
+        }
+        Expr::ArrayRepeat(expr, count) => {
+            bind_expr(b, expr);
+            bind_expr(b, count);
+        }
     }
 }
 
@@ -453,5 +462,6 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
                 bind_ty(b, *t);
             }
         }
+        Type::Array(t) => bind_ty(b, t),
     }
 }

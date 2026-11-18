@@ -305,6 +305,7 @@ fn ty(p: &mut Parser) -> TypeId {
         Identifier => named_ty(p),
         Fn => fn_ty(p),
         OpenParen => tuple_ty(p),
+        OpenBracket => array_ty(p),
         _ => {
             p.error("unexpected token");
             TypeId::MAX
@@ -363,6 +364,16 @@ fn tuple_ty(p: &mut Parser) -> TypeId {
     p.ast.types.alloc(Type::Tuple(types), start.to(p.prev_span))
 }
 
+fn array_ty(p: &mut Parser) -> TypeId {
+    p.advance();
+    let start = p.prev_span;
+    let element_ty = ty(p);
+    p.consume(CloseBracket, "expect ']'");
+    p.ast
+        .types
+        .alloc(Type::Array(element_ty), start.to(p.prev_span))
+}
+
 fn expression(p: &mut Parser) -> ExprId {
     parse_precedence(p, Precedence::Assignment as u8)
 }
@@ -391,6 +402,40 @@ fn tuple(p: &mut Parser) -> ExprId {
         p.consume(CloseParen, "expect ')'");
         expr
     })
+}
+
+fn array(p: &mut Parser) -> ExprId {
+    p.advance();
+    let start = p.prev_span;
+
+    if p.eat(CloseBracket) {
+        return p
+            .ast
+            .exprs
+            .alloc(Expr::Array(Vec::new()), start.to(p.prev_span));
+    }
+
+    let expr = expression(p);
+    if p.eat(Semicolon) {
+        let count = expression(p);
+        p.consume(CloseBracket, "expect ']'");
+        return p
+            .ast
+            .exprs
+            .alloc(Expr::ArrayRepeat(expr, count), start.to(p.prev_span));
+    }
+
+    let mut exprs = vec![expr];
+    if p.eat(Comma) {
+        loop {
+            exprs.push(expression(p));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseBracket, "expect ']'");
+    p.ast.exprs.alloc(Expr::Array(exprs), start.to(p.prev_span))
 }
 
 fn binary(p: &mut Parser, lhs: ExprId) -> ExprId {
@@ -709,6 +754,7 @@ fn parse_precedence(p: &mut Parser, precedence: u8) -> ExprId {
 fn parse_prefix(p: &mut Parser) -> Option<ExprId> {
     Some(match p.token {
         OpenParen => tuple(p),
+        OpenBracket => array(p),
         Minus | Bang => unary(p),
         NumberLiteral => number(p),
         StringLiteral => string(p),

@@ -268,6 +268,19 @@ impl VM {
                     let obj = self.stack.pop().unwrap() as usize;
                     self.heap.set_field(obj, index, value);
                 }
+                Opcode::RepeatStruct => {
+                    let count = self.stack.pop().unwrap();
+                    let value = self.stack.pop().unwrap();
+                    let count = f64::from_bits(count);
+                    if count.fract() != 0.0 || !count.is_finite() || count < 0.0 {
+                        panic!("Count must be an integer");
+                    }
+                    let count = count as usize;
+                    let data = vec![value; count];
+                    let data: &[u8] = unsafe { std::mem::transmute(&data[..]) };
+                    let obj = self.heap.alloc(ObjKind::Struct, data);
+                    self.stack.push(obj as u64);
+                }
             }
         }
     }

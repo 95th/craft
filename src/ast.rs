@@ -48,6 +48,8 @@ pub enum Expr {
     Tuple(Vec<ExprId>),
     Struct(String, FxIndexMap<String, ExprId>),
     StructField(ExprId, String),
+    Array(Vec<ExprId>),
+    ArrayRepeat(ExprId, ExprId),
 }
 
 #[derive(Debug)]
@@ -67,6 +69,7 @@ pub enum Type {
     FnType(Vec<TypeId>, Option<TypeId>),
     Unit,
     Tuple(Vec<TypeId>),
+    Array(TypeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +257,15 @@ impl AstNodes {
             Expr::StructField(expr, _) => {
                 self.visit_expr(expr, visitor);
             }
+            Expr::Array(ref args) => {
+                for arg in args {
+                    self.visit_expr(*arg, visitor);
+                }
+            }
+            Expr::ArrayRepeat(expr, count) => {
+                self.visit_expr(expr, visitor);
+                self.visit_expr(count, visitor);
+            }
         }
     }
 
@@ -275,6 +287,7 @@ impl AstNodes {
                     self.visit_type(*p, visitor);
                 }
             }
+            Type::Array(type_id) => self.visit_type(type_id, visitor),
         }
     }
 }

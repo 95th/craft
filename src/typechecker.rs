@@ -129,6 +129,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 result
             }
+            (&Ty::Array(a), &Ty::Array(b)) => self.try_unify(a, b),
             (Ty::Var, Ty::Var) => false,
             (Ty::Var, other) => {
                 self.types[lhs] = other.clone();
@@ -479,6 +480,20 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             check_expr(c, body);
             c.common_types.unit
         }
+        Expr::Array(ref elements) => {
+            let element_ty = c.types.alloc(Ty::Var);
+            for &expr in elements {
+                let ty = check_expr(c, expr);
+                c.unify(element_ty, ty, c.ast.exprs.span(expr));
+            }
+            c.types.alloc(Ty::Array(element_ty))
+        }
+        Expr::ArrayRepeat(expr, count) => {
+            let element_ty = check_expr(c, expr);
+            let count_ty = check_expr(c, count);
+            c.unify(c.common_types.number, count_ty, c.ast.exprs.span(expr));
+            c.types.alloc(Ty::Array(element_ty))
+        }
     }
 }
 
@@ -497,6 +512,10 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         Type::Tuple(ref items) => {
             let types = items.iter().map(|t| check_type(c, *t)).collect();
             c.types.alloc(Ty::Tuple(types))
+        }
+        Type::Array(element) => {
+            let ty = check_type(c, element);
+            c.types.alloc(Ty::Array(ty))
         }
     }
 }
@@ -584,6 +603,7 @@ impl fmt::Display for DisplayType<'_> {
                 }
                 write!(f, ")")
             }
+            Ty::Array(element) => write!(f, "[{}]", element.display(c)),
         }
     }
 }
