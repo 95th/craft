@@ -12,6 +12,9 @@ pub enum Node {
     Let(String, Option<NodeId>, NodeId),
     Variable(String),
     Assign(NodeId, NodeId),
+    If(NodeId, NodeId, Option<NodeId>),
+    Block(Vec<NodeId>),
+    ExprStatement(NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +96,28 @@ impl fmt::Display for NodeDisplay<'_> {
             }
             Node::Variable(x) => write!(f, "{x}"),
             Node::Assign(lhs, rhs) => write!(f, "{} = {}", lhs.display(arena), rhs.display(arena)),
+            Node::If(cond, then_clause, else_clause) => {
+                write!(
+                    f,
+                    "if {} {}",
+                    cond.display(arena),
+                    then_clause.display(arena)
+                )?;
+                if let Some(else_clause) = else_clause {
+                    write!(f, " else {}", else_clause.display(arena))?;
+                }
+                Ok(())
+            }
+            Node::Block(nodes) => {
+                write!(f, "{{ ")?;
+                for node in nodes {
+                    write!(f, "{}", node.display(arena))?;
+                }
+                write!(f, " }}")
+            }
+            Node::ExprStatement(node) => {
+                write!(f, "{};", node.display(arena))
+            }
         }
     }
 }

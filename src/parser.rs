@@ -108,8 +108,15 @@ fn statement(p: &mut Parser) -> NodeId {
 
 fn expression_statement(p: &mut Parser) -> NodeId {
     let expr = expression(p);
-    p.consume(Semicolon, "Expect ';' after expression.");
-    expr
+    if p.token == Semicolon {
+        p.advance();
+        p.nodes.alloc(
+            Node::ExprStatement(expr),
+            expr.span(p.nodes).to(p.scanner.span()),
+        )
+    } else {
+        expr
+    }
 }
 
 fn ty(p: &mut Parser) -> NodeId {
@@ -208,6 +215,46 @@ fn variable(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::Variable(name), span)
 }
 
+fn if_expr(p: &mut Parser) -> NodeId {
+    let start = p.scanner.span();
+    p.advance();
+    let cond = expression(p);
+    if p.token != OpenBrace {
+        p.error("Expect '{' after 'if' condition.");
+        return p.nodes.alloc(Node::Error, p.scanner.span());
+    }
+    let then_clause = block_expr(p);
+    let else_clause = if p.token == Else {
+        p.advance();
+        Some(match p.token {
+            OpenBrace => block_expr(p),
+            If => if_expr(p),
+            _ => {
+                p.error("Expect 'if' or '{' after else.");
+                p.nodes.alloc(Node::Error, p.scanner.span())
+            }
+        })
+    } else {
+        None
+    };
+    p.nodes.alloc(
+        Node::If(cond, then_clause, else_clause),
+        start.to(p.scanner.span()),
+    )
+}
+
+fn block_expr(p: &mut Parser) -> NodeId {
+    let start = p.scanner.span();
+    p.advance();
+    let mut nodes = Vec::new();
+    while p.token != CloseBrace && p.token != Eof {
+        nodes.push(declaration(p));
+    }
+    p.consume(CloseBrace, "Expect '}' after block.");
+    p.nodes
+        .alloc(Node::Block(nodes), start.to(p.scanner.span()))
+}
+
 fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
         let span = p.scanner.span();
@@ -231,6 +278,8 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         StringLiteral => string(p),
         True | False => boolean(p),
         Identifier => variable(p),
+        If => if_expr(p),
+        OpenBrace => block_expr(p),
         _ => return None,
     })
 }
