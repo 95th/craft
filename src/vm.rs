@@ -256,6 +256,15 @@ impl VM {
                     }
                     self.stack.push(obj as u64);
                 }
+                Opcode::RepeatStruct => {
+                    let count = self.stack.pop().unwrap();
+                    let value = self.stack.pop().unwrap();
+                    let count = number_to_usize(count);
+                    let data = vec![value; count];
+                    let data: &[u8] = unsafe { std::mem::transmute(&data[..]) };
+                    let obj = self.heap.alloc(ObjKind::Struct, data);
+                    self.stack.push(obj as u64);
+                }
                 Opcode::StructProperty => {
                     let index = self.frame.read_u16() as usize;
                     let obj = self.stack.pop().unwrap() as usize;
@@ -268,18 +277,19 @@ impl VM {
                     let obj = self.stack.pop().unwrap() as usize;
                     self.heap.set_field(obj, index, value);
                 }
-                Opcode::RepeatStruct => {
+                Opcode::StructIndex => {
                     let count = self.stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap() as usize;
+                    let index = number_to_usize(count);
+                    let value = self.heap.get_field(obj, index as usize);
+                    self.stack.push(value);
+                }
+                Opcode::SetStructIndex => {
                     let value = self.stack.pop().unwrap();
-                    let count = f64::from_bits(count);
-                    if count.fract() != 0.0 || !count.is_finite() || count < 0.0 {
-                        panic!("Count must be an integer");
-                    }
-                    let count = count as usize;
-                    let data = vec![value; count];
-                    let data: &[u8] = unsafe { std::mem::transmute(&data[..]) };
-                    let obj = self.heap.alloc(ObjKind::Struct, data);
-                    self.stack.push(obj as u64);
+                    let index = self.stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap() as usize;
+                    let index = number_to_usize(index);
+                    self.heap.set_field(obj, index as usize, value);
                 }
             }
         }
@@ -291,4 +301,12 @@ impl VM {
             CallFrame::new(&self.code, function as usize, self.stack.len() - arg_count),
         ))
     }
+}
+
+fn number_to_usize(n: u64) -> usize {
+    let n = f64::from_bits(n);
+    if n.fract() != 0.0 || !n.is_finite() || n < 0.0 {
+        panic!("Value must be an integer");
+    }
+    n as usize
 }

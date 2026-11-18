@@ -50,6 +50,7 @@ pub enum Expr {
     StructField(ExprId, String),
     Array(Vec<ExprId>),
     ArrayRepeat(ExprId, ExprId),
+    ArrayIndex(ExprId, ExprId),
 }
 
 #[derive(Debug)]
@@ -265,6 +266,10 @@ impl AstNodes {
             Expr::ArrayRepeat(expr, count) => {
                 self.visit_expr(expr, visitor);
                 self.visit_expr(count, visitor);
+            }
+            Expr::ArrayIndex(expr, index) => {
+                self.visit_expr(expr, visitor);
+                self.visit_expr(index, visitor);
             }
         }
     }

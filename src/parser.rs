@@ -470,7 +470,10 @@ fn assignment(p: &mut Parser, lhs: ExprId) -> ExprId {
     let rhs = expression(p);
     let lhs_span = p.ast.exprs.span(lhs);
     match p.ast.exprs[lhs] {
-        Expr::Variable(..) | Expr::StructField(..) | Expr::TupleField(..) => p
+        Expr::Variable(..)
+        | Expr::StructField(..)
+        | Expr::TupleField(..)
+        | Expr::ArrayIndex(..) => p
             .ast
             .exprs
             .alloc(Expr::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
@@ -496,6 +499,16 @@ fn call(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.ast
         .exprs
         .alloc(Expr::Call(lhs, args), p.ast.exprs.span(lhs).to(p.prev_span))
+}
+
+fn index(p: &mut Parser, lhs: ExprId) -> ExprId {
+    p.advance();
+    let index = expression(p);
+    p.consume(CloseBracket, "expect ']'");
+    p.ast.exprs.alloc(
+        Expr::ArrayIndex(lhs, index),
+        p.ast.exprs.span(lhs).to(p.prev_span),
+    )
 }
 
 fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
@@ -780,6 +793,7 @@ fn parse_infix(p: &mut Parser, lhs: ExprId) -> ExprId {
         | BangEqual | Bar | BarBar | Ampersand | AmpersandAmpersand => binary(p, lhs),
         Equal => assignment(p, lhs),
         OpenParen => call(p, lhs),
+        OpenBracket => index(p, lhs),
         Dot => dot(p, lhs),
         _ => lhs,
     }
@@ -797,7 +811,7 @@ impl Token {
             BarBar => Precedence::Or,
             Ampersand => Precedence::BitAnd,
             AmpersandAmpersand => Precedence::And,
-            OpenParen | Dot => Precedence::Call,
+            OpenParen | Dot | OpenBracket => Precedence::Call,
             _ => Precedence::None,
         }
     }

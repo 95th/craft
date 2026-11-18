@@ -433,6 +433,10 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             bind_expr(b, expr);
             bind_expr(b, count);
         }
+        Expr::ArrayIndex(expr, index) => {
+            bind_expr(b, expr);
+            bind_expr(b, index);
+        }
     }
 }
 

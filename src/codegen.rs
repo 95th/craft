@@ -168,6 +168,13 @@ impl<'a> Codegen<'a> {
                     self.code.write_u16(index as u16);
                     self.code.write(Opcode::Unit);
                 }
+                Expr::ArrayIndex(expr, index) => {
+                    self.process_expr(expr);
+                    self.process_expr(index);
+                    self.process_expr(rhs);
+                    self.code.write(Opcode::SetStructIndex);
+                    self.code.write(Opcode::Unit);
+                }
                 _ => unreachable!(),
             },
             Expr::Binary(lhs, BinaryOp::And, rhs) => {
@@ -361,6 +368,11 @@ impl<'a> Codegen<'a> {
                 self.process_expr(expr);
                 self.process_expr(count);
                 self.code.write(Opcode::RepeatStruct);
+            }
+            Expr::ArrayIndex(expr, index) => {
+                self.process_expr(expr);
+                self.process_expr(index);
+                self.code.write(Opcode::StructIndex)
             }
         }
     }

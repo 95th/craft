@@ -701,12 +701,12 @@ mod tests {
             print(a);
 
             let b: [number] = a;
-            print(b);
+            print(b[2]);
 
             fn foo(n: number) -> [number] {
                 [n; 20]
             }
-            print(foo(10));
+            print(foo(10)[1]);
         "#;
         run_ok(source);
     }

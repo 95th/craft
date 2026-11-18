@@ -494,6 +494,19 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             c.unify(c.common_types.number, count_ty, c.ast.exprs.span(expr));
             c.types.alloc(Ty::Array(element_ty))
         }
+        Expr::ArrayIndex(expr, index) => {
+            let array_ty = check_expr(c, expr);
+            let index_ty = check_expr(c, index);
+            c.unify(c.common_types.number, index_ty, c.ast.exprs.span(expr));
+
+            match c.types[array_ty] {
+                Ty::Array(element_ty) => element_ty,
+                _ => {
+                    c.error("expect array", c.ast.exprs.span(expr));
+                    c.types.alloc(Ty::Var)
+                }
+            }
+        }
     }
 }
 

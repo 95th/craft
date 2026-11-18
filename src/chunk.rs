@@ -27,6 +27,8 @@ pub enum Opcode {
     RepeatStruct,
     StructProperty,
     SetStructProperty,
+    StructIndex,
+    SetStructIndex,
 
     Add,
     Sub,
