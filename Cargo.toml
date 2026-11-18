@@ -3,6 +3,10 @@ name = "craft"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+codegen-units = 1
+strip = "symbols"
+
 [dependencies]
 bitflags = "2.13.2"
 stacker = "0.1.25"
