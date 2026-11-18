@@ -30,7 +30,7 @@ pub enum ScopeKind {
     Block,
 }
 
-struct Scope {
+pub struct Scope {
     kind: ScopeKind,
     symbols: HashMap<StrId, SymbolId>,
     parent: Option<ScopeId>,
