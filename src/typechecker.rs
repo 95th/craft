@@ -61,26 +61,8 @@ impl<'a> TypeChecker<'a> {
     }
 
     pub fn check(mut self, nodes: &[StmtId]) -> Result<TyContext, Error> {
-        self.type_bindings
-            .insert(self.bind_ctx.f64_type, self.common_types.f64);
-        self.type_bindings
-            .insert(self.bind_ctx.i64_type, self.common_types.i64);
-        self.type_bindings
-            .insert(self.bind_ctx.u64_type, self.common_types.u64);
-        self.type_bindings
-            .insert(self.bind_ctx.string_type, self.common_types.string);
-        self.type_bindings
-            .insert(self.bind_ctx.bool_type, self.common_types.boolean);
-
-        let print_arg_ty = self
-            .types
-            .new_key(Ty::TypeParam(self.bind_ctx.print_function));
-        let print_fn_ty = self
-            .types
-            .new_key(Ty::Fn([print_arg_ty].into(), self.common_types.unit));
-        self.value_bindings
-            .insert(self.bind_ctx.print_function, print_fn_ty);
-        self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
+        self.register_default_types();
+        self.register_default_functions();
 
         check_scope(&mut self, nodes);
         deferred_check_integers(&mut self);
@@ -94,6 +76,31 @@ impl<'a> TypeChecker<'a> {
                 expr_types: self.expr_types,
             })
         }
+    }
+
+    fn register_default_functions(&mut self) {
+        let print_arg_ty = self
+            .types
+            .new_key(Ty::TypeParam(self.bind_ctx.print_function));
+        let print_fn_ty = self
+            .types
+            .new_key(Ty::Fn([print_arg_ty].into(), self.common_types.unit));
+        self.value_bindings
+            .insert(self.bind_ctx.print_function, print_fn_ty);
+        self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
+    }
+
+    fn register_default_types(&mut self) {
+        self.type_bindings
+            .insert(self.bind_ctx.f64_type, self.common_types.f64);
+        self.type_bindings
+            .insert(self.bind_ctx.i64_type, self.common_types.i64);
+        self.type_bindings
+            .insert(self.bind_ctx.u64_type, self.common_types.u64);
+        self.type_bindings
+            .insert(self.bind_ctx.string_type, self.common_types.string);
+        self.type_bindings
+            .insert(self.bind_ctx.bool_type, self.common_types.boolean);
     }
 
     fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
