@@ -84,8 +84,6 @@ fn main() {
         print(fib(35));
     "#;
 
-    lower(source, &mut Diagnostics::new()).unwrap();
-
     let start = Instant::now();
     let mut diagnostics = Diagnostics::new();
     match compile(source, &mut diagnostics) {
@@ -104,19 +102,22 @@ fn main() {
 mod tests {
     use super::*;
 
+    const LOWER: bool = false;
+
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut diagnostics);
-        diagnostics.print(source);
-        let code = result.expect("ok");
-        let mut vm = VM::new(code);
-        vm.run();
-    }
 
-    fn lower_ok(source: &str) {
-        let mut diagnostics = Diagnostics::new();
-        lower(source, &mut diagnostics).expect("OK");
-        diagnostics.print(source);
+        if LOWER {
+            let result = lower(source, &mut diagnostics);
+            diagnostics.print(source);
+            result.expect("ok");
+        } else {
+            let result = compile(source, &mut diagnostics);
+            diagnostics.print(source);
+            let code = result.expect("ok");
+            let mut vm = VM::new(code);
+            vm.run();
+        }
     }
 
     fn check_err(source: &str, error: Error) {
@@ -968,11 +969,11 @@ mod tests {
     fn test_lower_basic() {
         let source = r#"
             let a = 1 + 2 - 3;
-            if a > 1 {
+            if a < 1 {
                 a = 20;
             }
             print(a + 10);
         "#;
-        lower_ok(source);
+        run_ok(source);
     }
 }

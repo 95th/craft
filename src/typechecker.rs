@@ -17,6 +17,7 @@ pub struct TyCtxt {
     pub types: InPlaceUnificationTable<TyId>,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
+    pub value_bindings: FxHashMap<SymbolId, TyId>,
 }
 
 pub struct TypeChecker<'a> {
@@ -81,6 +82,7 @@ impl<'a> TypeChecker<'a> {
                 types: self.types,
                 struct_properties: self.struct_properties,
                 expr_types: self.expr_types,
+                value_bindings: self.value_bindings,
             })
         }
     }
