@@ -195,14 +195,14 @@ impl AstNodes {
                     self.visit_expr(else_clause, visitor);
                 }
             }
-            Expr::Block(ref stmts, expr) => {
+            Expr::Block(ref stmts, expr) => crate::stack_safe(|| {
                 for stmt in stmts {
                     self.visit_stmt(*stmt, visitor);
                 }
                 if let Some(expr) = expr {
                     self.visit_expr(expr, visitor);
                 }
-            }
+            }),
             Expr::While(cond, body) => {
                 self.visit_expr(cond, visitor);
                 self.visit_expr(body, visitor);
