@@ -19,6 +19,8 @@ pub enum Opcode {
     JumpIfFalse,
     Jump,
     Loop,
+    Struct,
+    StructProperty,
 
     Add,
     Sub,
@@ -73,11 +75,11 @@ impl Code {
     }
 
     pub fn write_u16(&mut self, n: u16) {
-        self.code.extend(n.to_be_bytes());
+        self.code.extend(n.to_ne_bytes());
     }
 
     pub fn write_u64(&mut self, n: u64) {
-        self.code.extend(n.to_be_bytes());
+        self.code.extend(n.to_ne_bytes());
     }
 
     pub fn into_inner(self) -> Vec<u8> {
@@ -89,7 +91,7 @@ impl Code {
     }
 
     pub fn write_u16_at(&mut self, i: usize, n: u16) {
-        let [a, b] = n.to_be_bytes();
+        let [a, b] = n.to_ne_bytes();
         self.code[i] = a;
         self.code[i + 1] = b;
     }

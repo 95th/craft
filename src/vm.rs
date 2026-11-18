@@ -1,6 +1,6 @@
 use crate::{
     chunk::{Code, Opcode},
-    heap::Heap,
+    heap::{Heap, ObjKind},
 };
 
 const TRUE: u64 = 1;
@@ -34,7 +34,7 @@ impl CallFrame {
     fn read_u16(&mut self) -> u16 {
         unsafe {
             let bytes = *(self.ip as *const [u8; 2]);
-            let value = u16::from_be_bytes(bytes);
+            let value = u16::from_ne_bytes(bytes);
             self.ip = self.ip.add(2);
             value
         }
@@ -43,7 +43,7 @@ impl CallFrame {
     fn read_u64(&mut self) -> u64 {
         unsafe {
             let bytes = *(self.ip as *const [u8; 8]);
-            let value = u64::from_be_bytes(bytes);
+            let value = u64::from_ne_bytes(bytes);
             self.ip = self.ip.add(8);
             value
         }
@@ -236,6 +236,25 @@ impl VM {
                     } else {
                         return;
                     }
+                }
+                Opcode::Struct => {
+                    let count = self.frame.read_u16() as usize;
+                    let ptr =
+                        self.stack[self.stack.len() - count..].as_ptr() as *const u64 as *const u8;
+                    let data = unsafe { std::slice::from_raw_parts(ptr, count * 8) };
+                    let obj = self.heap.alloc(ObjKind::Struct, data);
+                    for _ in 0..count {
+                        self.stack.pop().unwrap();
+                    }
+                    self.stack.push(obj as u64);
+                }
+                Opcode::StructProperty => {
+                    let index = self.frame.read_u16() as usize;
+                    let obj = self.stack.pop().unwrap();
+                    let data = self.heap.data(obj as usize);
+                    let bytes = unsafe { *(data[index * 8..].as_ptr() as *const [u8; 8]) };
+                    let value = u64::from_ne_bytes(bytes);
+                    self.stack.push(value);
                 }
             }
         }

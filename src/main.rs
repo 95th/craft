@@ -513,4 +513,13 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_run_tuple() {
+        let source = r#"
+            let s = (1, 2, ("hello world", 20));
+            print_string(s.2.0);
+        "#;
+        run_ok(source);
+    }
 }

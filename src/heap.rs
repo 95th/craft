@@ -8,10 +8,12 @@ impl Heap {
     }
 
     pub fn alloc(&mut self, kind: ObjKind, data: &[u8]) -> usize {
-        let offset = self.data.len();
-        self.data.reserve(data.len() + 8);
+        let align = std::mem::align_of::<Obj<[u8; 0]>>();
+        let offset = self.data.len().next_multiple_of(align);
+        self.data
+            .reserve((offset - self.data.len()) + data.len() + 8);
         unsafe {
-            let ptr = self.data.as_ptr().add(self.data.len()) as *mut Obj<[u8; 0]>;
+            let ptr = self.data.as_ptr().add(offset) as *mut Obj<[u8; 0]>;
             std::ptr::write(&raw mut (*ptr).kind, kind);
             std::ptr::write(&raw mut (*ptr).len, data.len() as u32);
             let src = data.as_ptr();

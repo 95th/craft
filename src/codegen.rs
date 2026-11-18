@@ -259,6 +259,18 @@ impl<'a> Codegen<'a> {
                     self.code.write(Opcode::Return);
                 }
             }
+            Expr::Tuple(ref args) => {
+                for &arg in args {
+                    self.process_expr(arg);
+                }
+                self.code.write(Opcode::Struct);
+                self.code.write_u16(args.len() as u16);
+            }
+            Expr::TupleField(expr, index) => {
+                self.process_expr(expr);
+                self.code.write(Opcode::StructProperty);
+                self.code.write_u16(index);
+            }
             _ => {
                 // todo!()
             }
