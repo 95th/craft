@@ -859,4 +859,16 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_generic_function_value() {
+        let source = r#"
+            fn foo<T>(n: T) {
+                print(n);
+            }
+
+            let f = foo;
+        "#;
+        run_ok(source);
+    }
 }
