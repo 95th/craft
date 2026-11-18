@@ -28,7 +28,7 @@ fn main() {
     //     1 + foo(x);
     // "#;
     let source = r#"
-        fn fib(n: number) {
+        fn fib(n: number) -> number {
             if n < 2 {
                 return n;
             }
