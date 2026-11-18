@@ -1,5 +1,9 @@
 use crate::{
-    ast::AstNodes, bind::Binder, diagnostics::Diagnostic, parser::Parser, typechecker::TypeChecker,
+    ast::AstNodes,
+    bind::Binder,
+    diagnostics::{Diagnostic, print_diagnostics},
+    parser::Parser,
+    typechecker::TypeChecker,
 };
 
 mod arena;
@@ -55,9 +59,7 @@ fn main() {
 
     let mut diagnostics = Vec::new();
     if compile(source, &mut diagnostics).is_err() {
-        for d in diagnostics {
-            d.print(source);
-        }
+        print_diagnostics(source, diagnostics);
     }
 }
 
@@ -68,18 +70,14 @@ mod tests {
     fn check_ok(source: &str) {
         let mut diagnostics = Vec::new();
         let result = compile(source, &mut diagnostics);
-        for d in diagnostics {
-            d.print(source);
-        }
+        print_diagnostics(source, diagnostics);
         result.expect("ok");
     }
 
     fn check_err(source: &str, error: Error) {
         let mut diagnostics = Vec::new();
         let result = compile(source, &mut diagnostics);
-        for d in diagnostics {
-            d.print(source);
-        }
+        print_diagnostics(source, diagnostics);
         assert_eq!(result.unwrap_err(), error);
     }
 
