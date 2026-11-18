@@ -418,4 +418,19 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_for_no_clauses() {
+        let source = r#"
+            let i = 0;
+            for (;;) {
+                print_number(i);
+                i = i + 1;
+                if !(i < 10) {
+                    break;
+                }
+            }
+        "#;
+        check_ok(source);
+    }
 }
