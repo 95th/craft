@@ -74,12 +74,12 @@ impl<'a> Parser<'a> {
 
     fn error_at(&mut self, message: &str, span: Span) -> NodeId {
         if self.panic_mode {
-            return self.nodes.error_node;
+            return NodeId::ERROR;
         }
         self.panic_mode = true;
         self.had_error = true;
         print!("Error at '{}': {message}", span.text(self.source));
-        self.nodes.error_node
+        NodeId::ERROR
     }
 }
 
@@ -304,9 +304,9 @@ fn block_expr(p: &mut Parser) -> NodeId {
 
 fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
-        p.error("Expect expression.");
+        let node = p.error("Expect expression.");
         p.advance();
-        return p.nodes.error_node;
+        return node;
     };
 
     while precedence <= p.token.precedence() as u8 {

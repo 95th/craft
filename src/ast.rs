@@ -42,15 +42,13 @@ pub enum BinaryOp {
 pub struct NodeArena {
     nodes: Vec<Node>,
     spans: Vec<Span>,
-    pub error_node: NodeId,
 }
 
 impl NodeArena {
     pub fn new() -> Self {
         Self {
-            nodes: vec![Node::Error],
-            spans: vec![Span::new(0, 0)],
-            error_node: NodeId::new(0),
+            nodes: vec![],
+            spans: vec![],
         }
     }
 
@@ -76,6 +74,8 @@ impl NodeArena {
 pub struct NodeId(u32);
 
 impl NodeId {
+    pub const ERROR: Self = Self(u32::MAX);
+
     pub fn new(index: usize) -> Self {
         Self(index as u32)
     }
@@ -146,8 +146,10 @@ impl fmt::Display for NodeDisplay<'_> {
             Node::Continue => write!(f, "continue"),
             Node::Fn(name, params, return_ty, body) => {
                 write!(f, "fn {name}(")?;
+                let mut sep = "";
                 for (name, ty) in params {
-                    write!(f, "{name}: {}", ty.display(arena))?;
+                    write!(f, "{sep}{name}: {}", ty.display(arena))?;
+                    sep = ", ";
                 }
                 write!(f, ")")?;
                 if let Some(return_ty) = return_ty {
