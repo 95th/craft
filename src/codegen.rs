@@ -415,16 +415,10 @@ impl<'a> Codegen<'a> {
                 self.code.op_get_struct_property(index);
             }
             Expr::Struct(ref s) => {
-                let symbol = self.ast.exprs.value_binding(expr);
-                let properties = &self.ty_ctx.struct_properties[&symbol];
-                let mut exprs = Vec::with_capacity(properties.len());
-                for (name, _) in properties {
-                    exprs.push(s.fields[name]);
-                }
-                for &expr in exprs.iter() {
+                for &expr in s.fields.values() {
                     self.process_expr(expr);
                 }
-                self.code.op_struct(exprs.len() as u16);
+                self.code.op_struct(s.fields.len() as u16);
             }
             Expr::StructField { obj, name } => {
                 let ty = self.ty_ctx.expr_types[&obj];
