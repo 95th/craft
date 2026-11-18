@@ -121,29 +121,9 @@ impl<'a> TypeChecker<'a> {
             return true;
         }
         match (self.types.probe_value(lhs), self.types.probe_value(rhs)) {
-            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
-                let mut result = true;
-                for (a, b) in a.iter().zip(b.iter()) {
-                    if !self.can_unify(*a, *b) {
-                        result = false;
-                    }
-                }
-                result
-            }
-            (Ty::Fn(a_params, a_ret), Ty::Fn(b_params, b_ret)) => {
-                if a_params.len() != b_params.len() {
-                    return false;
-                }
-                let mut result = true;
-                for (a, b) in a_params.iter().zip(b_params.iter()) {
-                    if !self.can_unify(*a, *b) {
-                        result = false;
-                    }
-                }
-                if !self.can_unify(a_ret, b_ret) {
-                    result = false;
-                }
-                result
+            (Ty::Tuple(a), Ty::Tuple(b)) => self.can_unify_list(&a, &b),
+            (Ty::Fn(par_a, ret_a), Ty::Fn(par_b, ret_b)) => {
+                self.can_unify_list(&par_a, &par_b) && self.can_unify(ret_a, ret_b)
             }
             (Ty::Array(a), Ty::Array(b)) => self.can_unify(a, b),
             (Ty::Unknown, _) | (_, Ty::Unknown) => true,
@@ -152,6 +132,14 @@ impl<'a> TypeChecker<'a> {
             | (Ty::UnknownInt, Ty::UnknownInt) => true,
             _ => false,
         }
+    }
+
+    fn can_unify_list(&mut self, lhs: &[TyId], rhs: &[TyId]) -> bool {
+        lhs.len() == rhs.len()
+            && lhs
+                .iter()
+                .zip(rhs.iter())
+                .all(|(a, b)| self.can_unify(*a, *b))
     }
 
     fn unify_recursively(&mut self, lhs: TyId, rhs: TyId) {
