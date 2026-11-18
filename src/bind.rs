@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::{
     Error,
@@ -27,7 +27,7 @@ pub struct Symbol {
 pub type SymbolId = Id<Symbol>;
 
 pub struct Scope {
-    symbols: HashMap<StrId, SymbolId>,
+    symbols: FxHashMap<StrId, SymbolId>,
     parent: Option<ScopeId>,
 }
 
@@ -231,7 +231,7 @@ impl<'a> Binder<'a> {
 
     fn create_scope(&mut self, parent: Option<ScopeId>) -> ScopeId {
         self.scopes.alloc(Scope {
-            symbols: HashMap::new(),
+            symbols: FxHashMap::default(),
             parent,
         })
     }

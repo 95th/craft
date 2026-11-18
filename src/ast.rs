@@ -1,7 +1,9 @@
 use core::fmt;
-use std::collections::HashMap;
 
-use crate::arena::{AstArena, AstId};
+use crate::{
+    FxIndexMap,
+    arena::{AstArena, AstId},
+};
 
 pub type ExprId = AstId<Expr>;
 pub type StmtId = AstId<Stmt>;
@@ -44,7 +46,7 @@ pub enum Expr {
     Unit,
     TupleField(ExprId, u16),
     Tuple(Vec<ExprId>),
-    Struct(String, HashMap<String, ExprId>),
+    Struct(String, FxIndexMap<String, ExprId>),
     StructField(ExprId, String),
 }
 
@@ -54,7 +56,7 @@ pub enum Stmt {
     Expr(ExprId, bool),
     Param(String, TypeId),
     Fn(String, Vec<StmtId>, Option<TypeId>, ExprId),
-    Struct(String, HashMap<String, TypeId>),
+    Struct(String, FxIndexMap<String, TypeId>),
 }
 
 #[derive(Debug)]

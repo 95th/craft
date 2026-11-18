@@ -1,8 +1,9 @@
 use core::fmt;
-use std::collections::HashMap;
+
+use rustc_hash::FxHashMap;
 
 use crate::{
-    Error,
+    Error, FxIndexMap,
     arena::Arena,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     bind::{BindCtx, SymbolId},
@@ -14,8 +15,8 @@ use crate::{
 pub struct TyContext {
     pub bind_ctx: BindCtx,
     pub types: Arena<Ty>,
-    pub struct_properties: HashMap<SymbolId, Vec<(StrId, TyId)>>,
-    pub expr_types: HashMap<ExprId, TyId>,
+    pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
+    pub expr_types: FxHashMap<ExprId, TyId>,
 }
 
 pub struct TypeChecker<'a> {
@@ -26,9 +27,9 @@ pub struct TypeChecker<'a> {
     common_types: CommonTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
-    binding_types: HashMap<SymbolId, TyId>,
-    struct_properties: HashMap<SymbolId, Vec<(StrId, TyId)>>,
-    expr_types: HashMap<ExprId, TyId>,
+    binding_types: FxHashMap<SymbolId, TyId>,
+    struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
+    expr_types: FxHashMap<ExprId, TyId>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -43,9 +44,9 @@ impl<'a> TypeChecker<'a> {
             common_types,
             has_error: false,
             containing_return_ty: None,
-            binding_types: HashMap::new(),
-            struct_properties: HashMap::new(),
-            expr_types: HashMap::new(),
+            binding_types: FxHashMap::default(),
+            struct_properties: FxHashMap::default(),
+            expr_types: FxHashMap::default(),
         }
     }
 
@@ -166,13 +167,12 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
             c.binding_types.insert(fn_symbol, fn_ty);
         }
         Stmt::Struct(_, ref fields) => {
-            let mut properties = Vec::new();
+            let mut properties = FxIndexMap::default();
             for (name, ty) in fields.iter() {
                 let name = c.bind_ctx.interner.intern(name);
                 let ty = check_type(c, *ty);
-                properties.push((name, ty));
+                properties.insert(name, ty);
             }
-            properties.sort_by_key(|(name, _)| *name);
             let struct_symbol = c.ast.stmts.binding(node);
             let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
             c.binding_types.insert(struct_symbol, struct_ty);
@@ -378,8 +378,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             for (name, &value) in fields {
                 let name = c.bind_ctx.interner.intern(name);
                 let ty = check_expr(c, value);
-                if let Ok(i) = declared.binary_search_by_key(&name, |(name, _)| *name) {
-                    c.unify(declared[i].1, ty, c.ast.exprs.span(value));
+                if let Some(&declared_ty) = declared.get(&name) {
+                    c.unify(declared_ty, ty, c.ast.exprs.span(value));
                 } else {
                     c.error("unknown field", c.ast.exprs.span(value));
                 }
@@ -414,11 +414,11 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             };
 
             let name_id = c.bind_ctx.interner.intern(name);
-            let Ok(i) = properties.binary_search_by_key(&name_id, |(name, _)| *name) else {
+            let Some(&ty) = properties.get(&name_id) else {
                 c.error("unknown field", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
-            properties[i].1
+            ty
         }
         Expr::For(init, cond, incr, body) => {
             if let Some(init) = init {

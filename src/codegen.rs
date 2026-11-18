@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::{
     ast::{AstNodes, AstVisitor, BinaryOp, Expr, ExprId, Stmt, StmtId},
@@ -28,7 +28,7 @@ pub struct Codegen<'a> {
     ty_ctx: TyContext,
     code: Code,
     loop_ctxts: Vec<LoopCtx>,
-    functions: HashMap<SymbolId, usize>,
+    functions: FxHashMap<SymbolId, usize>,
     heap: &'a mut Heap,
 }
 
@@ -39,7 +39,7 @@ impl<'a> Codegen<'a> {
             ty_ctx,
             code: Code::new(),
             loop_ctxts: Vec::new(),
-            functions: HashMap::new(),
+            functions: FxHashMap::default(),
             heap,
         }
     }
@@ -151,9 +151,7 @@ impl<'a> Codegen<'a> {
                     };
                     let properties = &self.ty_ctx.struct_properties[&symbol];
                     let name = self.ty_ctx.bind_ctx.interner.intern(name);
-                    let index = properties
-                        .binary_search_by_key(&name, |(name, _)| *name)
-                        .unwrap();
+                    let index = properties.get_index_of(&name).unwrap();
                     self.process_expr(expr);
                     self.process_expr(rhs);
                     self.code.write(Opcode::SetStructProperty);
@@ -334,9 +332,7 @@ impl<'a> Codegen<'a> {
                 };
                 let properties = &self.ty_ctx.struct_properties[&symbol];
                 let name = self.ty_ctx.bind_ctx.interner.intern(name);
-                let index = properties
-                    .binary_search_by_key(&name, |(name, _)| *name)
-                    .unwrap();
+                let index = properties.get_index_of(&name).unwrap();
                 self.process_expr(expr);
                 self.code.write(Opcode::StructProperty);
                 self.code.write_u16(index as u16);

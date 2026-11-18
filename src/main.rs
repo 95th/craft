@@ -1,5 +1,8 @@
 use std::time::Instant;
 
+use indexmap::IndexMap;
+use rustc_hash::FxBuildHasher;
+
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
     heap::Heap, parser::Parser, typechecker::TypeChecker, vm::VM,
@@ -25,6 +28,8 @@ enum Error {
     Bind,
     TypeCheck,
 }
+
+type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 #[inline(always)]
 fn stack_safe<T>(f: impl FnOnce() -> T) -> T {

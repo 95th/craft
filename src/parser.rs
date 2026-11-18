@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use crate::{
-    Error,
+    Error, FxIndexMap,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostics,
     scanner::{
@@ -235,7 +233,7 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "expect identifier");
     p.consume(OpenBrace, "expect '{'");
-    let mut fields = HashMap::new();
+    let mut fields = FxIndexMap::default();
     if p.token != CloseBrace {
         loop {
             let name = p.scanner.token_text();
@@ -523,7 +521,7 @@ fn variable(p: &mut Parser) -> ExprId {
     {
         let start = p.prev_span;
         p.advance(); // eat the '{'
-        let mut fields = HashMap::new();
+        let mut fields = FxIndexMap::default();
         if p.token != CloseBrace {
             loop {
                 let name = p.scanner.token_text();

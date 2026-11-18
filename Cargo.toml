@@ -9,4 +9,6 @@ strip = "symbols"
 
 [dependencies]
 bitflags = "2.13.2"
+indexmap = "2.14.2"
+rustc-hash = "2.1.3"
 stacker = "0.1.25"

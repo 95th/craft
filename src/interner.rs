@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StrId(u32);
 
 pub struct StrInterner {
-    map: HashMap<&'static str, StrId>,
+    map: FxHashMap<&'static str, StrId>,
     vec: Vec<&'static str>,
     full: Vec<String>,
     buf: String,
@@ -13,7 +13,7 @@ pub struct StrInterner {
 impl StrInterner {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: FxHashMap::default(),
             vec: Vec::new(),
             full: Vec::new(),
             buf: String::with_capacity(1024),
