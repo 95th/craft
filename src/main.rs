@@ -102,7 +102,7 @@ fn main() {
 mod tests {
     use super::*;
 
-    const LOWER: bool = false;
+    const LOWER: bool = true;
 
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();

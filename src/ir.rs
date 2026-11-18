@@ -121,6 +121,10 @@ impl<'a> Lowering<'a> {
     }
 
     fn lower_expr(&mut self, expr: ast::ExprId) -> Operand {
+        crate::stack_safe(|| self.lower_expr_unsafe(expr))
+    }
+
+    fn lower_expr_unsafe(&mut self, expr: ast::ExprId) -> Operand {
         let ty = self.tcx.expr_types[&expr];
         let value = match self.ast.exprs[expr] {
             ast::Expr::Bool(x) => return Operand::Constant(Constant::Bool(x)),
