@@ -1,5 +1,3 @@
-use std::ops::Add;
-
 use crate::{
     ast::{BinaryOp, Node, NodeArena, NodeId, Span},
     scanner::{
@@ -124,7 +122,7 @@ fn ty(p: &mut Parser) -> NodeId {
 }
 
 fn expression(p: &mut Parser) -> NodeId {
-    parse_precedence(p, Precedence::ASSIGNMENT)
+    parse_precedence(p, Precedence::Assignment as u8)
 }
 
 fn grouping(p: &mut Parser) -> NodeId {
@@ -146,9 +144,13 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
         LessEqual => BinaryOp::LessEqual,
         EqualEqual => BinaryOp::Equal,
         BangEqual => BinaryOp::NotEqual,
+        BarBar => BinaryOp::Or,
+        AmpersandAmpersand => BinaryOp::And,
+        Bar => BinaryOp::BitOr,
+        Ampersand => BinaryOp::BitAnd,
         _ => unreachable!(),
     };
-    let precedence = precedence_of(p.token);
+    let precedence = p.token.precedence() as u8;
     p.advance();
     let rhs = parse_precedence(p, precedence + 1);
     p.nodes.alloc(
@@ -176,7 +178,7 @@ fn unary(p: &mut Parser) -> NodeId {
     let start = p.scanner.span();
     let op = p.token;
     p.advance();
-    let expr = parse_precedence(p, Precedence::UNARY);
+    let expr = parse_precedence(p, Precedence::Unary as u8);
     match op {
         Bang => p.nodes.alloc(Node::Not(expr), start.to(expr.span(p.nodes))),
         Minus => p
@@ -255,7 +257,7 @@ fn block_expr(p: &mut Parser) -> NodeId {
         .alloc(Node::Block(nodes), start.to(p.scanner.span()))
 }
 
-fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
+fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
         let span = p.scanner.span();
         p.error("Expect expression.");
@@ -263,7 +265,7 @@ fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
         return p.nodes.alloc(Node::Error, span);
     };
 
-    while precedence <= precedence_of(p.token) {
+    while precedence <= p.token.precedence() as u8 {
         expr = parse_infix(p, expr);
     }
 
@@ -287,43 +289,41 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
 fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
     match p.token {
         Plus | Minus | Star | Slash | Greater | GreaterEqual | Less | LessEqual | EqualEqual
-        | BangEqual => binary(p, lhs),
+        | BangEqual | Bar | BarBar | Ampersand | AmpersandAmpersand => binary(p, lhs),
         Equal => assignment(p, lhs),
         _ => lhs,
     }
 }
-
-fn precedence_of(token: Token) -> Precedence {
-    match token {
-        Plus | Minus => Precedence::TERM,
-        Star | Slash => Precedence::FACTOR,
-        Greater | GreaterEqual | Less | LessEqual => Precedence::COMPARISON,
-        EqualEqual | BangEqual => Precedence::EQUALITY,
-        Equal => Precedence::ASSIGNMENT,
-        _ => Precedence::NONE,
+impl Token {
+    fn precedence(self) -> Precedence {
+        match self {
+            Plus | Minus => Precedence::Term,
+            Star | Slash => Precedence::Factor,
+            Greater | GreaterEqual | Less | LessEqual => Precedence::Comparison,
+            EqualEqual | BangEqual => Precedence::Equality,
+            Equal => Precedence::Assignment,
+            Bar => Precedence::BitOr,
+            BarBar => Precedence::Or,
+            Ampersand => Precedence::BitAnd,
+            AmpersandAmpersand => Precedence::And,
+            _ => Precedence::None,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Precedence(u8);
-
-impl Add<u8> for Precedence {
-    type Output = Self;
-
-    fn add(self, rhs: u8) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-
-impl Precedence {
-    const NONE: Self = Self(0);
-    const ASSIGNMENT: Self = Self(1);
-    const OR: Self = Self(2);
-    const AND: Self = Self(3);
-    const EQUALITY: Self = Self(4);
-    const COMPARISON: Self = Self(5);
-    const TERM: Self = Self(6);
-    const FACTOR: Self = Self(7);
-    const UNARY: Self = Self(8);
-    const CALL: Self = Self(9);
+#[repr(u8)]
+enum Precedence {
+    None,
+    Assignment,
+    Or,
+    And,
+    Equality,
+    Comparison,
+    BitOr,
+    BitAnd,
+    Term,
+    Factor,
+    Unary,
+    Call,
 }

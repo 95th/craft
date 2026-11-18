@@ -29,6 +29,10 @@ pub enum BinaryOp {
     LessEqual,
     Equal,
     NotEqual,
+    Or,
+    And,
+    BitOr,
+    BitAnd,
 }
 
 pub struct NodeArena {
@@ -135,6 +139,10 @@ impl fmt::Display for BinaryOp {
             Self::LessEqual => write!(f, "<="),
             Self::Equal => write!(f, "=="),
             Self::NotEqual => write!(f, "!="),
+            Self::Or => write!(f, "||"),
+            Self::And => write!(f, "&&"),
+            Self::BitOr => write!(f, "|"),
+            Self::BitAnd => write!(f, "&"),
         }
     }
 }
