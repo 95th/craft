@@ -4,7 +4,7 @@ use crate::{
     Error,
     arena::{Arena, Bindings, Id},
     ast::{AstNodes, Expr, ExprId, Stmt, StmtId, Type, TypeId},
-    diagnostics::Diagnostic,
+    diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
 };
 
@@ -35,7 +35,7 @@ pub struct BindCtx {
 
 pub struct Binder<'a> {
     ast: &'a AstNodes,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a mut Diagnostics,
     scopes: Arena<Scope>,
     type_scope: ScopeId,
     fn_scope: ScopeId,
@@ -54,7 +54,7 @@ pub struct Binder<'a> {
 }
 
 impl<'a> Binder<'a> {
-    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Vec<Diagnostic>) -> Self {
+    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Diagnostics) -> Self {
         Self {
             ast,
             diagnostics,
@@ -113,10 +113,10 @@ impl<'a> Binder<'a> {
 
     fn declare_type(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
-            self.diagnostics.push(Diagnostic {
-                span: self.ast.stmts.span(declaration),
-                message: "already defined in this scope.".into(),
-            });
+            self.diagnostics.push(
+                "already defined in this scope.",
+                self.ast.stmts.span(declaration),
+            );
             self.has_error = true;
             return *s;
         }
@@ -125,10 +125,10 @@ impl<'a> Binder<'a> {
 
     fn declare_value(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
-            self.diagnostics.push(Diagnostic {
-                span: self.ast.stmts.span(declaration),
-                message: "already defined in this scope.".into(),
-            });
+            self.diagnostics.push(
+                "already defined in this scope.",
+                self.ast.stmts.span(declaration),
+            );
             self.has_error = true;
             return *s;
         }
@@ -137,10 +137,10 @@ impl<'a> Binder<'a> {
 
     fn declare_fn(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.fn_scope].symbols.get(&name) {
-            self.diagnostics.push(Diagnostic {
-                span: self.ast.stmts.span(declaration),
-                message: "already defined in this scope.".into(),
-            });
+            self.diagnostics.push(
+                "already defined in this scope.",
+                self.ast.stmts.span(declaration),
+            );
             self.has_error = true;
             return *s;
         }
@@ -284,10 +284,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             if let Some(symbol) = b.lookup_value(name_id) {
                 b.expr_bindings.bind(node, symbol);
             } else {
-                b.diagnostics.push(Diagnostic {
-                    span: b.ast.exprs.span(node),
-                    message: "not found in this scope.".into(),
-                });
+                b.diagnostics
+                    .push("not found in this scope.", b.ast.exprs.span(node));
                 b.has_error = true;
             }
         }
@@ -323,20 +321,16 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         }
         Expr::Break | Expr::Continue => {
             if b.loop_depth == 0 {
-                b.diagnostics.push(Diagnostic {
-                    span: b.ast.exprs.span(node),
-                    message: "cannot use outside of a loop".into(),
-                });
+                b.diagnostics
+                    .push("cannot use outside of a loop", b.ast.exprs.span(node));
                 b.has_error = true;
             }
         }
         Expr::Unit => {}
         Expr::Return(expr) => {
             if b.fn_depth == 0 {
-                b.diagnostics.push(Diagnostic {
-                    span: b.ast.exprs.span(node),
-                    message: "Cannot use outside of a function".into(),
-                });
+                b.diagnostics
+                    .push("Cannot use outside of a function", b.ast.exprs.span(node));
                 b.has_error = true;
             }
             if let Some(expr) = expr {
@@ -356,10 +350,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             if let Some(symbol) = b.lookup_type(name_id) {
                 b.expr_bindings.bind(node, symbol);
             } else {
-                b.diagnostics.push(Diagnostic {
-                    span: b.ast.exprs.span(node),
-                    message: "not found in this scope.".into(),
-                });
+                b.diagnostics
+                    .push("not found in this scope.", b.ast.exprs.span(node));
                 b.has_error = true;
             }
 
@@ -394,10 +386,8 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
             if let Some(symbol) = b.lookup_type(name_id) {
                 b.type_bindings.bind(node, symbol);
             } else {
-                b.diagnostics.push(Diagnostic {
-                    span: b.ast.types.span(node),
-                    message: "not found in this scope.".into(),
-                });
+                b.diagnostics
+                    .push("not found in this scope.", b.ast.types.span(node));
                 b.has_error = true;
             }
         }

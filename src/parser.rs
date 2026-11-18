@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     Error,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
-    diagnostics::Diagnostic,
+    diagnostics::Diagnostics,
     scanner::{
         Scanner,
         Token::{self, *},
@@ -33,7 +33,7 @@ struct Checkpoint<'a> {
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
     ast: &'a mut AstNodes,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a mut Diagnostics,
     token: Token,
     prev_span: Span,
     had_error: bool,
@@ -42,11 +42,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(
-        source: &'a str,
-        ast: &'a mut AstNodes,
-        diagnostics: &'a mut Vec<Diagnostic>,
-    ) -> Self {
+    pub fn new(source: &'a str, ast: &'a mut AstNodes, diagnostics: &'a mut Diagnostics) -> Self {
         Self {
             scanner: Scanner::new(source),
             ast,
@@ -171,10 +167,7 @@ impl<'a> Parser<'a> {
         }
         self.panic_mode = true;
         self.had_error = true;
-        self.diagnostics.push(Diagnostic {
-            message: message.into(),
-            span,
-        });
+        self.diagnostics.push(message, span);
     }
 }
 

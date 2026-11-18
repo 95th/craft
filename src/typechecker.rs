@@ -6,14 +6,14 @@ use crate::{
     arena::Arena,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     bind::{BindCtx, SymbolId},
-    diagnostics::Diagnostic,
+    diagnostics::Diagnostics,
     interner::StrId,
     types::{CommonTypes, Ty, TyId},
 };
 
 pub struct TypeChecker<'a> {
     ast: &'a AstNodes,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a mut Diagnostics,
     bind_ctx: BindCtx,
     types: Arena<Ty>,
     common_types: CommonTypes,
@@ -24,7 +24,7 @@ pub struct TypeChecker<'a> {
 }
 
 impl<'a> TypeChecker<'a> {
-    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Vec<Diagnostic>, bind_ctx: BindCtx) -> Self {
+    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Diagnostics, bind_ctx: BindCtx) -> Self {
         let mut types = Arena::new();
         let common_types = CommonTypes::new(&mut types);
         Self {
@@ -112,10 +112,7 @@ impl<'a> TypeChecker<'a> {
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.has_error = true;
-        self.diagnostics.push(Diagnostic {
-            span,
-            message: message.into(),
-        });
+        self.diagnostics.push(message, span);
     }
 }
 

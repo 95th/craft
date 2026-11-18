@@ -1,9 +1,5 @@
 use crate::{
-    ast::AstNodes,
-    bind::Binder,
-    diagnostics::{Diagnostic, print_diagnostics},
-    parser::Parser,
-    typechecker::TypeChecker,
+    ast::AstNodes, bind::Binder, diagnostics::Diagnostics, parser::Parser, typechecker::TypeChecker,
 };
 
 mod arena;
@@ -28,7 +24,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-fn compile(source: &str, diagnostics: &mut Vec<Diagnostic>) -> Result<(), Error> {
+fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
     let mut ast = AstNodes::new();
     let mut parser = Parser::new(source, &mut ast, diagnostics);
     let nodes = parser.parse()?;
@@ -57,9 +53,9 @@ fn main() {
         bar(foo);
     "#;
 
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = Diagnostics::new();
     if compile(source, &mut diagnostics).is_err() {
-        print_diagnostics(source, diagnostics);
+        diagnostics.print(source);
     }
 }
 
@@ -68,16 +64,16 @@ mod tests {
     use super::*;
 
     fn check_ok(source: &str) {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = Diagnostics::new();
         let result = compile(source, &mut diagnostics);
-        print_diagnostics(source, diagnostics);
+        diagnostics.print(source);
         result.expect("ok");
     }
 
     fn check_err(source: &str, error: Error) {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = Diagnostics::new();
         let result = compile(source, &mut diagnostics);
-        print_diagnostics(source, diagnostics);
+        diagnostics.print(source);
         assert_eq!(result.unwrap_err(), error);
     }
 
