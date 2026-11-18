@@ -226,8 +226,4 @@ impl<'a> Scanner<'a> {
     fn peek_char(&self) -> Option<char> {
         self.current.clone().next()
     }
-
-    fn peek_nth(&self, n: usize) -> Option<char> {
-        self.current.clone().nth(n)
-    }
 }
