@@ -155,7 +155,7 @@ impl<'a> Parser<'a> {
             self.token = self.scanner.scan_token();
             if self.token == Error {
                 self.error(self.scanner.error_message());
-            } else {
+            } else if self.token != Comment {
                 break;
             }
         }

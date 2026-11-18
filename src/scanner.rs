@@ -10,6 +10,8 @@ pub enum Token {
     Eof,
     Error,
 
+    Comment,
+
     Plus,
     Minus,
     Star,
@@ -87,7 +89,18 @@ impl<'a> Scanner<'a> {
             '+' => Plus,
             '-' => self.try_eat('>', RightArrow, Minus),
             '*' => Star,
-            '/' => Slash,
+            '/' => {
+                if let Some('/') = self.peek_char() {
+                    while let Some(c) = self.current.next() {
+                        if c == '\n' {
+                            break;
+                        }
+                    }
+                    Comment
+                } else {
+                    Slash
+                }
+            }
             ':' => Colon,
             ';' => Semicolon,
             ',' => Comma,
@@ -212,5 +225,9 @@ impl<'a> Scanner<'a> {
 
     fn peek_char(&self) -> Option<char> {
         self.current.clone().next()
+    }
+
+    fn peek_nth(&self, n: usize) -> Option<char> {
+        self.current.clone().nth(n)
     }
 }

@@ -1015,4 +1015,12 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_lower_basic_2() {
+        let source = r#"
+            // let a = { 10 };
+        "#;
+        run_ok(source);
+    }
 }
