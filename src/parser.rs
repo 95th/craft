@@ -68,17 +68,18 @@ impl<'a> Parser<'a> {
         self.error(message);
     }
 
-    fn error(&mut self, message: &str) {
-        self.error_at(message, self.scanner.span());
+    fn error(&mut self, message: &str) -> NodeId {
+        self.error_at(message, self.scanner.span())
     }
 
-    fn error_at(&mut self, message: &str, span: Span) {
+    fn error_at(&mut self, message: &str, span: Span) -> NodeId {
         if self.panic_mode {
-            return;
+            return self.nodes.error_node;
         }
         self.panic_mode = true;
         self.had_error = true;
-        print!("Error at '{}': {message}", span.text(self.source),);
+        print!("Error at '{}': {message}", span.text(self.source));
+        self.nodes.error_node
     }
 }
 
@@ -106,7 +107,32 @@ fn let_declaration(p: &mut Parser) -> NodeId {
 }
 
 fn fn_declaration(p: &mut Parser) -> NodeId {
-    todo!()
+    p.advance();
+    let start = p.prev_span;
+    let name = p.scanner.token_text().to_string();
+    p.consume(Identifier, "Expect function name.");
+    p.consume(OpenParen, "Expect '(' after function name.");
+    let mut params = Vec::new();
+    if p.token != CloseParen {
+        loop {
+            let name = p.scanner.token_text().to_string();
+            p.consume(Identifier, "Expect parameter name.");
+            p.consume(Colon, "Expect ':' after parameter name.");
+            let ty = ty(p);
+            params.push((name, ty));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseParen, "Expect ')' after function parameters.");
+    let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
+    p.consume(OpenBrace, "Expect '{' before funciton body");
+    let body = block_expr(p);
+    p.nodes.alloc(
+        Node::Fn(name, params, return_ty, body),
+        start.to(p.prev_span),
+    )
 }
 
 fn statement(p: &mut Parser) -> NodeId {
@@ -120,10 +146,7 @@ fn while_statement(p: &mut Parser) -> NodeId {
     p.advance();
     let start = p.prev_span;
     let cond = expression(p);
-    if p.token != OpenBrace {
-        p.error("Expect '{' after 'while' condition.");
-        return p.nodes.alloc(Node::Error, p.scanner.span());
-    }
+    p.consume(OpenBrace, "Expect '{' after 'while' condition.");
     let body = block_expr(p);
     p.nodes
         .alloc(Node::While(cond, body), start.to(p.prev_span))
@@ -142,7 +165,10 @@ fn expression_statement(p: &mut Parser) -> NodeId {
 }
 
 fn ty(p: &mut Parser) -> NodeId {
-    todo!()
+    match p.token {
+        Identifier => variable(p),
+        _ => p.error("Expected a type"),
+    }
 }
 
 fn expression(p: &mut Parser) -> NodeId {
@@ -191,10 +217,7 @@ fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
         Node::Variable(..) => p
             .nodes
             .alloc(Node::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
-        _ => {
-            p.error_at("Invalid assignment target", lhs_span);
-            p.nodes.alloc(Node::Error, lhs_span)
-        }
+        _ => p.error_at("Invalid assignment target", lhs_span),
     }
 }
 
@@ -249,19 +272,16 @@ fn if_expr(p: &mut Parser) -> NodeId {
     p.advance();
     let start = p.prev_span;
     let cond = expression(p);
-    if p.token != OpenBrace {
-        p.error("Expect '{' after 'if' condition.");
-        return p.nodes.alloc(Node::Error, p.scanner.span());
-    }
+    p.consume(OpenBrace, "Expect '{' after 'if' condition.");
     let then_clause = block_expr(p);
     let else_clause = if p.eat(Else) {
         Some(match p.token {
-            OpenBrace => block_expr(p),
-            If => if_expr(p),
-            _ => {
-                p.error("Expect 'if' or '{' after else.");
-                p.nodes.alloc(Node::Error, p.scanner.span())
+            OpenBrace => {
+                p.advance();
+                block_expr(p)
             }
+            If => if_expr(p),
+            _ => p.error("Expect 'if' or '{' after else."),
         })
     } else {
         None
@@ -273,7 +293,6 @@ fn if_expr(p: &mut Parser) -> NodeId {
 }
 
 fn block_expr(p: &mut Parser) -> NodeId {
-    p.advance();
     let start = p.prev_span;
     let mut nodes = Vec::new();
     while p.token != CloseBrace && p.token != Eof {
@@ -287,7 +306,7 @@ fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
         p.error("Expect expression.");
         p.advance();
-        return p.nodes.alloc(Node::Error, p.prev_span);
+        return p.nodes.error_node;
     };
 
     while precedence <= p.token.precedence() as u8 {

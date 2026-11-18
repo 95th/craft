@@ -18,6 +18,7 @@ pub enum Node {
     While(NodeId, NodeId),
     Break,
     Continue,
+    Fn(String, Vec<(String, NodeId)>, Option<NodeId>, NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,13 +42,15 @@ pub enum BinaryOp {
 pub struct NodeArena {
     nodes: Vec<Node>,
     spans: Vec<Span>,
+    pub error_node: NodeId,
 }
 
 impl NodeArena {
     pub fn new() -> Self {
         Self {
-            nodes: Vec::new(),
-            spans: Vec::new(),
+            nodes: vec![Node::Error],
+            spans: vec![Span::new(0, 0)],
+            error_node: NodeId::new(0),
         }
     }
 
@@ -96,7 +99,7 @@ impl fmt::Display for NodeDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(node, arena) = *self;
         match node.get(arena) {
-            Node::Error => unreachable!(),
+            Node::Error => write!(f, "<error>"),
             Node::Bool(x) => write!(f, "{x}"),
             Node::Number(x) => write!(f, "{x:?}"),
             Node::String(x) => write!(f, "{x:?}"),
@@ -141,6 +144,17 @@ impl fmt::Display for NodeDisplay<'_> {
             }
             Node::Break => write!(f, "break"),
             Node::Continue => write!(f, "continue"),
+            Node::Fn(name, params, return_ty, body) => {
+                write!(f, "fn {name}(")?;
+                for (name, ty) in params {
+                    write!(f, "{name}: {}", ty.display(arena))?;
+                }
+                write!(f, ")")?;
+                if let Some(return_ty) = return_ty {
+                    write!(f, " -> {}", return_ty.display(arena))?;
+                }
+                write!(f, " {}", body.display(arena))
+            }
         }
     }
 }
