@@ -14,6 +14,7 @@ pub enum SymbolKind {
     Let,
     Fn,
     Param,
+    TypeParam,
     Struct,
     Builtin,
 }
@@ -279,25 +280,34 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             }
             b.declare_value(name, SymbolKind::Let, stmt);
         }
-        Stmt::Fn(_, ref params, return_ty, body) => b.with_value_scope(false, |b| {
-            let prev_local_count = std::mem::replace(&mut b.local_count, 0);
-            for param in params {
-                bind_statement(b, *param);
+        Stmt::Fn(_, ref type_params, ref params, return_ty, body) => b.with_item_scope(|b| {
+            for t in type_params {
+                bind_statement(b, *t);
             }
-            if let Some(return_ty) = return_ty {
-                bind_ty(b, return_ty);
-            }
-            let prev_loop_depth = std::mem::replace(&mut b.loop_depth, 0);
-            b.fn_depth += 1;
-            bind_expr(b, body);
-            b.fn_depth -= 1;
-            b.loop_depth = prev_loop_depth;
-            b.local_count = prev_local_count;
+            b.with_value_scope(false, |b| {
+                let prev_local_count = std::mem::replace(&mut b.local_count, 0);
+                for param in params {
+                    bind_statement(b, *param);
+                }
+                if let Some(return_ty) = return_ty {
+                    bind_ty(b, return_ty);
+                }
+                let prev_loop_depth = std::mem::replace(&mut b.loop_depth, 0);
+                b.fn_depth += 1;
+                bind_expr(b, body);
+                b.fn_depth -= 1;
+                b.loop_depth = prev_loop_depth;
+                b.local_count = prev_local_count;
+            })
         }),
         Stmt::Param(ref name, ty) => {
             bind_ty(b, ty);
             let name = b.interner.intern(name);
             b.declare_value(name, SymbolKind::Param, stmt);
+        }
+        Stmt::TypeParam(ref name) => {
+            let name = b.interner.intern(name);
+            b.declare_type(name, SymbolKind::TypeParam, stmt);
         }
         Stmt::Expr(expr, _) => bind_expr(b, expr),
         Stmt::Struct(_, ref fields) => {
@@ -422,14 +432,17 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
                 b.has_error = true;
             }
         }
-        Type::FnType(ref params, ret) => {
+        Type::FnType(ref type_params, ref params, ret) => b.with_item_scope(|b| {
+            for t in type_params {
+                bind_statement(b, *t);
+            }
             for p in params {
                 bind_ty(b, *p);
             }
             if let Some(ret) = ret {
                 bind_ty(b, ret);
             }
-        }
+        }),
         Type::Unit => {}
         Type::Tuple(ref types) => {
             for t in types {

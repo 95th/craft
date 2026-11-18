@@ -193,11 +193,28 @@ fn let_declaration(p: &mut Parser) -> StmtId {
     )
 }
 
+fn type_params(p: &mut Parser) -> Vec<StmtId> {
+    let mut type_params = Vec::new();
+    if p.eat(Less) {
+        loop {
+            let name = p.scanner.token_text().to_string();
+            p.consume(Identifier, "expect identifier");
+            type_params.push(p.ast.stmts.alloc(Stmt::TypeParam(name), p.prev_span));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+        p.consume(Greater, "Expect '>'");
+    }
+    type_params
+}
+
 fn fn_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "expect identifier");
+    let type_params = type_params(p);
     p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
@@ -222,7 +239,7 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
     p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast.stmts.alloc(
-        Stmt::Fn(name, params, return_ty, body),
+        Stmt::Fn(name, type_params, params, return_ty, body),
         start.to(p.prev_span),
     )
 }
@@ -285,6 +302,7 @@ fn named_ty(p: &mut Parser) -> TypeId {
 fn fn_ty(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
+    let type_params = type_params(p);
     p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
@@ -297,9 +315,10 @@ fn fn_ty(p: &mut Parser) -> TypeId {
     }
     p.consume(CloseParen, "expect ')'");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.ast
-        .types
-        .alloc(Type::FnType(params, return_ty), start.to(p.prev_span))
+    p.ast.types.alloc(
+        Type::FnType(type_params, params, return_ty),
+        start.to(p.prev_span),
+    )
 }
 
 fn tuple_ty(p: &mut Parser) -> TypeId {

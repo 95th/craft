@@ -592,4 +592,18 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_generic_function() {
+        let source = r#"
+            fn foo<T, U>(a: T, b: U) -> (T, U) {
+                (a, b)
+            }
+
+            let f: fn<T>(number, T) -> (number, T) = foo;
+            print_number(f(10, true).0);
+            print_number(f(20, false).0);
+        "#;
+        run_ok(source);
+    }
 }

@@ -30,6 +30,7 @@ pub struct TypeChecker<'a> {
     binding_types: FxHashMap<SymbolId, TyId>,
     struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     expr_types: FxHashMap<ExprId, TyId>,
+    type_params: FxHashMap<TyId, Vec<TyId>>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -47,6 +48,7 @@ impl<'a> TypeChecker<'a> {
             binding_types: FxHashMap::default(),
             struct_properties: FxHashMap::default(),
             expr_types: FxHashMap::default(),
+            type_params: FxHashMap::default(),
         }
     }
 
@@ -111,7 +113,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 result
             }
-            (&Ty::Fn(ref a_params, a_ret), &Ty::Fn(ref b_params, b_ret)) => {
+            (&Ty::Fn(.., ref a_params, a_ret), &Ty::Fn(.., ref b_params, b_ret)) => {
                 if a_params.len() != b_params.len() {
                     return false;
                 }
@@ -157,14 +159,16 @@ fn check_scope(c: &mut TypeChecker, nodes: &[StmtId]) {
 
 fn declare_item(c: &mut TypeChecker, node: StmtId) {
     match c.ast.stmts[node] {
-        Stmt::Fn(_, ref params, return_ty, _) => {
-            let param_tys = params.iter().map(|p| check_stmt(c, *p)).collect();
-            let return_ty = return_ty
-                .map(|t| check_type(c, t))
-                .unwrap_or(c.common_types.unit);
-            let fn_ty = c.types.alloc(Ty::Fn(param_tys, return_ty));
+        Stmt::Fn(_, ref type_params, ref params, ret, _) => {
+            let type_params: Vec<TyId> = type_params.iter().map(|p| check_stmt(c, *p)).collect();
+            let params = params.iter().map(|p| check_stmt(c, *p)).collect();
+            let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
+            let fn_ty = c.types.alloc(Ty::Fn(params, ret));
             let fn_symbol = c.ast.stmts.binding(node);
             c.binding_types.insert(fn_symbol, fn_ty);
+            if !type_params.is_empty() {
+                c.type_params.insert(fn_ty, type_params);
+            }
         }
         Stmt::Struct(_, ref fields) => {
             let mut properties = FxIndexMap::default();
@@ -194,10 +198,10 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             c.binding_types.insert(symbol, init_ty);
             c.common_types.unit
         }
-        Stmt::Fn(_, _, _, body) => {
+        Stmt::Fn(.., body) => {
             let fn_symbol = c.ast.stmts.binding(node);
             let fn_ty = c.binding_types[&fn_symbol];
-            let Ty::Fn(_, return_ty) = c.types[fn_ty] else {
+            let Ty::Fn(.., return_ty) = c.types[fn_ty] else {
                 unreachable!();
             };
 
@@ -218,6 +222,12 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             if semi { c.common_types.unit } else { ty }
         }
         Stmt::Struct(..) => c.common_types.unit,
+        Stmt::TypeParam(..) => {
+            let symbol = c.ast.stmts.binding(node);
+            let ty = c.types.alloc(Ty::Var);
+            c.binding_types.insert(symbol, ty);
+            ty
+        }
     }
 }
 
@@ -284,7 +294,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Variable(..) => {
             let symbol = c.ast.exprs.binding(node);
-            c.binding_types[&symbol]
+            instantiate(c, c.binding_types[&symbol])
         }
         Expr::If(cond, then_clause, else_clause) => {
             let cond_ty = check_expr(c, cond);
@@ -438,10 +448,15 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
 fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
     match c.ast.types[node] {
-        Type::FnType(ref params, ret) => {
+        Type::FnType(ref type_params, ref params, ret) => {
+            let type_params: Vec<TyId> = type_params.iter().map(|t| check_stmt(c, *t)).collect();
             let params = params.iter().map(|t| check_type(c, *t)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
-            c.types.alloc(Ty::Fn(params, ret))
+            let ty = c.types.alloc(Ty::Fn(params, ret));
+            if !type_params.is_empty() {
+                c.type_params.insert(ty, type_params);
+            }
+            ty
         }
         Type::Unit => c.common_types.unit,
         Type::Named(..) => {
@@ -452,6 +467,40 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
             let types = items.iter().map(|t| check_type(c, *t)).collect();
             c.types.alloc(Ty::Tuple(types))
         }
+    }
+}
+
+fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
+    if let Some(type_params) = c.type_params.get(&ty) {
+        let mut subst = FxHashMap::default();
+        for t in type_params {
+            subst.insert(*t, c.types.alloc(Ty::Var));
+        }
+        substitute(c, ty, &subst)
+    } else {
+        ty
+    }
+}
+
+fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> TyId {
+    match c.types[ty].clone() {
+        Ty::Fn(params, ret) => {
+            let params = params
+                .into_iter()
+                .map(|p| substitute(c, p, subst))
+                .collect();
+            let ret = substitute(c, ret, subst);
+            c.types.alloc(Ty::Fn(params, ret))
+        }
+        Ty::Tuple(params) => {
+            let params = params
+                .into_iter()
+                .map(|p| substitute(c, p, subst))
+                .collect();
+            c.types.alloc(Ty::Tuple(params))
+        }
+        Ty::Var => subst.get(&ty).copied().unwrap_or(ty),
+        _ => ty,
     }
 }
 
@@ -474,6 +523,15 @@ impl fmt::Display for DisplayType<'_> {
             ),
             Ty::Fn(ref params, ret) => {
                 write!(f, "fn(")?;
+                if let Some(type_params) = c.type_params.get(&ty) {
+                    write!(f, "<")?;
+                    let mut sep = "";
+                    for p in type_params {
+                        write!(f, "{sep}{}", p.display(c))?;
+                        sep = ", ";
+                    }
+                    write!(f, ">")?;
+                }
                 let mut sep = "";
                 for p in params {
                     write!(f, "{sep}{}", p.display(c))?;

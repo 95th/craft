@@ -55,14 +55,15 @@ pub enum Stmt {
     Let(String, Option<TypeId>, ExprId),
     Expr(ExprId, bool),
     Param(String, TypeId),
-    Fn(String, Vec<StmtId>, Option<TypeId>, ExprId),
+    Fn(String, Vec<StmtId>, Vec<StmtId>, Option<TypeId>, ExprId),
     Struct(String, FxIndexMap<String, TypeId>),
+    TypeParam(String),
 }
 
 #[derive(Debug)]
 pub enum Type {
     Named(String),
-    FnType(Vec<TypeId>, Option<TypeId>),
+    FnType(Vec<StmtId>, Vec<TypeId>, Option<TypeId>),
     Unit,
     Tuple(Vec<TypeId>),
 }
@@ -151,7 +152,7 @@ impl AstNodes {
                     self.visit_type(*ty, visitor);
                 }
             }
-            Stmt::Fn(_, ref params, ret, body) => {
+            Stmt::Fn(.., ref params, ret, body) => {
                 for p in params {
                     self.visit_stmt(*p, visitor);
                 }
@@ -168,6 +169,7 @@ impl AstNodes {
             }
             Stmt::Expr(expr, _) => self.visit_expr(expr, visitor),
             Stmt::Param(_, type_id) => self.visit_type(type_id, visitor),
+            Stmt::TypeParam(..) => {}
         }
     }
 
@@ -253,7 +255,7 @@ impl AstNodes {
         visitor.visit_type(type_id, self);
         match self.types[type_id] {
             Type::Named(_) => {}
-            Type::FnType(ref params, ret) => {
+            Type::FnType(.., ref params, ret) => {
                 for p in params {
                     self.visit_type(*p, visitor);
                 }
