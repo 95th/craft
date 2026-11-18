@@ -33,7 +33,7 @@ impl<'a> Codegen<'a> {
             Stmt::Let(_, _, init) => self.process_expr(init),
             Stmt::Expr(expr, _) => {
                 self.process_expr(expr);
-                self.code.write(Opcode::Pop);
+                self.code.pop();
             }
             _ => {}
         }
@@ -138,6 +138,15 @@ impl<'a> Codegen<'a> {
                 } else {
                     self.code.patch_jump(then_offset);
                 }
+            }
+            Expr::While(cond, body) => {
+                let start = self.code.len();
+                self.process_expr(cond);
+                let jump_offset = self.code.write_jump(Opcode::JumpIfFalse);
+                self.process_expr(body);
+                self.code.pop();
+                self.code.write_loop(start);
+                self.code.patch_jump(jump_offset);
             }
             _ => {}
         }

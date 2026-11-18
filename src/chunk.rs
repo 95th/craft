@@ -17,6 +17,7 @@ pub enum Opcode {
     Pop,
     JumpIfFalse,
     Jump,
+    Loop,
 
     Add,
     Sub,
@@ -46,6 +47,14 @@ impl Code {
         self.code.push(op as u8);
     }
 
+    pub fn pop(&mut self) {
+        if self.code.last().copied() == Some(Opcode::Unit as u8) {
+            self.code.pop();
+        } else {
+            self.code.push(Opcode::Pop as u8);
+        }
+    }
+
     pub fn write_u8(&mut self, n: u8) {
         self.code.push(n);
     }
@@ -60,6 +69,10 @@ impl Code {
 
     pub fn into_inner(self) -> Vec<u8> {
         self.code
+    }
+
+    pub fn len(&self) -> usize {
+        self.code.len()
     }
 
     pub fn write_u16_at(&mut self, i: usize, n: u16) {
@@ -77,5 +90,11 @@ impl Code {
     pub fn patch_jump(&mut self, start: usize) {
         let offset = self.code.len() - start - 2;
         self.write_u16_at(start, offset as u16);
+    }
+
+    pub fn write_loop(&mut self, start: usize) {
+        let offset = self.code.len() - start + 3;
+        self.write(Opcode::Loop);
+        self.write_u16(offset as u16);
     }
 }

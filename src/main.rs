@@ -47,12 +47,11 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
 fn main() {
     let source = r#"
         let a = 10;
-        if a > 10 {
+        while a > 0 {
             print_number(a);
-        } else {
-            print_number(5);
+            a = a - 1;
         }
-        print_number(4);
+        print_number(100);
     "#;
 
     let mut diagnostics = Diagnostics::new();
@@ -83,6 +82,15 @@ mod tests {
         let result = compile(source, &mut diagnostics);
         diagnostics.print(source);
         assert_eq!(result.unwrap_err(), error);
+    }
+
+    fn run_ok(source: &str) {
+        let mut diagnostics = Diagnostics::new();
+        let result = compile(source, &mut diagnostics);
+        diagnostics.print(source);
+        let code = result.expect("ok");
+        let mut vm = VM::new(code);
+        vm.run();
     }
 
     #[test]
@@ -348,7 +356,7 @@ mod tests {
             };
             print_number(a);
         "#;
-        check_ok(source);
+        run_ok(source);
     }
 
     #[test]
@@ -362,6 +370,6 @@ mod tests {
             }
             print_number(4);
         "#;
-        check_ok(source);
+        run_ok(source);
     }
 }
