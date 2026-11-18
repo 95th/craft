@@ -755,6 +755,14 @@ mod tests {
     }
 
     #[test]
+    fn test_assign_negative_integer_to_u64() {
+        let source = r#"
+            let a: u64 = -1;
+        "#;
+        check_err(source, Error::TypeCheck);
+    }
+
+    #[test]
     fn test_negative_u64_late_resolution() {
         let source = r#"
             let a = 10;

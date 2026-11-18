@@ -568,7 +568,19 @@ fn unary(p: &mut Parser) -> ExprId {
     let expr = parse_precedence(p, Precedence::Unary as u8);
     match op {
         Bang => p.ast.exprs.alloc(Expr::Not(expr), start.to(p.prev_span)),
-        Minus => p.ast.exprs.alloc(Expr::Negate(expr), start.to(p.prev_span)),
+        Minus => {
+            if expr != ExprId::MAX {
+                match p.ast.exprs[expr] {
+                    Expr::Int(n) => return p.ast.exprs.alloc(Expr::Int(-n), start.to(p.prev_span)),
+                    Expr::Number(n) => {
+                        return p.ast.exprs.alloc(Expr::Number(-n), start.to(p.prev_span));
+                    }
+                    _ => {}
+                }
+            }
+
+            p.ast.exprs.alloc(Expr::Negate(expr), start.to(p.prev_span))
+        }
         _ => unreachable!(),
     }
 }
