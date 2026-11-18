@@ -606,4 +606,20 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_recursive_types() {
+        let source = r#"
+            struct Foo {
+                a: Bar
+            }
+            struct Bar {
+                a: Foo
+            }
+            struct Baz {
+                a: Baz
+            }
+        "#;
+        run_ok(source);
+    }
 }

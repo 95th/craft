@@ -165,17 +165,10 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
                 c.type_params.insert(fn_ty, type_params);
             }
         }
-        Stmt::Struct(_, ref fields) => {
-            let mut properties = FxIndexMap::default();
-            for (name, ty) in fields.iter() {
-                let name = c.bind_ctx.interner.intern(name);
-                let ty = check_type(c, *ty);
-                properties.insert(name, ty);
-            }
+        Stmt::Struct(..) => {
             let struct_symbol = c.ast.stmts.binding(node);
             let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
             c.binding_types.insert(struct_symbol, struct_ty);
-            c.struct_properties.insert(struct_symbol, properties);
         }
         _ => {}
     }
@@ -216,7 +209,17 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             let ty = check_expr(c, expr);
             if semi { c.common_types.unit } else { ty }
         }
-        Stmt::Struct(..) => c.common_types.unit,
+        Stmt::Struct(.., ref fields) => {
+            let struct_symbol = c.ast.stmts.binding(node);
+            let mut properties = FxIndexMap::default();
+            for (name, ty) in fields.iter() {
+                let name = c.bind_ctx.interner.intern(name);
+                let ty = check_type(c, *ty);
+                properties.insert(name, ty);
+            }
+            c.struct_properties.insert(struct_symbol, properties);
+            c.common_types.unit
+        }
         Stmt::TypeParam(..) => {
             let symbol = c.ast.stmts.binding(node);
             let ty = c.types.alloc(Ty::Var);
