@@ -658,7 +658,7 @@ fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> T
 }
 
 impl TyId {
-    pub fn display<'a>(self, c: &'a mut TypeChecker) -> String {
+    pub fn display(self, c: &mut TypeChecker) -> String {
         let mut buf = String::new();
         print_type(self, c, &mut buf);
         buf
