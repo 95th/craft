@@ -136,30 +136,45 @@ impl<'a> Codegen<'a> {
                 }
                 self.code.write(Opcode::Unit);
             }
-            Expr::Binary(lhs, op, rhs) => match op {
-                BinaryOp::Or | BinaryOp::And => {
-                    // todo!()
+            Expr::Binary(lhs, BinaryOp::And, rhs) => {
+                self.process_expr(lhs);
+                let jump_false = self.code.write_jump(Opcode::JumpIfFalse);
+                self.process_expr(rhs);
+                let jump_end = self.code.write_jump(Opcode::Jump);
+                self.code.patch_jump(jump_false);
+                self.code.write(Opcode::False);
+                self.code.patch_jump(jump_end);
+            }
+            Expr::Binary(lhs, BinaryOp::Or, rhs) => {
+                self.process_expr(lhs);
+                let jump_rhs = self.code.write_jump(Opcode::JumpIfFalse);
+                let jump_true = self.code.write_jump(Opcode::Jump);
+                self.code.patch_jump(jump_rhs);
+                self.process_expr(rhs);
+                let jump_end = self.code.write_jump(Opcode::Jump);
+                self.code.patch_jump(jump_true);
+                self.code.write(Opcode::True);
+                self.code.patch_jump(jump_end);
+            }
+            Expr::Binary(lhs, op, rhs) => {
+                self.process_expr(lhs);
+                self.process_expr(rhs);
+                match op {
+                    BinaryOp::Add => self.code.write(Opcode::Add),
+                    BinaryOp::Sub => self.code.write(Opcode::Sub),
+                    BinaryOp::Mul => self.code.write(Opcode::Mul),
+                    BinaryOp::Div => self.code.write(Opcode::Div),
+                    BinaryOp::Greater => self.code.write(Opcode::Greater),
+                    BinaryOp::GreaterEqual => self.code.write(Opcode::GreaterEqual),
+                    BinaryOp::Less => self.code.write(Opcode::Less),
+                    BinaryOp::LessEqual => self.code.write(Opcode::LessEqual),
+                    BinaryOp::Equal => self.code.write(Opcode::Equal),
+                    BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                    BinaryOp::BitOr => self.code.write(Opcode::BitOr),
+                    BinaryOp::BitAnd => self.code.write(Opcode::BitAnd),
+                    _ => {}
                 }
-                _ => {
-                    self.process_expr(lhs);
-                    self.process_expr(rhs);
-                    match op {
-                        BinaryOp::Add => self.code.write(Opcode::Add),
-                        BinaryOp::Sub => self.code.write(Opcode::Sub),
-                        BinaryOp::Mul => self.code.write(Opcode::Mul),
-                        BinaryOp::Div => self.code.write(Opcode::Div),
-                        BinaryOp::Greater => self.code.write(Opcode::Greater),
-                        BinaryOp::GreaterEqual => self.code.write(Opcode::GreaterEqual),
-                        BinaryOp::Less => self.code.write(Opcode::Less),
-                        BinaryOp::LessEqual => self.code.write(Opcode::LessEqual),
-                        BinaryOp::Equal => self.code.write(Opcode::Equal),
-                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
-                        BinaryOp::BitOr => self.code.write(Opcode::BitOr),
-                        BinaryOp::BitAnd => self.code.write(Opcode::BitAnd),
-                        _ => {}
-                    }
-                }
-            },
+            }
             Expr::Call(callee, ref args) => {
                 for &arg in args {
                     self.process_expr(arg);

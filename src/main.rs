@@ -78,22 +78,6 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn check_ok(source: &str) {
-        let mut heap = Heap::new();
-        let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut heap, &mut diagnostics);
-        diagnostics.print(source);
-        result.expect("ok");
-    }
-
-    fn check_err(source: &str, error: Error) {
-        let mut heap = Heap::new();
-        let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut heap, &mut diagnostics);
-        diagnostics.print(source);
-        assert_eq!(result.unwrap_err(), error);
-    }
-
     fn run_ok(source: &str) {
         let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
@@ -102,6 +86,14 @@ mod tests {
         let code = result.expect("ok");
         let mut vm = VM::new(code, heap);
         vm.run();
+    }
+
+    fn check_err(source: &str, error: Error) {
+        let mut heap = Heap::new();
+        let mut diagnostics = Diagnostics::new();
+        let result = compile(source, &mut heap, &mut diagnostics);
+        diagnostics.print(source);
+        assert_eq!(result.unwrap_err(), error);
     }
 
     #[test]
@@ -118,7 +110,19 @@ mod tests {
             }
             foo(foo(1, 2), x);
         "#;
-        check_ok(source)
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_and_or() {
+        let source = r#"
+            let x = 1;
+            if x == 12 && x > 1 { print_number(x + 1); }
+            if x == 1 || x > 1 {  print_number(x + 2); }
+            if x == 1 && x > 1 {  print_number(x + 3); }
+            if x == 12 || x > 1 { print_number(x + 4); }
+        "#;
+        run_ok(source)
     }
 
     #[test]
@@ -128,18 +132,35 @@ mod tests {
             let x = 1;
             1 + foo(x);
         "#;
-        check_ok(source)
+        run_ok(source)
     }
 
     #[test]
-    fn test_tuples() {
+    fn test_fn_duplicate_param() {
+        let source = r#"
+            fn foo(n: number, n: number) -> number { n + 1 }
+        "#;
+        check_err(source, Error::Bind);
+    }
+
+    #[test]
+    fn test_tuple() {
+        let source = r#"
+            let s = (1, 2, ("hello world", 20));
+            print_string(s.2.0);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_tuple_2() {
         let source = r#"
             fn foo(a: number, b: number) -> number { 1 }
             let f: fn(number, number) -> number = foo;
             let a: (number, (number, number)) = (1, (2, 3));
             foo(a.0, a.1.0);
         "#;
-        check_ok(source)
+        run_ok(source)
     }
 
     #[test]
@@ -167,7 +188,28 @@ mod tests {
             };
             bar(foo);
         "#;
-        check_ok(source)
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_struct_multiple_fields() {
+        let source = r#"
+            struct Foo {
+                a: number,
+                b: string,
+                c: bool
+            }
+
+            let foo = Foo {
+                a: 10,
+                b: "hello world",
+                c: true
+            };
+
+            print_string(foo.b);
+            print_number(foo.a);
+        "#;
+        run_ok(source);
     }
 
     #[test]
@@ -251,7 +293,7 @@ mod tests {
         let source = r#"
             let x: () = ();
         "#;
-        check_ok(source);
+        run_ok(source);
     }
 
     #[test]
@@ -264,11 +306,59 @@ mod tests {
         for _ in 0..1_000_000 {
             s.push('}');
         }
-        check_ok(&s);
+        run_ok(&s);
     }
 
     #[test]
     fn test_for() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                print_number(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_for_without_init() {
+        let source = r#"
+            let i = 0;
+            for (; i < 10; i = i + 1) {
+                print_number(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_for_without_init_and_incr() {
+        let source = r#"
+            let i = 0;
+            for (; i < 10;) {
+                print_number(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_for_no_clauses() {
+        let source = r#"
+            let i = 0;
+            for (;;) {
+                print_number(i);
+                i = i + 1;
+                if i >= 10 {
+                    break;
+                }
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_for_break_and_continue() {
         let source = r#"
             for (let i = 0; i < 10; i = i + 1) {
                 if i == 1 {
@@ -277,10 +367,10 @@ mod tests {
                 if i == 2 {
                     continue;
                 }
-                i;
+                print_number(i);
             }
         "#;
-        check_ok(source);
+        run_ok(source);
     }
 
     #[test]
@@ -312,15 +402,7 @@ mod tests {
             let f = Foo { f: foo };
             f.f(10);
         "#;
-        check_ok(source);
-    }
-
-    #[test]
-    fn test_fn_duplicate_param() {
-        let source = r#"
-            fn foo(n: number, n: number) -> number { n + 1 }
-        "#;
-        check_err(source, Error::Bind);
+        run_ok(source);
     }
 
     #[test]
@@ -332,7 +414,7 @@ mod tests {
             while i {
             }
         "#;
-        check_ok(source);
+        run_ok(source);
     }
 
     #[test]
@@ -398,55 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_for() {
-        let source = r#"
-            for (let i = 0; i < 10; i = i + 1) {
-                print_number(i);
-            }
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_for_without_init() {
-        let source = r#"
-            let i = 0;
-            for (; i < 10; i = i + 1) {
-                print_number(i);
-            }
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_for_without_init_and_incr() {
-        let source = r#"
-            let i = 0;
-            for (; i < 10;) {
-                print_number(i);
-                i = i + 1;
-            }
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_for_no_clauses() {
-        let source = r#"
-            let i = 0;
-            for (;;) {
-                print_number(i);
-                i = i + 1;
-                if i >= 10 {
-                    break;
-                }
-            }
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_while_break() {
+    fn test_while_break() {
         let source = r#"
             let i = 0;
             while true {
@@ -461,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_while_continue() {
+    fn test_while_continue() {
         let source = r#"
             let i = 0;
             while true {
@@ -477,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_functions() {
+    fn test_functions() {
         let source = r#"
             fn foo(n: number) {
                 print_number(n);
@@ -491,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_recursion() {
+    fn test_recursion() {
         let source = r#"
             fn fib(n: number) -> number {
                 if n < 2 {
@@ -506,40 +540,10 @@ mod tests {
     }
 
     #[test]
-    fn test_run_string() {
+    fn test_string() {
         let source = r#"
             let s = "hello world";
             print_string(s);
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_tuple() {
-        let source = r#"
-            let s = (1, 2, ("hello world", 20));
-            print_string(s.2.0);
-        "#;
-        run_ok(source);
-    }
-
-    #[test]
-    fn test_run_struct() {
-        let source = r#"
-            struct Foo {
-                a: number,
-                b: string,
-                c: bool
-            }
-
-            let foo = Foo {
-                a: 10,
-                b: "hello world",
-                c: true
-            };
-
-            print_string(foo.b);
-            print_number(foo.a);
         "#;
         run_ok(source);
     }
