@@ -268,4 +268,17 @@ mod tests {
         "#;
         check_err(source, Error::Parse);
     }
+
+    #[test]
+    fn test_struct_field_function() {
+        let source = r#"
+            struct Foo {
+                f: fn(number) -> number
+            }
+            fn foo(n: number) -> number { n + 1 }
+            let f = Foo { f: foo };
+            f.f(10);
+        "#;
+        check_ok(source);
+    }
 }

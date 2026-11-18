@@ -360,7 +360,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::TupleField(target, _) => {
             bind_expr(b, target);
         }
-        Expr::Struct(ref name, ..) => {
+        Expr::Struct(ref name, ref fields) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_type(name_id) {
                 b.expr_bindings.bind(node, symbol);
@@ -370,6 +370,10 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
                     message: format!("Cannot find value '{name}' in this scope."),
                 });
                 b.has_error = true;
+            }
+
+            for expr in fields.values() {
+                bind_expr(b, *expr);
             }
         }
         Expr::StructField(target, _) => {
