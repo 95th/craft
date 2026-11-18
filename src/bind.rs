@@ -22,6 +22,7 @@ pub enum SymbolKind {
     Fn,
     Var,
     Param,
+    Type,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,11 +69,32 @@ impl<'a> Binder<'a> {
     pub fn bind(&mut self, nodes: &[NodeId]) {
         self.value_scope = self.create_scope(ScopeKind::Block, None);
         self.type_scope = self.create_scope(ScopeKind::Block, None);
+        self.declare_default_types();
         bind_scope(self, nodes);
     }
 
+    fn declare_default_types(&mut self) {
+        self.declare_default_type("number");
+        self.declare_default_type("str");
+    }
+
+    fn declare_default_type(&mut self, name: &str) {
+        let name = self.interner.intern(name);
+        self.declare_type(
+            name,
+            Symbol {
+                kind: SymbolKind::Type,
+                name,
+                declaration: NodeId::ERROR,
+            },
+        );
+    }
+
     fn declare_type(&mut self, name: StrId, symbol: Symbol) {
-        if self.lookup(self.type_scope, name).is_some() {
+        if self.scopes[self.type_scope.0 as usize]
+            .symbols
+            .contains_key(&name)
+        {
             println!(
                 "Another type with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -84,7 +106,10 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_value(&mut self, name: StrId, symbol: Symbol) {
-        if self.lookup(self.value_scope, name).is_some() {
+        if self.scopes[self.value_scope.0 as usize]
+            .symbols
+            .contains_key(&name)
+        {
             println!(
                 "Another variable with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -103,15 +128,19 @@ impl<'a> Binder<'a> {
     }
 
     fn lookup_type(&self, name: StrId) -> Option<SymbolId> {
-        self.lookup(self.type_scope, name)
+        let mut curr = Some(self.type_scope);
+        while let Some(scope) = curr {
+            let scope = &self.scopes[scope.0 as usize];
+            if let Some(symbol) = scope.symbols.get(&name) {
+                return Some(*symbol);
+            }
+            curr = scope.parent;
+        }
+        None
     }
 
     fn lookup_value(&self, name: StrId) -> Option<SymbolId> {
-        self.lookup(self.value_scope, name)
-    }
-
-    fn lookup(&self, scope: ScopeId, name: StrId) -> Option<SymbolId> {
-        let mut curr = Some(scope);
+        let mut curr = Some(self.value_scope);
         while let Some(scope) = curr {
             let scope = &self.scopes[scope.0 as usize];
             if let Some(symbol) = scope.symbols.get(&name) {
