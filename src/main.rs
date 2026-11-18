@@ -869,4 +869,19 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_duplicate_string_string_table() {
+        let source = r#"
+            let a = "hello world";
+            let b = "hello world";
+            let c = "hello world";
+            let d = "hello world";
+            print(a);
+            print(b);
+            print(c);
+            print(d);
+        "#;
+        run_ok(source);
+    }
 }

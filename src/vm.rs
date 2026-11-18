@@ -1,3 +1,5 @@
+use rustc_hash::FxHashMap;
+
 use crate::{
     chunk::{Code, Opcode},
     heap::Heap,
@@ -74,6 +76,7 @@ pub struct VM {
     heap: Heap,
     frame: CallFrame,
     frames: Vec<CallFrame>,
+    string_pool: FxHashMap<usize, u64>,
 }
 
 impl VM {
@@ -85,6 +88,7 @@ impl VM {
             frames: Vec::new(),
             code,
             heap: Heap::new(),
+            string_pool: FxHashMap::default(),
         }
     }
 
@@ -96,11 +100,14 @@ impl VM {
                 Opcode::False => self.stack.push(FALSE),
                 Opcode::String => {
                     let index = self.stack.pop().unwrap() as usize;
-                    let len = unsafe { *(self.code.as_ptr().add(index) as *const [u8; 4]) };
-                    let len = u32::from_ne_bytes(len) as usize;
-                    let index = index + 4;
-                    let data = &self.code[index..index + len];
-                    let obj = self.heap.alloc_string(data);
+                    let obj = *self.string_pool.entry(index).or_insert_with(|| {
+                        let len = unsafe { *(self.code.as_ptr().add(index) as *const [u8; 4]) };
+                        let len = u32::from_ne_bytes(len) as usize;
+                        let index = index + 4;
+                        let data = &self.code[index..index + len];
+                        let obj = self.heap.alloc_string(data);
+                        obj as u64
+                    });
                     self.stack.push(obj as u64);
                 }
                 Opcode::Not => {

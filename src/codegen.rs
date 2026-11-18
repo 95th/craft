@@ -33,7 +33,6 @@ pub struct Codegen<'a> {
     loop_ctxts: Vec<LoopCtx>,
     function_table: FxHashMap<SymbolId, usize>,
     function_worklist: VecDeque<(SymbolId, usize)>,
-    string_table: FxHashMap<StrId, usize>,
     string_worklist: Vec<(usize, StrId)>,
 }
 
@@ -47,7 +46,6 @@ impl<'a> Codegen<'a> {
             loop_ctxts: Vec::new(),
             function_table: FxHashMap::default(),
             function_worklist: VecDeque::new(),
-            string_table: FxHashMap::default(),
             string_worklist: Vec::new(),
         }
     }
@@ -70,16 +68,16 @@ impl<'a> Codegen<'a> {
             }
         }
 
+        let mut string_table = FxHashMap::default();
         for (patch_offset, string) in self.string_worklist {
-            if let Some(&string_offset) = self.string_table.get(&string) {
-                self.code.write_u64_at(patch_offset, string_offset as u64);
-            } else {
+            let string_offset = *string_table.entry(string).or_insert_with(|| {
                 let string_offset = self.code.len();
                 self.code.write_string(self.interner.lookup(string));
                 self.code.write_u64_at(patch_offset, string_offset as u64);
-            }
+                string_offset
+            });
+            self.code.write_u64_at(patch_offset, string_offset as u64);
         }
-
         self.code
     }
 
