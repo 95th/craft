@@ -1020,9 +1020,16 @@ mod tests {
     fn test_lower_basic_2() {
         let source = r#"
             // let a = { 10 };
-            let a = {
-                10 + 12
-            };
+            // let a = {
+            //     { 10 } + 12
+            // };
+
+            // let a = 10;
+            // {
+            //     a = 20;
+            // }
+            // print(a);
+            let a = 1 + 2 + 3;
         "#;
         run_ok(source);
     }

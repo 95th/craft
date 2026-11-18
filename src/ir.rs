@@ -83,11 +83,7 @@ impl<'a> Lowering<'a> {
                 for &p in f.params.iter() {
                     self.lower_stmt(p);
                 }
-                let value = self.lower_expr(f.body);
-                self.push_stmt(Statement::Assign {
-                    place: Place::local(result_local),
-                    value: RValue::Use(value),
-                });
+                self.lower_expr(f.body, Some(Place::local(result_local)));
             }
             ast::Stmt::TupleStruct(_) => {
                 let fields = params
@@ -115,7 +111,7 @@ impl<'a> Lowering<'a> {
                 self.local_symbols.insert(symbol, local);
             }
             ast::Stmt::Expr { expr, .. } => {
-                self.lower_expr(expr);
+                self.lower_expr(expr, None);
             }
             ast::Stmt::Param { .. } => {
                 let symbol = self.ast.stmts.value_binding(stmt);
@@ -127,63 +123,74 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn lower_expr(&mut self, expr: ast::ExprId) -> Operand {
-        crate::stack_safe(|| self.lower_expr_unsafe(expr))
+    fn lower_expr(&mut self, expr: ast::ExprId, place: Option<Place>) -> Operand {
+        crate::stack_safe(|| self.lower_expr_unsafe(expr, place))
     }
 
-    fn lower_expr_unsafe(&mut self, expr: ast::ExprId) -> Operand {
+    fn lower_expr_unsafe(&mut self, expr: ast::ExprId, place: Option<Place>) -> Operand {
         let ty = self.tcx.expr_types[&expr];
         let value = match self.ast.exprs[expr] {
-            ast::Expr::Bool(x) => return Operand::Constant(Constant::Bool(x)),
-            ast::Expr::Number(x) => return Operand::Constant(Constant::F64(x)),
-            ast::Expr::Int(x) => {
-                return if self.tcx.types.probe_value(ty) == Ty::U64 {
-                    Operand::Constant(Constant::U64(x as u64))
-                } else {
-                    Operand::Constant(Constant::I64(x as i64))
-                };
+            ast::Expr::Bool(x) => {
+                return self.constant_operand(place, Constant::Bool(x));
             }
-            ast::Expr::String(s) => return Operand::Constant(Constant::String(s)),
+            ast::Expr::Number(x) => {
+                return self.constant_operand(place, Constant::F64(x));
+            }
+            ast::Expr::Int(x) => {
+                let constant = if self.tcx.types.probe_value(ty) == Ty::U64 {
+                    Constant::U64(x as u64)
+                } else {
+                    Constant::I64(x as i64)
+                };
+                return self.constant_operand(place, constant);
+            }
+            ast::Expr::String(s) => {
+                return self.constant_operand(place, Constant::String(s));
+            }
             ast::Expr::Binary { lhs, op, rhs } => {
-                let lhs = self.lower_expr(lhs);
-                let rhs = self.lower_expr(rhs);
+                let lhs = self.lower_expr(lhs, None);
+                let rhs = self.lower_expr(rhs, None);
                 RValue::Binary { op, lhs, rhs }
             }
             ast::Expr::Not(e) => {
-                let operand = self.lower_expr(e);
+                let operand = self.lower_expr(e, None);
                 RValue::Not(operand)
             }
             ast::Expr::Negate(e) => {
-                let operand = self.lower_expr(e);
+                let operand = self.lower_expr(e, None);
                 RValue::Neg(operand)
             }
             ast::Expr::Call { callee, ref args } => {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.tcx.bcx.std.print {
-                    let arg = self.lower_expr(args[0]);
+                    let arg = self.lower_expr(args[0], None);
                     self.push_stmt(Statement::Print(arg));
                     return Operand::Constant(Constant::Unit);
                 }
 
-                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
-                let callee = self.lower_expr(callee);
+                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
+                let callee = self.lower_expr(callee, None);
                 RValue::Call { callee, args }
             }
             ast::Expr::Array(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
                 RValue::Struct { fields: args }
             }
             ast::Expr::ArrayRepeat { expr, count } => {
-                let value = self.lower_expr(expr);
-                let count = self.lower_expr(count);
+                let value = self.lower_expr(expr, None);
+                let count = self.lower_expr(count, None);
                 RValue::StructRepeat { value, count }
             }
             ast::Expr::Struct(ref s) => {
-                let args = s.fields.values().map(|x| self.lower_expr(*x)).collect();
+                let args = s
+                    .fields
+                    .values()
+                    .map(|x| self.lower_expr(*x, None))
+                    .collect();
                 RValue::Struct { fields: args }
             }
             ast::Expr::Tuple(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
                 RValue::Struct { fields: args }
             }
             ast::Expr::StructField { obj, name } => {
@@ -216,27 +223,20 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Block { ref stmts, expr } => {
                 if stmts.is_empty() {
-                    return expr.map_or(Operand::Constant(Constant::Unit), |expr| {
-                        self.lower_expr(expr)
-                    });
+                    return match expr {
+                        Some(expr) => self.lower_expr(expr, place),
+                        None => self.constant_operand(place, Constant::Unit),
+                    };
                 }
 
-                let result_local = expr.map(|_| self.create_local(ty));
                 let prev_locals = self.local_stack.len();
                 for &stmt in stmts {
                     self.lower_stmt(stmt);
                 }
-                let value = if let Some(expr) = expr
-                    && let Some(result_local) = result_local
-                {
-                    let value = self.lower_expr(expr);
-                    self.push_stmt(Statement::Assign {
-                        place: Place::local(result_local),
-                        value: RValue::Use(value),
-                    });
-                    Operand::Place(Place::local(result_local))
+                let value = if let Some(expr) = expr {
+                    return self.lower_expr(expr, place);
                 } else {
-                    Operand::Constant(Constant::Unit)
+                    self.constant_operand(place, Constant::Unit)
                 };
                 self.drop_locals(prev_locals);
                 return value;
@@ -246,11 +246,12 @@ impl<'a> Lowering<'a> {
                 let symbol = &self.tcx.bcx.symbols[symbol_id];
                 return match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
-                        Operand::Place(Place::local(self.local_symbols[&symbol_id]))
+                        let local = self.local_symbols[&symbol_id];
+                        self.store_in_place(place, Operand::Place(Place::local(local)))
                     }
                     SymbolKind::Fn => {
                         self.function_worklist.push_back(symbol_id);
-                        Operand::Constant(Constant::Function(symbol_id))
+                        self.constant_operand(place, Constant::Function(symbol_id))
                     }
                     _ => unreachable!(),
                 };
@@ -260,8 +261,7 @@ impl<'a> Lowering<'a> {
                 then_clause,
                 else_clause,
             } => {
-                let cond = self.lower_expr(cond);
-                let result_local = self.create_local(ty);
+                let cond = self.lower_expr(cond, None);
 
                 let then_block = self.create_block();
                 let else_block = else_clause.map(|_| self.create_block());
@@ -276,30 +276,24 @@ impl<'a> Lowering<'a> {
                 self.add_edge(self.current_block, else_block.unwrap_or(merge_block));
 
                 self.current_block = then_block;
-                let then_value = self.lower_expr(then_clause);
-                self.push_stmt(Statement::Assign {
-                    place: Place::local(result_local),
-                    value: RValue::Use(then_value),
-                });
+                self.lower_expr(then_clause, place);
                 self.add_edge(self.current_block, merge_block);
 
                 if let Some(else_clause) = else_clause
                     && let Some(else_block) = else_block
                 {
                     self.current_block = else_block;
-                    let else_value = self.lower_expr(else_clause);
-                    self.push_stmt(Statement::Assign {
-                        place: Place::local(result_local),
-                        value: RValue::Use(else_value),
-                    });
+                    self.lower_expr(else_clause, place);
                     self.add_edge(self.current_block, merge_block);
                 }
 
                 self.current_block = merge_block;
-                return Operand::Place(Place::local(result_local));
+                return place.map_or(Operand::Constant(Constant::Unit), |place| {
+                    Operand::Place(place)
+                });
             }
             ast::Expr::Assign { lhs, rhs } => {
-                let place = match self.ast.exprs[lhs] {
+                let lhs_place = match self.ast.exprs[lhs] {
                     ast::Expr::Variable(_) => {
                         let symbol = self.ast.exprs.value_binding(lhs);
                         let local = self.local_symbols[&symbol];
@@ -336,12 +330,8 @@ impl<'a> Lowering<'a> {
                     }
                     _ => unreachable!(),
                 };
-                let value = self.lower_expr(rhs);
-                self.push_stmt(Statement::Assign {
-                    place,
-                    value: RValue::Use(value),
-                });
-                return Operand::Constant(Constant::Unit);
+                self.lower_expr(rhs, Some(lhs_place));
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::While { cond, body } => {
                 let locals = self.local_stack.len();
@@ -358,7 +348,7 @@ impl<'a> Lowering<'a> {
 
                 self.add_edge(self.current_block, cond_block);
                 self.current_block = cond_block;
-                let cond = self.lower_expr(cond);
+                let cond = self.lower_expr(cond, None);
 
                 self.set_terminator(Terminator::Branch {
                     cond,
@@ -369,13 +359,13 @@ impl<'a> Lowering<'a> {
                 self.add_edge(self.current_block, merge_block);
 
                 self.current_block = body_block;
-                self.lower_expr(body);
+                self.lower_expr(body, None);
                 self.set_terminator(Terminator::Jump { target: cond_block });
                 self.add_edge(self.current_block, cond_block);
 
                 self.current_block = merge_block;
                 self.loop_contexts.pop();
-                return Operand::Constant(Constant::Unit);
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::For {
                 init,
@@ -398,7 +388,7 @@ impl<'a> Lowering<'a> {
                 {
                     self.add_edge(self.current_block, cond_block);
                     self.current_block = cond_block;
-                    let cond = self.lower_expr(cond);
+                    let cond = self.lower_expr(cond, None);
                     self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
@@ -420,7 +410,7 @@ impl<'a> Lowering<'a> {
                     break_locals: prev_locals,
                 });
 
-                self.lower_expr(body);
+                self.lower_expr(body, None);
                 self.set_terminator(Terminator::Jump {
                     target: continue_target,
                 });
@@ -430,7 +420,7 @@ impl<'a> Lowering<'a> {
                     && let Some(incr_block) = incr_block
                 {
                     self.current_block = incr_block;
-                    self.lower_expr(incr);
+                    self.lower_expr(incr, None);
                     let incr_target = cond_block.unwrap_or(body_block);
                     self.set_terminator(Terminator::Jump {
                         target: incr_target,
@@ -441,7 +431,7 @@ impl<'a> Lowering<'a> {
                 self.current_block = merge_block;
                 self.loop_contexts.pop();
                 self.drop_locals(prev_locals);
-                return Operand::Constant(Constant::Unit);
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
@@ -471,7 +461,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Return(expr) => {
                 let value = if let Some(expr) = expr {
-                    self.lower_expr(expr)
+                    self.lower_expr(expr, None)
                 } else {
                     Operand::Constant(Constant::Unit)
                 };
@@ -485,33 +475,32 @@ impl<'a> Lowering<'a> {
                 }
                 return Operand::Constant(Constant::Unit);
             }
-            ast::Expr::Unit => return Operand::Constant(Constant::Unit),
+            ast::Expr::Unit => return self.constant_operand(place, Constant::Unit),
         };
-        let local = self.create_local(ty);
-        self.push_stmt(Statement::Assign {
-            place: Place::local(local),
-            value,
-        });
-        Operand::Place(Place::local(local))
+        let place = place.unwrap_or_else(|| Place::local(self.create_local(ty)));
+        self.push_stmt(Statement::Assign { place, value });
+        Operand::Place(place)
     }
 
     fn lower_expr_to_local(&mut self, expr: ast::ExprId) -> LocalId {
-        let value = self.lower_expr(expr);
-        match value {
-            Operand::Place(Place {
-                local,
-                projection: None,
-            }) => local,
-            _ => {
-                let ty = self.tcx.expr_types[&expr];
-                let local = self.create_local(ty);
-                self.push_stmt(Statement::Assign {
-                    place: Place::local(local),
-                    value: RValue::Use(value),
-                });
-                local
-            }
+        let ty = self.tcx.expr_types[&expr];
+        let local = self.create_local(ty);
+        self.lower_expr(expr, Some(Place::local(local)));
+        local
+    }
+
+    fn constant_operand(&mut self, place: Option<Place>, value: Constant) -> Operand {
+        self.store_in_place(place, Operand::Constant(value))
+    }
+
+    fn store_in_place(&mut self, place: Option<Place>, operand: Operand) -> Operand {
+        if let Some(place) = place {
+            self.push_stmt(Statement::Assign {
+                place,
+                value: RValue::Use(operand),
+            });
         }
+        operand
     }
 
     fn set_terminator(&mut self, terminator: Terminator) {
