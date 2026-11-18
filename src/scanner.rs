@@ -116,7 +116,7 @@ impl<'a> Scanner<'a> {
         self.line
     }
 
-    pub fn error_message(&self) -> &str {
+    pub fn error_message(&self) -> &'a str {
         self.error_message
     }
 
