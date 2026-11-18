@@ -281,4 +281,12 @@ mod tests {
         "#;
         check_ok(source);
     }
+
+    #[test]
+    fn test_fn_duplicate_param() {
+        let source = r#"
+            fn foo(n: number, n: number) -> number { n + 1 }
+        "#;
+        check_err(source, Error::Bind);
+    }
 }
