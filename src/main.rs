@@ -54,7 +54,7 @@ fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Resu
 
 fn main() {
     let source = r#"
-        fn fib(n: f64) -> f64 {
+        fn fib(n: u64) -> u64 {
             if n < 2 {
                 return n;
             }
