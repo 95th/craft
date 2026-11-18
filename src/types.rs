@@ -1,9 +1,9 @@
 use crate::{
-    arena::{Arena, Idx},
+    arena::{Arena, Id},
     bind::SymbolId,
 };
 
-pub type TyId = Idx<Ty>;
+pub type TyId = Id<Ty>;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Ty {

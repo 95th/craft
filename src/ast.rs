@@ -1,11 +1,11 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use crate::arena::{AstArena, AstIdx};
+use crate::arena::{AstArena, AstId};
 
-pub type ExprId = AstIdx<Expr>;
-pub type StmtId = AstIdx<Stmt>;
-pub type TypeId = AstIdx<Type>;
+pub type ExprId = AstId<Expr>;
+pub type StmtId = AstId<Stmt>;
+pub type TypeId = AstId<Type>;
 
 pub struct AstNodes {
     pub exprs: AstArena<Expr>,

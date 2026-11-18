@@ -2,19 +2,19 @@ use std::collections::HashMap;
 
 use crate::{
     Error,
-    arena::{Arena, Bindings, Idx},
+    arena::{Arena, Bindings, Id},
     ast::{AstNodes, Expr, ExprId, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostic,
     interner::{StrId, StrInterner},
 };
 
-type ScopeId = Idx<Scope>;
+type ScopeId = Id<Scope>;
 
 pub struct Symbol {
     pub name: StrId,
 }
 
-pub type SymbolId = Idx<Symbol>;
+pub type SymbolId = Id<Symbol>;
 
 pub struct Scope {
     symbols: HashMap<StrId, SymbolId>,
