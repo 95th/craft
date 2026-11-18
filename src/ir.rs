@@ -215,6 +215,12 @@ impl<'a> Lowering<'a> {
                 });
             }
             ast::Expr::Block { ref stmts, expr } => {
+                if stmts.is_empty() {
+                    return expr.map_or(Operand::Constant(Constant::Unit), |expr| {
+                        self.lower_expr(expr)
+                    });
+                }
+
                 let result_local = expr.map(|_| self.create_local(ty));
                 let prev_locals = self.local_stack.len();
                 for &stmt in stmts {
