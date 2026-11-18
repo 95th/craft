@@ -8,7 +8,6 @@ fn main() {
     let source = r#"
         let x = 1 + 2 / 3 - 4 * 5 * (1 - 2);
         x = 12;
-        x + 1 = 13;
     "#;
 
     let mut arena = NodeArena::new();
