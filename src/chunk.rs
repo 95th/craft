@@ -5,6 +5,7 @@ pub enum Opcode {
     Const,
     True,
     False,
+    Unit,
     Not,
     Negate,
     GetLocal,
@@ -13,6 +14,7 @@ pub enum Opcode {
     SetLocalLong,
     PrintNumber,
     Call,
+    Pop,
 
     Add,
     Sub,

@@ -31,7 +31,10 @@ impl<'a> Codegen<'a> {
     fn process_stmt(&mut self, stmt: StmtId) {
         match self.ast.stmts[stmt] {
             Stmt::Let(_, _, init) => self.process_expr(init),
-            Stmt::Expr(expr, _) => self.process_expr(expr),
+            Stmt::Expr(expr, _) => {
+                self.process_expr(expr);
+                self.code.write(Opcode::Pop);
+            }
             _ => {}
         }
     }
@@ -75,6 +78,7 @@ impl<'a> Codegen<'a> {
                     self.code.write(Opcode::SetLocalLong);
                     self.code.write_u16(index as u16);
                 }
+                self.code.write(Opcode::Unit);
             }
             Expr::Binary(lhs, op, rhs) => match op {
                 BinaryOp::Or | BinaryOp::And => todo!(),
@@ -105,10 +109,21 @@ impl<'a> Codegen<'a> {
                 let symbol = self.ast.exprs.binding(callee);
                 if symbol == self.ty_ctx.bind_ctx.print_number_function {
                     self.code.write(Opcode::PrintNumber);
+                    self.code.write(Opcode::Unit);
                 } else {
                     self.process_expr(callee);
                     self.code.write(Opcode::Call);
                     self.code.write_u8(args.len() as u8);
+                }
+            }
+            Expr::Block(ref stmts, expr) => {
+                for &stmt in stmts {
+                    self.process_stmt(stmt);
+                }
+                if let Some(expr) = expr {
+                    self.process_expr(expr);
+                } else {
+                    self.code.write(Opcode::Unit);
                 }
             }
             _ => {}

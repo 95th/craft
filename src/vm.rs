@@ -145,6 +145,10 @@ impl VM {
                     let value = f64::from_bits(value);
                     println!("{value}");
                 }
+                Opcode::Unit => self.stack.push(0),
+                Opcode::Pop => {
+                    self.stack.pop().unwrap();
+                }
                 Opcode::Return => return,
             }
         }
