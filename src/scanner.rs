@@ -107,7 +107,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn token_text(&self) -> &str {
+    pub fn token_text(&self) -> &'a str {
         let len = self.start.len() - self.current.as_str().len();
         &self.start[..len]
     }

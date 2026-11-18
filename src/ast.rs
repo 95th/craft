@@ -9,6 +9,9 @@ pub enum Node {
     Not(NodeId),
     Negate(NodeId),
     Binary(NodeId, BinaryOp, NodeId),
+    Let(String, Option<NodeId>, NodeId),
+    Variable(String),
+    Assign(NodeId, NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,14 +67,23 @@ impl fmt::Display for NodeDisplay<'_> {
         let Self(node, arena) = *self;
         match node.get(arena) {
             Node::Error => unreachable!(),
-            Node::Bool(x) => x.fmt(f),
-            Node::Number(x) => x.fmt(f),
-            Node::String(x) => x.fmt(f),
+            Node::Bool(x) => write!(f, "{x}"),
+            Node::Number(x) => write!(f, "{x:?}"),
+            Node::String(x) => write!(f, "{x:?}"),
             Node::Not(x) => write!(f, "!{}", x.display(arena)),
             Node::Negate(x) => write!(f, "-{}", x.display(arena)),
             Node::Binary(lhs, op, rhs) => {
                 write!(f, "({} {} {})", lhs.display(arena), op, rhs.display(arena))
             }
+            Node::Let(name, ty, init) => {
+                write!(f, "let {name}")?;
+                if let Some(ty) = ty {
+                    write!(f, ": {}", ty.display(arena))?;
+                }
+                write!(f, " = {};", init.display(arena))
+            }
+            Node::Variable(x) => write!(f, "{x}"),
+            Node::Assign(lhs, rhs) => write!(f, "{} = {}", lhs.display(arena), rhs.display(arena)),
         }
     }
 }

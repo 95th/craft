@@ -27,9 +27,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> NodeId {
+    pub fn parse(&mut self) -> Option<Vec<NodeId>> {
         self.advance();
-        expression(self)
+        let mut nodes = Vec::new();
+        while self.token != Token::Eof {
+            nodes.push(declaration(self));
+        }
+        if self.had_error { None } else { Some(nodes) }
     }
 
     fn advance(&mut self) {
@@ -53,21 +57,68 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&mut self, message: &str) {
+        self.error_at(
+            message,
+            self.token,
+            self.scanner.line(),
+            self.scanner.token_text(),
+        );
+    }
+
+    fn error_at(&mut self, message: &str, token: Token, line: u32, token_text: &str) {
         if self.panic_mode {
             return;
         }
         self.panic_mode = true;
         self.had_error = true;
-        match self.token {
+        match token {
             Eof => print!("Error at end of file: {message}"),
-            Error => print!("[Line: {}] Error: {message}", self.scanner.line()),
-            _ => print!(
-                "[Line: {}] Error at '{}': {message}",
-                self.scanner.line(),
-                self.scanner.token_text()
-            ),
+            Error => print!("[Line: {line}] Error: {message}"),
+            _ => print!("[Line: {line}] Error at '{token_text}': {message}"),
         }
     }
+}
+
+fn declaration(p: &mut Parser) -> NodeId {
+    match p.token {
+        Let => let_declaration(p),
+        Fn => fn_declaration(p),
+        _ => statement(p),
+    }
+}
+
+fn let_declaration(p: &mut Parser) -> NodeId {
+    p.advance();
+    let name = p.scanner.token_text().to_string();
+    p.consume(Identifier, "Expect variable name.");
+    let type_annotation = if p.token == Colon {
+        p.advance();
+        Some(ty(p))
+    } else {
+        None
+    };
+    p.consume(Equal, "Expect '=' before initializer.");
+    let init = expression(p);
+    p.consume(Semicolon, "Expect ';' after initializer.");
+    p.nodes.alloc(Node::Let(name, type_annotation, init))
+}
+
+fn fn_declaration(p: &mut Parser) -> NodeId {
+    todo!()
+}
+
+fn statement(p: &mut Parser) -> NodeId {
+    expression_statement(p)
+}
+
+fn expression_statement(p: &mut Parser) -> NodeId {
+    let expr = expression(p);
+    p.consume(Semicolon, "Expect ';' after expression.");
+    expr
+}
+
+fn ty(p: &mut Parser) -> NodeId {
+    todo!()
 }
 
 fn expression(p: &mut Parser) -> NodeId {
@@ -101,6 +152,18 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
     p.nodes.alloc(Node::Binary(lhs, op, rhs))
 }
 
+fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
+    p.advance();
+    let rhs = expression(p);
+    match lhs.get(p.nodes) {
+        Node::Variable(..) => p.nodes.alloc(Node::Assign(lhs, rhs)),
+        _ => {
+            p.error("Invalid assignment target");
+            p.nodes.alloc(Node::Error)
+        }
+    }
+}
+
 fn unary(p: &mut Parser) -> NodeId {
     let op = p.token;
     p.advance();
@@ -131,9 +194,16 @@ fn boolean(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::Bool(value))
 }
 
+fn variable(p: &mut Parser) -> NodeId {
+    let name = p.scanner.token_text().to_string();
+    p.advance();
+    p.nodes.alloc(Node::Variable(name))
+}
+
 fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
         p.error("Expect expression.");
+        p.advance();
         return p.nodes.alloc(Node::Error);
     };
 
@@ -151,6 +221,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         NumberLiteral => number(p),
         StringLiteral => string(p),
         True | False => boolean(p),
+        Identifier => variable(p),
         _ => return None,
     })
 }
@@ -159,6 +230,7 @@ fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
     match p.token {
         Plus | Minus | Star | Slash | Greater | GreaterEqual | Less | LessEqual | EqualEqual
         | BangEqual => binary(p, lhs),
+        Equal => assignment(p, lhs),
         _ => lhs,
     }
 }
@@ -169,6 +241,7 @@ fn precedence_of(token: Token) -> Precedence {
         Star | Slash => Precedence::FACTOR,
         Greater | GreaterEqual | Less | LessEqual => Precedence::COMPARISON,
         EqualEqual | BangEqual => Precedence::EQUALITY,
+        Equal => Precedence::ASSIGNMENT,
         _ => Precedence::NONE,
     }
 }
