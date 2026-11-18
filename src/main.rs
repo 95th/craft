@@ -811,4 +811,29 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_nested_arrays_simple() {
+        let source = r#"
+            let a = [[1,2,3],[4, 5, 6]];
+            print(a[1][2] == 6);
+
+            let b = [[1; 2]; 3];
+            print(b[1][1] == 1);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_nested_arrays_using_generic_method() {
+        let source = r#"
+            fn ten_of<T>(value: T) -> [T] {
+                [value; 10]
+            }
+
+            let a = ten_of(ten_of(ten_of(5)));
+            print(a[0][0][0]);
+        "#;
+        run_ok(source);
+    }
 }

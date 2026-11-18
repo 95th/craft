@@ -661,6 +661,10 @@ fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> T
             let params = params.iter().map(|p| substitute(c, *p, subst)).collect();
             c.types.new_key(Ty::Tuple(params))
         }
+        Ty::Array(el) => {
+            let el = substitute(c, el, subst);
+            c.types.new_key(Ty::Array(el))
+        }
         Ty::TypeParam(_) => subst.get(&ty).copied().unwrap_or(ty),
         _ => ty,
     }
