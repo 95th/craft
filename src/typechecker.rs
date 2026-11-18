@@ -189,10 +189,7 @@ fn deferred_check_integers(c: &mut TypeChecker) {
 
     for (expr, ty) in std::mem::take(&mut c.deferred_negation_checks) {
         if let Ty::U64 = c.types.probe_value(ty) {
-            c.error(
-                format!("expect `i64` or `f64`, found `u64`"),
-                c.ast.exprs.span(expr),
-            );
+            c.error("expect `i64` or `f64`, found `u64`", c.ast.exprs.span(expr));
         }
     }
 }
