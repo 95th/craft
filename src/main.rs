@@ -1120,4 +1120,60 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_while_with_continue() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                if i == 5 {
+                    continue;
+                }
+                print(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_while_with_unconditional_continue() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                i = i + 1;
+                continue;
+                print(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_while_with_break() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                if i == 5 {
+                    break;
+                }
+                print(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_while_with_unconditional_break() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                i = i + 1;
+                break;
+                print(i);
+            }
+        "#;
+        run_ok(source);
+    }
 }
