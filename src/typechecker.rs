@@ -6,14 +6,14 @@ use rustc_hash::FxHashMap;
 use crate::{
     Error, FxIndexMap,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
-    bind::{BindCtx, SymbolId},
+    bind::{BindCtxt, SymbolId},
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
-    types::{CommonTypes, Ty, TyId},
+    types::{StdTypes, Ty, TyId},
 };
 
-pub struct TyContext {
-    pub bind_ctx: BindCtx,
+pub struct TyCtxt {
+    pub bcx: BindCtxt,
     pub types: InPlaceUnificationTable<TyId>,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
@@ -23,9 +23,9 @@ pub struct TypeChecker<'a> {
     ast: &'a AstNodes,
     interner: &'a StrInterner,
     diagnostics: &'a mut Diagnostics,
-    bind_ctx: BindCtx,
+    bcx: BindCtxt,
     types: InPlaceUnificationTable<TyId>,
-    common_types: CommonTypes,
+    std: StdTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
     type_bindings: FxHashMap<SymbolId, TyId>,
@@ -43,17 +43,17 @@ impl<'a> TypeChecker<'a> {
         ast: &'a AstNodes,
         interner: &'a StrInterner,
         diagnostics: &'a mut Diagnostics,
-        bind_ctx: BindCtx,
+        bcx: BindCtxt,
     ) -> Self {
         let mut types = InPlaceUnificationTable::new();
-        let common_types = CommonTypes::new(&mut types);
+        let std = StdTypes::new(&mut types);
         Self {
             ast,
             interner,
             diagnostics,
-            bind_ctx,
+            bcx,
             types,
-            common_types,
+            std,
             has_error: false,
             containing_return_ty: None,
             type_bindings: FxHashMap::default(),
@@ -67,7 +67,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    pub fn check(mut self, nodes: &[StmtId]) -> Result<TyContext, Error> {
+    pub fn check(mut self, nodes: &[StmtId]) -> Result<TyCtxt, Error> {
         self.register_default_types();
         self.register_default_functions();
 
@@ -76,8 +76,8 @@ impl<'a> TypeChecker<'a> {
         if self.has_error {
             Err(Error::TypeCheck)
         } else {
-            Ok(TyContext {
-                bind_ctx: self.bind_ctx,
+            Ok(TyCtxt {
+                bcx: self.bcx,
                 types: self.types,
                 struct_properties: self.struct_properties,
                 expr_types: self.expr_types,
@@ -86,28 +86,22 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn register_default_functions(&mut self) {
-        let print_arg_ty = self
-            .types
-            .new_key(Ty::TypeParam(self.bind_ctx.print_function));
+        let print_arg_ty = self.types.new_key(Ty::TypeParam(self.bcx.std.print));
         let print_fn_ty = self
             .types
-            .new_key(Ty::Fn([print_arg_ty].into(), self.common_types.unit));
-        self.value_bindings
-            .insert(self.bind_ctx.print_function, print_fn_ty);
+            .new_key(Ty::Fn([print_arg_ty].into(), self.std.unit));
+        self.value_bindings.insert(self.bcx.std.print, print_fn_ty);
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
     }
 
     fn register_default_types(&mut self) {
+        self.type_bindings.insert(self.bcx.std.f64, self.std.f64);
+        self.type_bindings.insert(self.bcx.std.i64, self.std.i64);
+        self.type_bindings.insert(self.bcx.std.u64, self.std.u64);
         self.type_bindings
-            .insert(self.bind_ctx.f64_type, self.common_types.f64);
+            .insert(self.bcx.std.string, self.std.string);
         self.type_bindings
-            .insert(self.bind_ctx.i64_type, self.common_types.i64);
-        self.type_bindings
-            .insert(self.bind_ctx.u64_type, self.common_types.u64);
-        self.type_bindings
-            .insert(self.bind_ctx.string_type, self.common_types.string);
-        self.type_bindings
-            .insert(self.bind_ctx.bool_type, self.common_types.boolean);
+            .insert(self.bcx.std.bool, self.std.boolean);
     }
 
     fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
@@ -241,10 +235,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
         Stmt::Fn(ref f) => {
             let type_params: Vec<TyId> = f.type_params.iter().map(|p| check_stmt(c, *p)).collect();
             let params = f.params.iter().map(|p| check_stmt(c, *p)).collect();
-            let ret = f
-                .return_ty
-                .map(|t| check_type(c, t))
-                .unwrap_or(c.common_types.unit);
+            let ret = f.return_ty.map(|t| check_type(c, t)).unwrap_or(c.std.unit);
             let fn_ty = c.types.new_key(Ty::Fn(params, ret));
             let fn_symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(fn_symbol, fn_ty);
@@ -276,7 +267,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             }
             let symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(symbol, init_ty);
-            c.common_types.unit
+            c.std.unit
         }
         Stmt::Fn(ref f) => {
             let fn_symbol = c.ast.stmts.value_binding(node);
@@ -289,7 +280,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             let body_ty = check_expr(c, f.body);
             c.unify(return_ty, body_ty, c.ast.exprs.span(f.body));
             c.containing_return_ty = prev_containing_return_ty;
-            c.common_types.unit
+            c.std.unit
         }
         Stmt::Param { ty, .. } => {
             let ty = check_type(c, ty);
@@ -299,7 +290,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         }
         Stmt::Expr { expr, semi } => {
             let ty = check_expr(c, expr);
-            if semi { c.common_types.unit } else { ty }
+            if semi { c.std.unit } else { ty }
         }
         Stmt::Struct(ref s) => {
             let symbol = c.ast.stmts.type_binding(node);
@@ -309,7 +300,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 properties.insert(name, ty);
             }
             c.struct_properties.insert(symbol, properties);
-            c.common_types.unit
+            c.std.unit
         }
         Stmt::TupleStruct(ref s) => {
             let type_symbol = c.ast.stmts.type_binding(node);
@@ -326,7 +317,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             let fn_ty = c.types.new_key(Ty::Fn(arg_tys, struct_ty));
             let value_symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(value_symbol, fn_ty);
-            c.common_types.unit
+            c.std.unit
         }
         Stmt::TypeParam(..) => {
             let symbol = c.ast.stmts.type_binding(node);
@@ -346,19 +337,19 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
 
 fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
     match c.ast.exprs[node] {
-        Expr::Bool(_) => c.common_types.boolean,
+        Expr::Bool(_) => c.std.boolean,
         Expr::Int(_) => {
             let ty = c.types.new_key(Ty::UnknownInt);
             c.integer_literals.push((node, ty));
             ty
         }
-        Expr::Number(_) => c.common_types.f64,
-        Expr::String(_) => c.common_types.string,
+        Expr::Number(_) => c.std.f64,
+        Expr::String(_) => c.std.string,
         Expr::Assign { lhs, rhs } => {
             let lhs_ty = check_expr(c, lhs);
             let rhs_ty = check_expr(c, rhs);
             c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-            c.common_types.unit
+            c.std.unit
         }
         Expr::Binary { lhs, op, rhs } => {
             let lhs_ty = check_expr(c, lhs);
@@ -405,23 +396,23 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                             c.error(message, c.ast.exprs.span(lhs));
                         }
                     }
-                    c.common_types.boolean
+                    c.std.boolean
                 }
                 BinaryOp::Equal | BinaryOp::NotEqual => {
                     c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-                    c.common_types.boolean
+                    c.std.boolean
                 }
                 BinaryOp::Or | BinaryOp::And => {
-                    c.unify(c.common_types.boolean, lhs_ty, c.ast.exprs.span(lhs));
-                    c.unify(c.common_types.boolean, rhs_ty, c.ast.exprs.span(rhs));
-                    c.common_types.boolean
+                    c.unify(c.std.boolean, lhs_ty, c.ast.exprs.span(lhs));
+                    c.unify(c.std.boolean, rhs_ty, c.ast.exprs.span(rhs));
+                    c.std.boolean
                 }
             }
         }
         Expr::Not(expr) => {
             let ty = check_expr(c, expr);
-            c.unify(c.common_types.boolean, ty, c.ast.exprs.span(expr));
-            c.common_types.boolean
+            c.unify(c.std.boolean, ty, c.ast.exprs.span(expr));
+            c.std.boolean
         }
         Expr::Negate(expr) => {
             let ty = check_expr(c, expr);
@@ -448,7 +439,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             else_clause,
         } => {
             let cond_ty = check_expr(c, cond);
-            c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
+            c.unify(c.std.boolean, cond_ty, c.ast.exprs.span(cond));
             let then_clause_ty = check_expr(c, then_clause);
             if let Some(else_clause) = else_clause {
                 let else_clause_ty = check_expr(c, else_clause);
@@ -459,12 +450,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 );
                 then_clause_ty
             } else {
-                c.unify(
-                    c.common_types.unit,
-                    then_clause_ty,
-                    c.ast.exprs.span(then_clause),
-                );
-                c.common_types.unit
+                c.unify(c.std.unit, then_clause_ty, c.ast.exprs.span(then_clause));
+                c.std.unit
             }
         }
         Expr::Block { ref stmts, expr } => crate::stack_safe(|| {
@@ -472,14 +459,14 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             if let Some(expr) = expr {
                 check_expr(c, expr)
             } else {
-                c.common_types.unit
+                c.std.unit
             }
         }),
         Expr::While { cond, body } => {
             let cond_ty = check_expr(c, cond);
-            c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
+            c.unify(c.std.boolean, cond_ty, c.ast.exprs.span(cond));
             check_expr(c, body);
-            c.common_types.unit
+            c.std.unit
         }
         Expr::Break => c.types.new_key(Ty::Unknown),
         Expr::Continue => c.types.new_key(Ty::Unknown),
@@ -506,7 +493,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             let value_ty = if let Some(value) = value {
                 check_expr(c, value)
             } else {
-                c.common_types.unit
+                c.std.unit
             };
             c.unify(
                 value_ty,
@@ -515,7 +502,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             );
             c.types.new_key(Ty::Unknown)
         }
-        Expr::Unit => c.common_types.unit,
+        Expr::Unit => c.std.unit,
         Expr::Tuple(ref types) => {
             let types = types.iter().map(|t| check_expr(c, *t)).collect();
             c.types.new_key(Ty::Tuple(types))
@@ -599,13 +586,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             }
             if let Some(cond) = cond {
                 let ty = check_expr(c, cond);
-                c.unify(c.common_types.boolean, ty, c.ast.exprs.span(cond));
+                c.unify(c.std.boolean, ty, c.ast.exprs.span(cond));
             }
             if let Some(incr) = incr {
                 check_expr(c, incr);
             }
             check_expr(c, body);
-            c.common_types.unit
+            c.std.unit
         }
         Expr::Array(ref elements) => {
             let element_ty = c.types.new_key(Ty::Unknown);
@@ -618,13 +605,13 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::ArrayRepeat { expr, count } => {
             let element_ty = check_expr(c, expr);
             let count_ty = check_expr(c, count);
-            c.unify(c.common_types.u64, count_ty, c.ast.exprs.span(count));
+            c.unify(c.std.u64, count_ty, c.ast.exprs.span(count));
             c.types.new_key(Ty::Array(element_ty))
         }
         Expr::ArrayIndex { array, index } => {
             let array_ty = check_expr(c, array);
             let index_ty = check_expr(c, index);
-            c.unify(c.common_types.u64, index_ty, c.ast.exprs.span(index));
+            c.unify(c.std.u64, index_ty, c.ast.exprs.span(index));
 
             match c.types.probe_value(array_ty) {
                 Ty::Array(element_ty) => element_ty,
@@ -641,10 +628,10 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
     match c.ast.types[node] {
         Type::FnType { ref params, ret } => {
             let params = params.iter().map(|t| check_type(c, *t)).collect();
-            let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
+            let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.std.unit);
             c.types.new_key(Ty::Fn(params, ret))
         }
-        Type::Unit => c.common_types.unit,
+        Type::Unit => c.std.unit,
         Type::Named(..) => {
             let symbol = c.ast.types.type_binding(node);
             c.type_bindings[&symbol]
@@ -703,7 +690,7 @@ impl TyId {
 fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
     match c.types.probe_value(ty) {
         Ty::Named(symbol) | Ty::TypeParam(symbol) => {
-            buf.push_str(c.interner.lookup(c.bind_ctx.symbols[symbol].name))
+            buf.push_str(c.interner.lookup(c.bcx.symbols[symbol].name))
         }
         Ty::Fn(params, ret) => {
             buf.push_str("fn(");

@@ -33,14 +33,18 @@ pub struct Scope {
     parent: Option<ScopeId>,
 }
 
-pub struct BindCtx {
+pub struct StdSymbols {
+    pub f64: SymbolId,
+    pub i64: SymbolId,
+    pub u64: SymbolId,
+    pub string: SymbolId,
+    pub bool: SymbolId,
+    pub print: SymbolId,
+}
+
+pub struct BindCtxt {
     pub symbols: Arena<Symbol>,
-    pub f64_type: SymbolId,
-    pub i64_type: SymbolId,
-    pub u64_type: SymbolId,
-    pub string_type: SymbolId,
-    pub bool_type: SymbolId,
-    pub print_function: SymbolId,
+    pub std: StdSymbols,
 }
 
 pub struct Binder<'a> {
@@ -53,12 +57,7 @@ pub struct Binder<'a> {
     symbols: Arena<Symbol>,
     interner: &'a mut StrInterner,
     has_error: bool,
-    f64_type: SymbolId,
-    i64_type: SymbolId,
-    u64_type: SymbolId,
-    string_type: SymbolId,
-    bool_type: SymbolId,
-    print_function: SymbolId,
+    std: StdSymbols,
     loop_depth: u32,
     fn_depth: u32,
     local_count: u32,
@@ -80,19 +79,21 @@ impl<'a> Binder<'a> {
             symbols: Arena::new(),
             interner,
             has_error: false,
-            f64_type: SymbolId::MAX,
-            i64_type: SymbolId::MAX,
-            u64_type: SymbolId::MAX,
-            string_type: SymbolId::MAX,
-            bool_type: SymbolId::MAX,
-            print_function: SymbolId::MAX,
+            std: StdSymbols {
+                f64: SymbolId::MAX,
+                i64: SymbolId::MAX,
+                u64: SymbolId::MAX,
+                string: SymbolId::MAX,
+                bool: SymbolId::MAX,
+                print: SymbolId::MAX,
+            },
             loop_depth: 0,
             fn_depth: 0,
             local_count: 0,
         }
     }
 
-    pub fn bind(mut self, nodes: &[StmtId]) -> Result<BindCtx, Error> {
+    pub fn bind(mut self, nodes: &[StmtId]) -> Result<BindCtxt, Error> {
         self.type_scope = self.create_scope(None);
         self.fn_scope = self.create_scope(None);
         self.value_scope = self.create_scope(None);
@@ -104,23 +105,18 @@ impl<'a> Binder<'a> {
         if self.has_error {
             return Err(Error::Bind);
         }
-        Ok(BindCtx {
+        Ok(BindCtxt {
             symbols: self.symbols,
-            f64_type: self.f64_type,
-            i64_type: self.i64_type,
-            u64_type: self.u64_type,
-            string_type: self.string_type,
-            bool_type: self.bool_type,
-            print_function: self.print_function,
+            std: self.std,
         })
     }
 
     fn declare_default_types(&mut self) {
-        self.i64_type = self.declare_default_type("i64");
-        self.u64_type = self.declare_default_type("u64");
-        self.f64_type = self.declare_default_type("f64");
-        self.string_type = self.declare_default_type("string");
-        self.bool_type = self.declare_default_type("bool");
+        self.std.i64 = self.declare_default_type("i64");
+        self.std.u64 = self.declare_default_type("u64");
+        self.std.f64 = self.declare_default_type("f64");
+        self.std.string = self.declare_default_type("string");
+        self.std.bool = self.declare_default_type("bool");
     }
 
     fn declare_default_type(&mut self, name: &str) -> SymbolId {
@@ -129,7 +125,7 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_default_functions(&mut self) {
-        self.print_function = self.declare_default_function("print");
+        self.std.print = self.declare_default_function("print");
     }
 
     fn declare_default_function(&mut self, name: &str) -> SymbolId {

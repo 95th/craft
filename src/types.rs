@@ -21,7 +21,7 @@ pub enum Ty {
     Array(TyId),
 }
 
-pub struct CommonTypes {
+pub struct StdTypes {
     pub boolean: TyId,
     pub f64: TyId,
     pub i64: TyId,
@@ -30,7 +30,7 @@ pub struct CommonTypes {
     pub string: TyId,
 }
 
-impl CommonTypes {
+impl StdTypes {
     pub fn new(table: &mut InPlaceUnificationTable<TyId>) -> Self {
         Self {
             boolean: table.new_key(Ty::Bool),

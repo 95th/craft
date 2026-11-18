@@ -7,7 +7,7 @@ use crate::{
     bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
     interner::{StrId, StrInterner},
-    typechecker::TyContext,
+    typechecker::TyCtxt,
     types::Ty,
 };
 
@@ -28,7 +28,7 @@ impl LoopCtx {
 pub struct Codegen<'a> {
     ast: &'a AstNodes,
     interner: &'a StrInterner,
-    ty_ctx: TyContext,
+    tcx: TyCtxt,
     code: Code,
     loop_ctxts: Vec<LoopCtx>,
     function_table: FxHashMap<SymbolId, usize>,
@@ -38,11 +38,11 @@ pub struct Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ast: &'a AstNodes, interner: &'a StrInterner, ty_ctx: TyContext) -> Self {
+    pub fn new(ast: &'a AstNodes, interner: &'a StrInterner, tcx: TyCtxt) -> Self {
         Self {
             ast,
             interner,
-            ty_ctx,
+            tcx,
             code: Code::new(),
             loop_ctxts: Vec::new(),
             function_table: FxHashMap::default(),
@@ -65,7 +65,7 @@ impl<'a> Codegen<'a> {
                 let function = self.code.len();
                 self.code.write_u64_at(patch_offset, function as u64);
                 self.function_table.insert(symbol, function);
-                let function = self.ty_ctx.bind_ctx.symbols[symbol].declaration;
+                let function = self.tcx.bcx.symbols[symbol].declaration;
                 self.process_function(function);
             }
         }
@@ -117,8 +117,8 @@ impl<'a> Codegen<'a> {
         match self.ast.exprs[expr] {
             Expr::Bool(b) => self.code.op(if b { Opcode::True } else { Opcode::False }),
             Expr::Int(n) => {
-                let ty = self.ty_ctx.expr_types[&expr];
-                let value = match self.ty_ctx.types.probe_value(ty) {
+                let ty = self.tcx.expr_types[&expr];
+                let value = match self.tcx.types.probe_value(ty) {
                     Ty::I64 => u64::from_ne_bytes((n as i64).to_ne_bytes()),
                     Ty::U64 => n as u64,
                     t => unreachable!("{t:?}"),
@@ -140,8 +140,8 @@ impl<'a> Codegen<'a> {
             }
             Expr::Negate(expr) => {
                 self.process_expr(expr);
-                let ty = self.ty_ctx.expr_types[&expr];
-                match self.ty_ctx.types.probe_value(ty) {
+                let ty = self.tcx.expr_types[&expr];
+                match self.tcx.types.probe_value(ty) {
                     Ty::I64 => self.code.op(Opcode::I64Neg),
                     Ty::F64 => self.code.op(Opcode::F64Neg),
                     t => unreachable!("{t:?}"),
@@ -149,7 +149,7 @@ impl<'a> Codegen<'a> {
             }
             Expr::Variable(_) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
-                let symbol = &self.ty_ctx.bind_ctx.symbols[symbol_id];
+                let symbol = &self.tcx.bcx.symbols[symbol_id];
                 match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
                         self.code.op_get_local(symbol.local_index);
@@ -169,7 +169,7 @@ impl<'a> Codegen<'a> {
             Expr::Assign { lhs, rhs } => match self.ast.exprs[lhs] {
                 Expr::Variable(..) => {
                     let symbol = self.ast.exprs.value_binding(lhs);
-                    let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
+                    let index = self.tcx.bcx.symbols[symbol].local_index;
                     self.process_expr(rhs);
                     self.code.op_set_local(index);
                     self.code.op_unit();
@@ -181,11 +181,11 @@ impl<'a> Codegen<'a> {
                     self.code.op_unit();
                 }
                 Expr::StructField { obj, name } => {
-                    let ty = self.ty_ctx.expr_types[&obj];
-                    let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
+                    let ty = self.tcx.expr_types[&obj];
+                    let Ty::Named(symbol) = self.tcx.types.probe_value(ty) else {
                         unreachable!();
                     };
-                    let properties = &self.ty_ctx.struct_properties[&symbol];
+                    let properties = &self.tcx.struct_properties[&symbol];
                     let index = properties.get_index_of(&name).unwrap();
                     self.process_expr(obj);
                     self.process_expr(rhs);
@@ -232,8 +232,8 @@ impl<'a> Codegen<'a> {
             Expr::Binary { lhs, op, rhs } => {
                 self.process_expr(lhs);
                 self.process_expr(rhs);
-                let ty = self.ty_ctx.expr_types[&lhs];
-                match self.ty_ctx.types.probe_value(ty) {
+                let ty = self.tcx.expr_types[&lhs];
+                match self.tcx.types.probe_value(ty) {
                     Ty::F64 => match op {
                         BinaryOp::Add => self.code.op(Opcode::F64Add),
                         BinaryOp::Sub => self.code.op(Opcode::F64Sub),
@@ -289,9 +289,9 @@ impl<'a> Codegen<'a> {
                     self.process_expr(arg);
                 }
                 let symbol = self.ast.exprs.value_binding(callee);
-                if symbol == self.ty_ctx.bind_ctx.print_function {
-                    let ty = self.ty_ctx.expr_types[&args[0]];
-                    match self.ty_ctx.types.probe_value(ty) {
+                if symbol == self.tcx.bcx.std.print {
+                    let ty = self.tcx.expr_types[&args[0]];
+                    match self.tcx.types.probe_value(ty) {
                         Ty::F64 => self.code.op(Opcode::PrintF64),
                         Ty::I64 => self.code.op(Opcode::PrintI64),
                         Ty::U64 => self.code.op(Opcode::PrintU64),
@@ -421,11 +421,11 @@ impl<'a> Codegen<'a> {
                 self.code.op_struct(s.fields.len() as u16);
             }
             Expr::StructField { obj, name } => {
-                let ty = self.ty_ctx.expr_types[&obj];
-                let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
+                let ty = self.tcx.expr_types[&obj];
+                let Ty::Named(symbol) = self.tcx.types.probe_value(ty) else {
                     unreachable!();
                 };
-                let properties = &self.ty_ctx.struct_properties[&symbol];
+                let properties = &self.tcx.struct_properties[&symbol];
                 let index = properties.get_index_of(&name).unwrap();
                 self.process_expr(obj);
                 self.code.op_get_struct_property(index as u16);
