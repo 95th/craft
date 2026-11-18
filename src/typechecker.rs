@@ -60,7 +60,9 @@ impl<'a> TypeChecker<'a> {
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
 
-        let print_arg_ty = self.types.alloc(Ty::Var);
+        let print_arg_ty = self
+            .types
+            .alloc(Ty::TypeParam(self.bind_ctx.print_function));
         let print_fn_ty = self
             .types
             .alloc(Ty::Fn(vec![print_arg_ty], self.common_types.unit));
@@ -222,7 +224,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         }
         Stmt::TypeParam(..) => {
             let symbol = c.ast.stmts.binding(node);
-            let ty = c.types.alloc(Ty::Var);
+            let ty = c.types.alloc(Ty::TypeParam(symbol));
             c.binding_types.insert(symbol, ty);
             ty
         }
@@ -446,15 +448,10 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
 
 fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
     match c.ast.types[node] {
-        Type::FnType(ref type_params, ref params, ret) => {
-            let type_params: Vec<TyId> = type_params.iter().map(|t| check_stmt(c, *t)).collect();
+        Type::FnType(ref params, ret) => {
             let params = params.iter().map(|t| check_type(c, *t)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
-            let ty = c.types.alloc(Ty::Fn(params, ret));
-            if !type_params.is_empty() {
-                c.type_params.insert(ty, type_params);
-            }
-            ty
+            c.types.alloc(Ty::Fn(params, ret))
         }
         Type::Unit => c.common_types.unit,
         Type::Named(..) => {
@@ -497,7 +494,7 @@ fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> T
                 .collect();
             c.types.alloc(Ty::Tuple(params))
         }
-        Ty::Var => subst.get(&ty).copied().unwrap_or(ty),
+        Ty::TypeParam(_) => subst.get(&ty).copied().unwrap_or(ty),
         _ => ty,
     }
 }
@@ -514,7 +511,7 @@ impl fmt::Display for DisplayType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(ty, c) = *self;
         match c.types[ty] {
-            Ty::Named(symbol) => write!(
+            Ty::Named(symbol) | Ty::TypeParam(symbol) => write!(
                 f,
                 "{}",
                 c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name)

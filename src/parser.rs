@@ -302,7 +302,6 @@ fn named_ty(p: &mut Parser) -> TypeId {
 fn fn_ty(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
-    let type_params = type_params(p);
     p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
@@ -315,10 +314,9 @@ fn fn_ty(p: &mut Parser) -> TypeId {
     }
     p.consume(CloseParen, "expect ')'");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.ast.types.alloc(
-        Type::FnType(type_params, params, return_ty),
-        start.to(p.prev_span),
-    )
+    p.ast
+        .types
+        .alloc(Type::FnType(params, return_ty), start.to(p.prev_span))
 }
 
 fn tuple_ty(p: &mut Parser) -> TypeId {
@@ -651,7 +649,9 @@ fn block_expr(p: &mut Parser) -> ExprId {
             loop {
                 let stmt = declaration(p);
                 if p.token == CloseBrace || p.token == Eof {
-                    if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
+                    if stmt != StmtId::MAX
+                        && let Stmt::Expr(expr, false) = p.ast.stmts[stmt]
+                    {
                         trailing_expr = Some(expr);
                     } else {
                         nodes.push(stmt);
@@ -739,7 +739,10 @@ impl Token {
 }
 
 fn expr_requires_semi(p: &Parser, stmt: StmtId) -> bool {
-    if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
+    if stmt != StmtId::MAX
+        && let Stmt::Expr(expr, false) = p.ast.stmts[stmt]
+        && expr != ExprId::MAX
+    {
         !matches!(
             p.ast.exprs[expr],
             Expr::If(..) | Expr::While(..) | Expr::Block(..) | Expr::For(..)

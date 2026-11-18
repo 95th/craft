@@ -8,6 +8,7 @@ pub type TyId = Id<Ty>;
 #[derive(Clone, PartialEq, Eq)]
 pub enum Ty {
     Named(SymbolId),
+    TypeParam(SymbolId),
     Fn(Vec<TyId>, TyId),
     Unit,
     Bool,

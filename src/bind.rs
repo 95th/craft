@@ -427,17 +427,14 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
                 b.has_error = true;
             }
         }
-        Type::FnType(ref type_params, ref params, ret) => b.with_item_scope(|b| {
-            for t in type_params {
-                bind_statement(b, *t);
-            }
+        Type::FnType(ref params, ret) => {
             for p in params {
                 bind_ty(b, *p);
             }
             if let Some(ret) = ret {
                 bind_ty(b, ret);
             }
-        }),
+        }
         Type::Unit => {}
         Type::Tuple(ref types) => {
             for t in types {

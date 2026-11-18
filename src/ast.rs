@@ -63,7 +63,7 @@ pub enum Stmt {
 #[derive(Debug)]
 pub enum Type {
     Named(String),
-    FnType(Vec<StmtId>, Vec<TypeId>, Option<TypeId>),
+    FnType(Vec<TypeId>, Option<TypeId>),
     Unit,
     Tuple(Vec<TypeId>),
 }

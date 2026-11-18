@@ -600,7 +600,7 @@ mod tests {
                 (a, b)
             }
 
-            let f: fn<T>(number, T) -> (number, T) = foo;
+            let f: fn(number, bool) -> (number, bool) = foo;
             print(f(10, true).0);
             print(f(20, false).0);
         "#;
@@ -618,6 +618,22 @@ mod tests {
                 foo(a, a).1
             }
             print(foo(10));
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_generic_function_with_generic_args() {
+        let source = r#"
+            fn foo<T, U>(a: T, b: fn(T) -> string) -> string {
+                b(a)
+            }
+
+            fn bar<T>(t: T) -> string {
+                "Hello world"
+            }
+
+            print(foo(10, bar));
         "#;
         run_ok(source);
     }
