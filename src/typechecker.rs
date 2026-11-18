@@ -78,17 +78,13 @@ impl<'a> TypeChecker<'a> {
                 self.error(
                     format!(
                         "Type mismatch: Expected '{}' but got '{}'",
-                        self.display(lhs),
-                        self.display(rhs)
+                        lhs.display(self),
+                        rhs.display(self)
                     ),
                     span,
                 );
             }
         }
-    }
-
-    fn display(&self, ty: TypeId) -> impl fmt::Display {
-        ty.display(&self.types, &self.bind_ctx.symbols, &self.bind_ctx.interner)
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
@@ -280,6 +276,41 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
                 node.span(c.nodes),
             );
             c.types.alloc(Type::Var)
+        }
+    }
+}
+
+impl TypeId {
+    pub fn display<'a>(self, c: &'a TypeChecker) -> impl fmt::Display {
+        DisplayType(self, c)
+    }
+}
+
+struct DisplayType<'a>(TypeId, &'a TypeChecker<'a>);
+
+impl fmt::Display for DisplayType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self(ty, c) = *self;
+        match c.types[ty] {
+            Type::Named(symbol) => write!(
+                f,
+                "{}",
+                c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name)
+            ),
+            Type::Fn(ref params, ret) => {
+                write!(f, "fn(")?;
+                let mut sep = "";
+                for p in params {
+                    write!(f, "{sep}{}", p.display(c))?;
+                    sep = ", ";
+                }
+                write!(f, ") -> {}", ret.display(c))
+            }
+            Type::Unit => write!(f, "()"),
+            Type::Bool => write!(f, "bool"),
+            Type::Number => write!(f, "number"),
+            Type::String => write!(f, "string"),
+            Type::Var => write!(f, "<cannot infer>"),
         }
     }
 }
