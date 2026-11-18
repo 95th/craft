@@ -138,6 +138,7 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
 fn statement(p: &mut Parser) -> NodeId {
     match p.token {
         While => while_statement(p),
+        Return => return_statement(p),
         _ => expression_statement(p),
     }
 }
@@ -150,6 +151,19 @@ fn while_statement(p: &mut Parser) -> NodeId {
     let body = block_expr(p);
     p.nodes
         .alloc(Node::While(cond, body), start.to(p.prev_span))
+}
+
+fn return_statement(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let value = if !p.eat(Semicolon) {
+        let value = expression(p);
+        p.consume(Semicolon, "Expect ';' after return value");
+        Some(value)
+    } else {
+        None
+    };
+    p.nodes.alloc(Node::Return(value), start.to(p.prev_span))
 }
 
 fn expression_statement(p: &mut Parser) -> NodeId {

@@ -10,6 +10,9 @@ fn main() {
         x = 12;
         let y = if x == 12 || y == 2 && x > 1 { x + 1 } else if x > 12 { x + 2 } else { x + 3 };
         fn foo(a: Foo, b: Foo) -> Foo {
+            if a > b {
+                return 0;
+            }
             a + b
         }
         foo(foo(1, 2), x);

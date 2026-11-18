@@ -19,6 +19,7 @@ pub enum Node {
     Continue,
     Fn(String, Vec<(String, NodeId)>, Option<NodeId>, NodeId),
     Call(NodeId, Vec<NodeId>),
+    Return(Option<NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +166,13 @@ impl fmt::Display for NodeDisplay<'_> {
                     sep = ", ";
                 }
                 write!(f, ")")
+            }
+            Node::Return(value) => {
+                write!(f, "return")?;
+                if let Some(value) = value {
+                    write!(f, " {}", value.display(arena))?;
+                }
+                write!(f, ";")
             }
         }
     }
