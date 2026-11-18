@@ -130,7 +130,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 result
             }
-            (Ty::Fn(.., a_params, a_ret), Ty::Fn(.., b_params, b_ret)) => {
+            (Ty::Fn(a_params, a_ret), Ty::Fn(b_params, b_ret)) => {
                 if a_params.len() != b_params.len() {
                     return false;
                 }
@@ -167,7 +167,7 @@ impl<'a> TypeChecker<'a> {
                     self.unify_recursively(*a, *b);
                 }
             }
-            (Ty::Fn(.., a_params, a_ret), Ty::Fn(.., b_params, b_ret)) => {
+            (Ty::Fn(a_params, a_ret), Ty::Fn(b_params, b_ret)) => {
                 for (a, b) in a_params.iter().zip(b_params.iter()) {
                     self.unify_recursively(*a, *b);
                 }
