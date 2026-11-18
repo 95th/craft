@@ -2,7 +2,6 @@ use core::fmt;
 
 #[derive(Debug)]
 pub enum Node {
-    Error,
     Bool(bool),
     Number(f64),
     String(String),
@@ -19,6 +18,7 @@ pub enum Node {
     Break,
     Continue,
     Fn(String, Vec<(String, NodeId)>, Option<NodeId>, NodeId),
+    Call(NodeId, Vec<NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,11 +60,12 @@ impl NodeArena {
 
     pub fn dump(&self, source: &str) {
         for i in 0..self.nodes.len() {
+            let node = NodeId::new(i);
             println!(
-                "{:?}: {:?} -> {}",
+                "{node:?} = {:?}, source={:?}, parsed={}",
                 self.nodes[i],
                 self.spans[i].text(source),
-                NodeId::new(i).display(self)
+                node.display(self)
             )
         }
     }
@@ -99,7 +100,6 @@ impl fmt::Display for NodeDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(node, arena) = *self;
         match node.get(arena) {
-            Node::Error => write!(f, "<error>"),
             Node::Bool(x) => write!(f, "{x}"),
             Node::Number(x) => write!(f, "{x:?}"),
             Node::String(x) => write!(f, "{x:?}"),
@@ -156,6 +156,15 @@ impl fmt::Display for NodeDisplay<'_> {
                     write!(f, " -> {}", return_ty.display(arena))?;
                 }
                 write!(f, " {}", body.display(arena))
+            }
+            Node::Call(target, args) => {
+                write!(f, "{}(", target.display(arena))?;
+                let mut sep = "";
+                for arg in args {
+                    write!(f, "{sep}{}", arg.display(arena))?;
+                    sep = ", ";
+                }
+                write!(f, ")")
             }
         }
     }

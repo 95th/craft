@@ -12,6 +12,7 @@ fn main() {
         fn foo(a: Foo, b: Foo) -> Foo {
             a + b
         }
+        foo(foo(1, 2), x);
     "#;
 
     let mut arena = NodeArena::new();

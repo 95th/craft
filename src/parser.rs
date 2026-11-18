@@ -221,6 +221,22 @@ fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
     }
 }
 
+fn call(p: &mut Parser, lhs: NodeId) -> NodeId {
+    p.advance();
+    let mut args = Vec::new();
+    if p.token != CloseParen {
+        loop {
+            args.push(expression(p));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+    }
+    p.consume(CloseParen, "Expect ')' after arguments.");
+    p.nodes
+        .alloc(Node::Call(lhs, args), lhs.span(p.nodes).to(p.prev_span))
+}
+
 fn unary(p: &mut Parser) -> NodeId {
     let op = p.token;
     p.advance();
@@ -337,6 +353,7 @@ fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
         Plus | Minus | Star | Slash | Greater | GreaterEqual | Less | LessEqual | EqualEqual
         | BangEqual | Bar | BarBar | Ampersand | AmpersandAmpersand => binary(p, lhs),
         Equal => assignment(p, lhs),
+        OpenParen => call(p, lhs),
         _ => lhs,
     }
 }
@@ -352,6 +369,7 @@ impl Token {
             BarBar => Precedence::Or,
             Ampersand => Precedence::BitAnd,
             AmpersandAmpersand => Precedence::And,
+            OpenParen => Precedence::Call,
             _ => Precedence::None,
         }
     }
