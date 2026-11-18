@@ -292,11 +292,26 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
         Expr::Continue => c.types.alloc(Ty::Var),
         Expr::Call(callee, ref args) => {
             let callee_ty = check_expr(c, callee);
-            let arg_tys = args.iter().map(|a| check_expr(c, *a)).collect();
-            let ret_ty = c.types.alloc(Ty::Var);
-            let expect_ty = c.types.alloc(Ty::Fn(arg_tys, ret_ty));
-            c.unify(callee_ty, expect_ty, c.ast.exprs.span(node));
-            ret_ty
+            let Ty::Fn(params, ret) = c.types[callee_ty].clone() else {
+                c.error("Callee must be a callable.", c.ast.exprs.span(node));
+                return c.types.alloc(Ty::Var);
+            };
+            if args.len() != params.len() {
+                c.error(
+                    format!(
+                        "Expected {} arguments, but got {}",
+                        params.len(),
+                        args.len()
+                    ),
+                    c.ast.exprs.span(node),
+                );
+                return c.types.alloc(Ty::Var);
+            }
+            for (&arg, param) in args.iter().zip(params) {
+                let arg_ty = check_expr(c, arg);
+                c.unify(param, arg_ty, c.ast.exprs.span(node));
+            }
+            ret
         }
         Expr::Return(value) => {
             let value_ty = if let Some(value) = value {
