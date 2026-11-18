@@ -282,6 +282,11 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
             let ret = ret.map(|t| check_node(c, t)).unwrap_or(c.common_types.unit);
             c.types.alloc(Type::Fn(params, ret))
         }
+        Node::Unit => c.common_types.unit,
+        Node::Tuple(ref types) => {
+            let types = types.iter().map(|t| check_node(c, *t)).collect();
+            c.types.alloc(Type::Tuple(types))
+        }
     }
 }
 
@@ -316,6 +321,15 @@ impl fmt::Display for DisplayType<'_> {
             Type::Number => write!(f, "number"),
             Type::String => write!(f, "string"),
             Type::Var => write!(f, "<cannot infer>"),
+            Type::Tuple(ref types) => {
+                write!(f, "(")?;
+                let mut sep = "";
+                for t in types {
+                    write!(f, "{sep}{}", t.display(c))?;
+                    sep = ", ";
+                }
+                write!(f, ")")
+            }
         }
     }
 }

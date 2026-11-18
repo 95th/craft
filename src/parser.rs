@@ -153,6 +153,7 @@ fn ty(p: &mut Parser) -> NodeId {
     match p.token {
         Identifier => variable(p),
         Fn => fn_ty(p),
+        OpenParen => tuple_ty(p),
         _ => p.error("Expected a type"),
     }
 }
@@ -176,13 +177,48 @@ fn fn_ty(p: &mut Parser) -> NodeId {
         .alloc(Node::FnType(params, return_ty), start.to(p.prev_span))
 }
 
+fn tuple_ty(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    if p.eat(CloseParen) {
+        return p.nodes.alloc(Node::Unit, start.to(p.prev_span));
+    }
+
+    let mut types = Vec::new();
+    loop {
+        types.push(ty(p));
+        if !p.eat(Comma) {
+            break;
+        }
+    }
+    p.consume(CloseParen, "Expect ')' after tuple types.");
+    p.nodes.alloc(Node::Tuple(types), start.to(p.prev_span))
+}
+
 fn expression(p: &mut Parser) -> NodeId {
     parse_precedence(p, Precedence::Assignment as u8)
 }
 
-fn grouping(p: &mut Parser) -> NodeId {
+fn tuple(p: &mut Parser) -> NodeId {
     p.advance();
+    let start = p.prev_span;
+    if p.eat(CloseParen) {
+        return p.nodes.alloc(Node::Unit, start.to(p.prev_span));
+    }
+
     let expr = expression(p);
+    if p.eat(Comma) {
+        let mut exprs = vec![expr];
+        loop {
+            exprs.push(expression(p));
+            if !p.eat(Comma) {
+                break;
+            }
+        }
+        p.consume(CloseParen, "Expect ')' after tuple values.");
+        return p.nodes.alloc(Node::Tuple(exprs), start.to(p.prev_span));
+    }
+
     p.consume(CloseParen, "Expect ')' after grouping.");
     expr
 }
@@ -376,7 +412,7 @@ fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
 
 fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
     Some(match p.token {
-        OpenParen => grouping(p),
+        OpenParen => tuple(p),
         Minus | Bang => unary(p),
         NumberLiteral => number(p),
         StringLiteral => string(p),

@@ -310,7 +310,7 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
             }
             bind_expr(b, callee);
         }
-        Node::Break | Node::Continue => {
+        Node::Break | Node::Continue | Node::Unit => {
             if b.loop_depth == 0 {
                 println!("Cannot '{}' outside of a loop", node.display(b.nodes));
                 b.has_error = true;
@@ -323,6 +323,11 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
             }
             if let Some(expr) = expr {
                 bind_expr(b, expr);
+            }
+        }
+        Node::Tuple(ref nodes) => {
+            for node in nodes {
+                bind_expr(b, *node);
             }
         }
         ref node => unreachable!("{node:?}"),
@@ -346,6 +351,12 @@ fn bind_ty(b: &mut Binder, node: NodeId) {
             }
             if let Some(ret) = ret {
                 bind_ty(b, ret);
+            }
+        }
+        Node::Unit => {}
+        Node::Tuple(ref types) => {
+            for t in types {
+                bind_ty(b, *t);
             }
         }
         _ => unreachable!(),

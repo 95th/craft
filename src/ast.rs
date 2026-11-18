@@ -28,6 +28,8 @@ pub enum Node {
 
     // Type
     FnType(Vec<NodeId>, Option<NodeId>),
+    Unit,
+    Tuple(Vec<NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,19 +179,6 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, " {}", body.display(arena))
             }
-            Node::FnType(params, return_ty) => {
-                write!(f, "fn(")?;
-                let mut sep = "";
-                for param in params {
-                    write!(f, "{sep}{}", param.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, ")")?;
-                if let Some(return_ty) = return_ty {
-                    write!(f, " -> {}", return_ty.display(arena))?;
-                }
-                Ok(())
-            }
             Node::Param(name, ty) => write!(f, "{name}: {}", ty.display(arena)),
             Node::Call(target, args) => {
                 write!(f, "{}(", target.display(arena))?;
@@ -206,6 +195,29 @@ impl fmt::Display for NodeDisplay<'_> {
                     write!(f, " {}", value.display(arena))?;
                 }
                 write!(f, ";")
+            }
+            Node::FnType(params, return_ty) => {
+                write!(f, "fn(")?;
+                let mut sep = "";
+                for param in params {
+                    write!(f, "{sep}{}", param.display(arena))?;
+                    sep = ", ";
+                }
+                write!(f, ")")?;
+                if let Some(return_ty) = return_ty {
+                    write!(f, " -> {}", return_ty.display(arena))?;
+                }
+                Ok(())
+            }
+            Node::Unit => write!(f, "()"),
+            Node::Tuple(nodes) => {
+                write!(f, "(")?;
+                let mut sep = "";
+                for t in nodes {
+                    write!(f, "{sep}{}", t.display(arena))?;
+                    sep = ", ";
+                }
+                write!(f, ")")
             }
         }
     }

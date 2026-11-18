@@ -14,6 +14,7 @@ pub enum Type {
     Number,
     String,
     Var,
+    Tuple(Vec<TypeId>),
 }
 
 pub struct CommonTypes {
