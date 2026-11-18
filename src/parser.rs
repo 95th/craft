@@ -87,6 +87,12 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
         Minus => BinaryOp::Sub,
         Star => BinaryOp::Mul,
         Slash => BinaryOp::Div,
+        Greater => BinaryOp::Greater,
+        GreaterEqual => BinaryOp::GreaterEqual,
+        Less => BinaryOp::Less,
+        LessEqual => BinaryOp::LessEqual,
+        EqualEqual => BinaryOp::Equal,
+        BangEqual => BinaryOp::NotEqual,
         _ => unreachable!(),
     };
     let precedence = precedence_of(p.token);
@@ -151,7 +157,8 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
 
 fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
     match p.token {
-        Plus | Minus | Star | Slash => binary(p, lhs),
+        Plus | Minus | Star | Slash | Greater | GreaterEqual | Less | LessEqual | EqualEqual
+        | BangEqual => binary(p, lhs),
         _ => lhs,
     }
 }
@@ -160,6 +167,8 @@ fn precedence_of(token: Token) -> Precedence {
     match token {
         Plus | Minus => Precedence::TERM,
         Star | Slash => Precedence::FACTOR,
+        Greater | GreaterEqual | Less | LessEqual => Precedence::COMPARISON,
+        EqualEqual | BangEqual => Precedence::EQUALITY,
         _ => Precedence::NONE,
     }
 }

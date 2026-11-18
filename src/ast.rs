@@ -17,6 +17,12 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    Equal,
+    NotEqual,
 }
 
 pub struct NodeArena {
@@ -77,6 +83,12 @@ impl fmt::Display for BinaryOp {
             Self::Sub => write!(f, "-"),
             Self::Mul => write!(f, "*"),
             Self::Div => write!(f, "/"),
+            Self::Greater => write!(f, ">"),
+            Self::GreaterEqual => write!(f, ">="),
+            Self::Less => write!(f, "<"),
+            Self::LessEqual => write!(f, "<="),
+            Self::Equal => write!(f, "=="),
+            Self::NotEqual => write!(f, "!="),
         }
     }
 }
