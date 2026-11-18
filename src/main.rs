@@ -11,6 +11,7 @@ mod bind;
 mod chunk;
 mod codegen;
 mod diagnostics;
+mod heap;
 mod interner;
 mod parser;
 mod scanner;
