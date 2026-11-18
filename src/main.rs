@@ -639,6 +639,21 @@ mod tests {
     }
 
     #[test]
+    fn test_generic_unify_with_regular() {
+        let source = r#"
+            fn foo<T>(a: T) -> T {
+                a
+            }
+            fn bar(n: number) -> number {
+                n + 1
+            }
+            let x = if true { foo } else { bar };
+            print(x(10));
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_recursive_types() {
         let source = r#"
             struct Foo {
