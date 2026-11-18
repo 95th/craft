@@ -28,9 +28,8 @@ fn main() {
     //     1 + foo(x);
     // "#;
     let source = r#"
-        fn foo(x: number) {
-            x
-        }
+        fn foo(a: number, b: number) -> number { 1 }
+        foo(10);
     "#;
 
     let mut arena = NodeArena::new();

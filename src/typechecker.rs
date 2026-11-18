@@ -72,7 +72,7 @@ impl<'a> TypeChecker<'a> {
                 if params_a.len() != params_b.len() {
                     self.error(
                         format!(
-                            "Type mismatch, expected {} params, got: {}",
+                            "Type mismatch, expected {} arguments, got {}",
                             params_a.len(),
                             params_b.len()
                         ),
@@ -121,9 +121,14 @@ fn check_scope(c: &mut TypeChecker, nodes: &[NodeId]) {
 
 fn declare_item(c: &mut TypeChecker, node: NodeId) {
     match *node.get(c.nodes) {
-        Node::Fn(..) | Node::Let(..) => {
-            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            c.binding_types.insert(symbol, c.types.alloc(Type::Var));
+        Node::Fn(_, ref params, return_ty, _) => {
+            let param_tys = params.iter().map(|p| check_node(c, *p)).collect();
+            let return_ty = return_ty
+                .map(|t| check_node(c, t))
+                .unwrap_or(c.common_types.unit);
+            let fn_ty = c.types.alloc(Type::Fn(param_tys, return_ty));
+            let fn_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+            c.binding_types.insert(fn_symbol, fn_ty);
         }
         _ => {}
     }
@@ -185,7 +190,7 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
                 c.unify(ty, init_ty, init.span(c.nodes));
             }
             let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            c.unify(init_ty, c.binding_types[&symbol], node.span(c.nodes));
+            c.binding_types.insert(symbol, init_ty);
             c.common_types.unit
         }
         Node::Variable(..) => {
@@ -229,14 +234,12 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
         }
         Node::Break => c.types.alloc(Type::Var),
         Node::Continue => c.types.alloc(Type::Var),
-        Node::Fn(_, ref params, return_ty, body) => {
-            let param_tys = params.iter().map(|p| check_node(c, *p)).collect();
-            let return_ty = return_ty
-                .map(|t| check_node(c, t))
-                .unwrap_or(c.common_types.unit);
-            let fn_ty = c.types.alloc(Type::Fn(param_tys, return_ty));
+        Node::Fn(_, _, _, body) => {
             let fn_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            c.unify(c.binding_types[&fn_symbol], fn_ty, node.span(c.nodes));
+            let fn_ty = c.binding_types[&fn_symbol];
+            let Type::Fn(_, return_ty) = c.types[fn_ty] else {
+                unreachable!();
+            };
 
             let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
             let body_ty = check_node(c, body);
@@ -254,8 +257,8 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
             let callee_ty = check_node(c, callee);
             let args = args.iter().map(|arg| check_node(c, *arg)).collect();
             let ret = c.types.alloc(Type::Var);
-            let expected_callee_ty = c.types.alloc(Type::Fn(args, ret));
-            c.unify(expected_callee_ty, callee_ty, callee.span(c.nodes));
+            let expected_ty = c.types.alloc(Type::Fn(args, ret));
+            c.unify(callee_ty, expected_ty, node.span(c.nodes));
             ret
         }
         Node::Return(value) => {
