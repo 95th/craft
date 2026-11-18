@@ -356,6 +356,9 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
                 b.has_error = true;
             }
         }
+        Node::StructField(target, _) => {
+            bind_expr(b, target);
+        }
         ref node => unreachable!("{node:?}"),
     }
 }

@@ -318,18 +318,26 @@ fn call(p: &mut Parser, lhs: NodeId) -> NodeId {
 fn dot(p: &mut Parser, lhs: NodeId) -> NodeId {
     p.advance();
     let name = p.scanner.token_text().to_string();
-    p.consume(NumberLiteral, "Expect field name.");
-    let index = match name.parse() {
-        Ok(n) => n,
-        _ => {
-            p.error_at("Expect an integer tuple field", p.prev_span);
-            0
-        }
-    };
-    p.nodes.alloc(
-        Node::TupleField(lhs, index),
-        lhs.span(p.nodes).to(p.prev_span),
-    )
+    if p.eat(NumberLiteral) {
+        let index = match name.parse() {
+            Ok(n) => n,
+            _ => {
+                p.error_at("Expect an integer tuple field", p.prev_span);
+                0
+            }
+        };
+        p.nodes.alloc(
+            Node::TupleField(lhs, index),
+            lhs.span(p.nodes).to(p.prev_span),
+        )
+    } else if p.eat(Identifier) {
+        p.nodes.alloc(
+            Node::StructField(lhs, name),
+            lhs.span(p.nodes).to(p.prev_span),
+        )
+    } else {
+        p.error("Expect identifier or integer property name.")
+    }
 }
 
 fn unary(p: &mut Parser) -> NodeId {

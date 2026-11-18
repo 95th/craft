@@ -333,6 +333,27 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
 
             c.binding_types[&symbol]
         }
+        Node::StructField(expr, ref name) => {
+            let expr_ty = check_node(c, expr);
+            let Type::Named(symbol) = c.types[expr_ty] else {
+                c.error("Expect expr to be a struct instance", expr.span(c.nodes));
+                return c.types.alloc(Type::Var);
+            };
+            let Some(properties) = c.struct_properties.get(&symbol) else {
+                c.error("Expect expr to be a struct instance", expr.span(c.nodes));
+                return c.types.alloc(Type::Var);
+            };
+
+            let name_id = c.bind_ctx.interner.intern(name);
+            let Some(ty) = properties.get(&name_id) else {
+                c.error(
+                    format!("Properties does not exist: '{name}'"),
+                    expr.span(c.nodes),
+                );
+                return c.types.alloc(Type::Var);
+            };
+            *ty
+        }
     }
 }
 

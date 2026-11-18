@@ -18,7 +18,11 @@ pub enum Node {
     Continue,
     Call(NodeId, Vec<NodeId>),
     Return(Option<NodeId>),
+    Unit,
     TupleField(NodeId, u16),
+    Tuple(Vec<NodeId>),
+    Struct(String, HashMap<String, NodeId>),
+    StructField(NodeId, String),
 
     // Statements
     Let(String, Option<NodeId>, NodeId),
@@ -30,9 +34,6 @@ pub enum Node {
 
     // Type
     FnType(Vec<NodeId>, Option<NodeId>),
-    Unit,
-    Tuple(Vec<NodeId>),
-    Struct(String, HashMap<String, NodeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,7 +223,7 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, ")")
             }
-            Node::TupleField(target, name) => write!(f, "{}.{}", target.display(arena), name),
+            Node::TupleField(target, index) => write!(f, "{}.{}", target.display(arena), index),
             Node::Struct(name, fields) => {
                 write!(f, "struct {name} {{ ")?;
                 let mut sep = "";
@@ -232,6 +233,7 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, " }}")
             }
+            Node::StructField(target, name) => write!(f, "{}.{}", target.display(arena), name),
         }
     }
 }

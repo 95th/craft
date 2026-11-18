@@ -39,11 +39,12 @@ fn main() {
             a: number
         }
 
-        fn bar(f: Foo) {
+        fn bar(f: Foo) -> number {
+            f.a + 10
         }
 
         let foo = struct Foo {
-            a: true
+            a: 10
         };
         bar(foo);
     "#;
