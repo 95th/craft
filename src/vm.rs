@@ -250,11 +250,15 @@ impl VM {
                 }
                 Opcode::StructProperty => {
                     let index = self.frame.read_u16() as usize;
-                    let obj = self.stack.pop().unwrap();
-                    let data = self.heap.data(obj as usize);
-                    let bytes = unsafe { *(data[index * 8..].as_ptr() as *const [u8; 8]) };
-                    let value = u64::from_ne_bytes(bytes);
+                    let obj = self.stack.pop().unwrap() as usize;
+                    let value = self.heap.get_field(obj, index);
                     self.stack.push(value);
+                }
+                Opcode::SetStructProperty => {
+                    let index = self.frame.read_u16() as usize;
+                    let value = self.stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap() as usize;
+                    self.heap.set_field(obj, index, value);
                 }
             }
         }

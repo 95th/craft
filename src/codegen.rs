@@ -123,19 +123,45 @@ impl<'a> Codegen<'a> {
                     _ => unreachable!(),
                 }
             }
-            Expr::Assign(lhs, rhs) => {
-                let symbol = self.ast.exprs.binding(lhs);
-                let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
-                self.process_expr(rhs);
-                if index <= u8::MAX as u32 {
-                    self.code.write(Opcode::SetLocal);
-                    self.code.write_u8(index as u8);
-                } else {
-                    self.code.write(Opcode::SetLocalLong);
-                    self.code.write_u16(index as u16);
+            Expr::Assign(lhs, rhs) => match self.ast.exprs[lhs] {
+                Expr::Variable(..) => {
+                    let symbol = self.ast.exprs.binding(lhs);
+                    let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
+                    self.process_expr(rhs);
+                    if index <= u8::MAX as u32 {
+                        self.code.write(Opcode::SetLocal);
+                        self.code.write_u8(index as u8);
+                    } else {
+                        self.code.write(Opcode::SetLocalLong);
+                        self.code.write_u16(index as u16);
+                    }
+                    self.code.write(Opcode::Unit);
                 }
-                self.code.write(Opcode::Unit);
-            }
+                Expr::TupleField(expr, index) => {
+                    self.process_expr(expr);
+                    self.process_expr(rhs);
+                    self.code.write(Opcode::SetStructProperty);
+                    self.code.write_u16(index);
+                    self.code.write(Opcode::Unit);
+                }
+                Expr::StructField(expr, ref name) => {
+                    let ty = self.ty_ctx.expr_types[&expr];
+                    let Ty::Named(symbol) = self.ty_ctx.types[ty] else {
+                        unreachable!();
+                    };
+                    let properties = &self.ty_ctx.struct_properties[&symbol];
+                    let name = self.ty_ctx.bind_ctx.interner.intern(name);
+                    let index = properties
+                        .binary_search_by_key(&name, |(name, _)| *name)
+                        .unwrap();
+                    self.process_expr(expr);
+                    self.process_expr(rhs);
+                    self.code.write(Opcode::SetStructProperty);
+                    self.code.write_u16(index as u16);
+                    self.code.write(Opcode::Unit);
+                }
+                _ => unreachable!(),
+            },
             Expr::Binary(lhs, BinaryOp::And, rhs) => {
                 self.process_expr(lhs);
                 let jump_false = self.code.write_jump(Opcode::JumpIfFalse);

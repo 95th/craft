@@ -21,6 +21,7 @@ pub enum Opcode {
     Loop,
     Struct,
     StructProperty,
+    SetStructProperty,
 
     Add,
     Sub,

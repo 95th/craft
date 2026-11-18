@@ -391,7 +391,7 @@ fn assignment(p: &mut Parser, lhs: ExprId) -> ExprId {
     let rhs = expression(p);
     let lhs_span = p.ast.exprs.span(lhs);
     match p.ast.exprs[lhs] {
-        Expr::Variable(..) => p
+        Expr::Variable(..) | Expr::StructField(..) | Expr::TupleField(..) => p
             .ast
             .exprs
             .alloc(Expr::Assign(lhs, rhs), lhs_span.to(p.prev_span)),

@@ -33,6 +33,20 @@ impl Heap {
         &mut self.get_mut(index).data
     }
 
+    pub fn get_field(&self, obj: usize, index: usize) -> u64 {
+        let data = self.data(obj);
+        let bytes = unsafe { *(data[index * 8..].as_ptr() as *const [u8; 8]) };
+        u64::from_ne_bytes(bytes)
+    }
+
+    pub fn set_field(&mut self, obj: usize, index: usize, value: u64) {
+        let data = self.data_mut(obj as usize);
+        let bytes = data[index * 8..].as_mut_ptr();
+        unsafe {
+            std::ptr::copy_nonoverlapping(value.to_ne_bytes().as_ptr(), bytes, 8);
+        }
+    }
+
     fn get(&self, index: usize) -> &Obj<[u8]> {
         let thin = self.data[index..].as_ptr() as *const Obj<[u8; 0]>;
         let len = unsafe { (*thin).len as usize };

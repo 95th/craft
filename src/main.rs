@@ -164,6 +164,21 @@ mod tests {
     }
 
     #[test]
+    fn test_tuple_assign_fields() {
+        let source = r#"
+            let foo = (10, "hello world", true);
+            print_number(foo.0);
+            print_string(foo.1);
+
+            foo.0 = 20;
+            foo.1 = "bye world";
+            print_number(foo.0);
+            print_string(foo.1);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_tuples_fail_mismatch_inner() {
         let source = r#"
             fn foo(a: number, b: number) -> number { 1 }
@@ -208,6 +223,31 @@ mod tests {
 
             print_string(foo.b);
             print_number(foo.a);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_struct_assign_fields() {
+        let source = r#"
+            struct Foo {
+                a: number,
+                b: string,
+                c: bool
+            }
+
+            let foo = Foo {
+                a: 10,
+                b: "hello world",
+                c: true
+            };
+            print_number(foo.a);
+            print_string(foo.b);
+
+            foo.a = 20;
+            foo.b = "bye world";
+            print_number(foo.a);
+            print_string(foo.b);
         "#;
         run_ok(source);
     }
