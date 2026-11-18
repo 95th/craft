@@ -62,13 +62,20 @@ impl<'a> Codegen<'a> {
     }
 
     fn process_function(&mut self, function: StmtId) {
-        let symbol = self.ast.stmts.binding(function);
+        let symbol = self.ast.stmts.value_binding(function);
         self.functions.insert(symbol, self.code.len());
-        let Stmt::Fn(.., body) = self.ast.stmts[function] else {
-            unreachable!();
+        match self.ast.stmts[function] {
+            Stmt::Fn(.., body) => {
+                self.process_expr(body);
+                self.code.write(Opcode::Return);
+            }
+            Stmt::TupleStruct(.., ref args) => {
+                self.code.write(Opcode::Struct);
+                self.code.write_u16(args.len() as u16);
+                self.code.write(Opcode::Return);
+            }
+            _ => unreachable!(),
         };
-        self.process_expr(body);
-        self.code.write(Opcode::Return);
     }
 
     fn process_stmt(&mut self, stmt: StmtId) {
@@ -105,7 +112,7 @@ impl<'a> Codegen<'a> {
                 self.code.write(Opcode::Negate)
             }
             Expr::Variable(_) => {
-                let symbol_id = self.ast.exprs.binding(expr);
+                let symbol_id = self.ast.exprs.value_binding(expr);
                 let symbol = &self.ty_ctx.bind_ctx.symbols[symbol_id];
                 match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
@@ -128,7 +135,7 @@ impl<'a> Codegen<'a> {
             }
             Expr::Assign(lhs, rhs) => match self.ast.exprs[lhs] {
                 Expr::Variable(..) => {
-                    let symbol = self.ast.exprs.binding(lhs);
+                    let symbol = self.ast.exprs.value_binding(lhs);
                     let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
                     self.process_expr(rhs);
                     if index <= u8::MAX as u32 {
@@ -206,7 +213,7 @@ impl<'a> Codegen<'a> {
                 for &arg in args {
                     self.process_expr(arg);
                 }
-                let symbol = self.ast.exprs.binding(callee);
+                let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.ty_ctx.bind_ctx.print_function {
                     let ty = self.ty_ctx.expr_types[&args[0]];
                     match self.ty_ctx.types[ty] {
@@ -318,7 +325,7 @@ impl<'a> Codegen<'a> {
                 self.code.write_u16(index);
             }
             Expr::Struct(.., ref fields) => {
-                let symbol = self.ast.exprs.binding(expr);
+                let symbol = self.ast.exprs.value_binding(expr);
                 let properties = &self.ty_ctx.struct_properties[&symbol];
                 let mut exprs = Vec::with_capacity(properties.len());
                 for (name, _) in properties {
@@ -386,7 +393,7 @@ impl AstVisitor for NodeCollector {
     fn visit_stmt(&mut self, stmt: StmtId, ast: &AstNodes) {
         match ast.stmts[stmt] {
             Stmt::Struct(..) => self.structs.push(stmt),
-            Stmt::Fn(..) => self.functions.push(stmt),
+            Stmt::Fn(..) | Stmt::TupleStruct(..) => self.functions.push(stmt),
             _ => {}
         }
     }

@@ -133,7 +133,11 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.type_scope, name, kind, declaration)
+        let symbol = self.declare_symbol(self.type_scope, name, kind);
+        if declaration != StmtId::MAX {
+            self.ast.stmts.bind_type(declaration, symbol);
+        }
+        symbol
     }
 
     fn declare_value(&mut self, name: StrId, kind: SymbolKind, declaration: StmtId) -> SymbolId {
@@ -145,8 +149,11 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        let symbol = self.declare_symbol(self.value_scope, name, kind, declaration);
+        let symbol = self.declare_symbol(self.value_scope, name, kind);
         self.local_count += 1;
+        if declaration != StmtId::MAX {
+            self.ast.stmts.bind_value(declaration, symbol);
+        }
         symbol
     }
 
@@ -159,25 +166,20 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.fn_scope, name, SymbolKind::Fn, declaration)
+        let symbol = self.declare_symbol(self.fn_scope, name, SymbolKind::Fn);
+        if declaration != StmtId::MAX {
+            self.ast.stmts.bind_value(declaration, symbol);
+        }
+        symbol
     }
 
-    fn declare_symbol(
-        &mut self,
-        scope: ScopeId,
-        name: StrId,
-        kind: SymbolKind,
-        declaration: StmtId,
-    ) -> SymbolId {
+    fn declare_symbol(&mut self, scope: ScopeId, name: StrId, kind: SymbolKind) -> SymbolId {
         let symbol = self.symbols.alloc(Symbol {
             name,
             kind,
             local_index: self.local_count,
         });
         self.scopes[scope].symbols.insert(name, symbol);
-        if declaration != StmtId::MAX {
-            self.ast.stmts.bind(declaration, symbol);
-        }
         symbol
     }
 
@@ -261,6 +263,11 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
             let name = b.interner.intern(name);
             b.declare_type(name, SymbolKind::Struct, stmt);
         }
+        Stmt::TupleStruct(name, ..) => {
+            let name = b.interner.intern(name);
+            b.declare_type(name, SymbolKind::Struct, stmt);
+            b.declare_fn(name, stmt);
+        }
         _ => (),
     }
 }
@@ -310,6 +317,11 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
                 bind_ty(b, *ty)
             }
         }
+        Stmt::TupleStruct(_, ref types) => {
+            for ty in types {
+                bind_ty(b, *ty)
+            }
+        }
     }
 }
 
@@ -318,7 +330,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::Variable(ref name) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_value(name_id) {
-                b.ast.exprs.bind(node, symbol);
+                b.ast.exprs.bind_value(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.exprs.span(node));
@@ -384,7 +396,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::Struct(ref name, ref fields) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_type(name_id) {
-                b.ast.exprs.bind(node, symbol);
+                b.ast.exprs.bind_value(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.exprs.span(node));
@@ -420,7 +432,7 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
         Type::Named(ref name) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_type(name_id) {
-                b.ast.types.bind(node, symbol);
+                b.ast.types.bind_type(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.types.span(node));

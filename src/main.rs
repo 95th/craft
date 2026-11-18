@@ -668,4 +668,19 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_tuple_struct() {
+        let source = r#"
+            struct Bar(number);
+            struct Foo(number, string, Bar);
+            let bar = Bar(10);
+            let foo = Foo(20, "hello", bar);
+            print(foo.0);
+            print(foo.1);
+            print(foo.2);
+            print(foo.2.0);
+        "#;
+        run_ok(source);
+    }
 }

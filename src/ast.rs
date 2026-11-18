@@ -57,6 +57,7 @@ pub enum Stmt {
     Param(String, TypeId),
     Fn(String, Vec<StmtId>, Vec<StmtId>, Option<TypeId>, ExprId),
     Struct(String, FxIndexMap<String, TypeId>),
+    TupleStruct(String, Vec<TypeId>),
     TypeParam(String),
 }
 
@@ -170,6 +171,11 @@ impl AstNodes {
             Stmt::Expr(expr, _) => self.visit_expr(expr, visitor),
             Stmt::Param(_, type_id) => self.visit_type(type_id, visitor),
             Stmt::TypeParam(..) => {}
+            Stmt::TupleStruct(_, ref types) => {
+                for ty in types {
+                    self.visit_type(*ty, visitor);
+                }
+            }
         }
     }
 

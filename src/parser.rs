@@ -249,6 +249,25 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "expect identifier");
+
+    if p.eat(OpenParen) {
+        let mut types = Vec::new();
+        if p.token != CloseParen {
+            loop {
+                types.push(ty(p));
+                if !p.eat(Comma) {
+                    break;
+                }
+            }
+        }
+        p.consume(CloseParen, "expect ')'");
+        p.consume(Semicolon, "expect ';'");
+        return p
+            .ast
+            .stmts
+            .alloc(Stmt::TupleStruct(name, types), start.to(p.prev_span));
+    }
+
     p.consume(OpenBrace, "expect '{'");
     let mut fields = FxIndexMap::default();
     if p.token != CloseBrace {

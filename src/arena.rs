@@ -101,7 +101,8 @@ pub type AstId<T> = Id<(T, Span)>;
 pub struct AstArena<T> {
     nodes: Vec<T>,
     spans: Vec<Span>,
-    bindings: Vec<Cell<SymbolId>>,
+    type_bindings: Vec<Cell<SymbolId>>,
+    value_bindings: Vec<Cell<SymbolId>>,
 }
 
 impl<T> AstArena<T> {
@@ -109,7 +110,8 @@ impl<T> AstArena<T> {
         Self {
             nodes: Vec::new(),
             spans: Vec::new(),
-            bindings: Vec::new(),
+            type_bindings: Vec::new(),
+            value_bindings: Vec::new(),
         }
     }
 
@@ -117,7 +119,8 @@ impl<T> AstArena<T> {
         let idx = AstId::new(self.nodes.len());
         self.nodes.push(value);
         self.spans.push(span);
-        self.bindings.push(Cell::new(SymbolId::MAX));
+        self.type_bindings.push(Cell::new(SymbolId::MAX));
+        self.value_bindings.push(Cell::new(SymbolId::MAX));
         idx
     }
 
@@ -125,13 +128,22 @@ impl<T> AstArena<T> {
         self.spans[index.idx as usize]
     }
 
-    pub fn bind(&self, index: AstId<T>, symbol: SymbolId) {
-        let prev = self.bindings[index.idx as usize].replace(symbol);
+    pub fn bind_type(&self, index: AstId<T>, symbol: SymbolId) {
+        let prev = self.type_bindings[index.idx as usize].replace(symbol);
         debug_assert_eq!(prev, SymbolId::MAX);
     }
 
-    pub fn binding(&self, index: AstId<T>) -> SymbolId {
-        self.bindings[index.idx as usize].get()
+    pub fn type_binding(&self, index: AstId<T>) -> SymbolId {
+        self.type_bindings[index.idx as usize].get()
+    }
+
+    pub fn bind_value(&self, index: AstId<T>, symbol: SymbolId) {
+        let prev = self.value_bindings[index.idx as usize].replace(symbol);
+        debug_assert_eq!(prev, SymbolId::MAX);
+    }
+
+    pub fn value_binding(&self, index: AstId<T>) -> SymbolId {
+        self.value_bindings[index.idx as usize].get()
     }
 
     pub fn len(&self) -> usize {
@@ -141,7 +153,8 @@ impl<T> AstArena<T> {
     pub fn truncate(&mut self, len: usize) {
         self.nodes.truncate(len);
         self.spans.truncate(len);
-        self.bindings.truncate(len);
+        self.type_bindings.truncate(len);
+        self.value_bindings.truncate(len);
     }
 }
 
