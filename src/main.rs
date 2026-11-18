@@ -61,7 +61,7 @@ fn main() {
             fib(n - 1) + fib(n - 2)
         }
 
-        print_number(fib(35));
+        print(fib(35));
     "#;
 
     let start = Instant::now();
@@ -122,10 +122,10 @@ mod tests {
     fn test_and_or() {
         let source = r#"
             let x = 1;
-            if x == 12 && x > 1 { print_number(x + 1); }
-            if x == 1 || x > 1 {  print_number(x + 2); }
-            if x == 1 && x > 1 {  print_number(x + 3); }
-            if x == 12 || x > 1 { print_number(x + 4); }
+            if x == 12 && x > 1 { print(x + 1); }
+            if x == 1 || x > 1 {  print(x + 2); }
+            if x == 1 && x > 1 {  print(x + 3); }
+            if x == 12 || x > 1 { print(x + 4); }
         "#;
         run_ok(source)
     }
@@ -152,7 +152,7 @@ mod tests {
     fn test_tuple() {
         let source = r#"
             let s = (1, 2, ("hello world", 20));
-            print_string(s.2.0);
+            print(s.2.0);
         "#;
         run_ok(source);
     }
@@ -172,13 +172,13 @@ mod tests {
     fn test_tuple_assign_fields() {
         let source = r#"
             let foo = (10, "hello world", true);
-            print_number(foo.0);
-            print_string(foo.1);
+            print(foo.0);
+            print(foo.1);
 
             foo.0 = 20;
             foo.1 = "bye world";
-            print_number(foo.0);
-            print_string(foo.1);
+            print(foo.0);
+            print(foo.1);
         "#;
         run_ok(source);
     }
@@ -226,8 +226,8 @@ mod tests {
                 c: true
             };
 
-            print_string(foo.b);
-            print_number(foo.a);
+            print(foo.b);
+            print(foo.a);
         "#;
         run_ok(source);
     }
@@ -246,13 +246,13 @@ mod tests {
                 b: "hello world",
                 c: true
             };
-            print_number(foo.a);
-            print_string(foo.b);
+            print(foo.a);
+            print(foo.b);
 
             foo.a = 20;
             foo.b = "bye world";
-            print_number(foo.a);
-            print_string(foo.b);
+            print(foo.a);
+            print(foo.b);
         "#;
         run_ok(source);
     }
@@ -358,7 +358,7 @@ mod tests {
     fn test_for() {
         let source = r#"
             for (let i = 0; i < 10; i = i + 1) {
-                print_number(i);
+                print(i);
             }
         "#;
         run_ok(source);
@@ -369,7 +369,7 @@ mod tests {
         let source = r#"
             let i = 0;
             for (; i < 10; i = i + 1) {
-                print_number(i);
+                print(i);
             }
         "#;
         run_ok(source);
@@ -380,7 +380,7 @@ mod tests {
         let source = r#"
             let i = 0;
             for (; i < 10;) {
-                print_number(i);
+                print(i);
                 i = i + 1;
             }
         "#;
@@ -392,7 +392,7 @@ mod tests {
         let source = r#"
             let i = 0;
             for (;;) {
-                print_number(i);
+                print(i);
                 i = i + 1;
                 if i >= 10 {
                     break;
@@ -412,7 +412,7 @@ mod tests {
                 if i == 2 {
                     continue;
                 }
-                print_number(i);
+                print(i);
             }
         "#;
         run_ok(source);
@@ -487,12 +487,12 @@ mod tests {
         let source = r#"
             let a = 10;
             a = a + 1 - 4 / 2 * 1.2;
-            print_number(a);
+            print(a);
             a = {
                 let b = 20;
                 b + 1
             };
-            print_number(a);
+            print(a);
         "#;
         run_ok(source);
     }
@@ -502,11 +502,11 @@ mod tests {
         let source = r#"
             let a = 10;
             if a > 10 {
-                print_number(a);
+                print(a);
             } else {
-                print_number(5);
+                print(5);
             }
-            print_number(4);
+            print(4);
         "#;
         run_ok(source);
     }
@@ -516,10 +516,10 @@ mod tests {
         let source = r#"
             let a = 10;
             while a > 0 {
-                print_number(a);
+                print(a);
                 a = a - 1;
             }
-            print_number(100);
+            print(100);
         "#;
         run_ok(source);
     }
@@ -529,7 +529,7 @@ mod tests {
         let source = r#"
             let i = 0;
             while true {
-                print_number(i);
+                print(i);
                 i = i + 1;
                 if i == 10 {
                     break;
@@ -544,7 +544,7 @@ mod tests {
         let source = r#"
             let i = 0;
             while true {
-                print_number(i);
+                print(i);
                 i = i + 1;
                 if i < 10 {
                     continue;
@@ -559,7 +559,7 @@ mod tests {
     fn test_functions() {
         let source = r#"
             fn foo(n: number) {
-                print_number(n);
+                print(n);
             }
 
             foo(10);
@@ -579,7 +579,7 @@ mod tests {
                 fib(n - 1) + fib(n - 2)
             }
 
-            print_number(fib(35));
+            print(fib(35));
         "#;
         run_ok(source);
     }
@@ -588,7 +588,7 @@ mod tests {
     fn test_string() {
         let source = r#"
             let s = "hello world";
-            print_string(s);
+            print(s);
         "#;
         run_ok(source);
     }
@@ -601,8 +601,8 @@ mod tests {
             }
 
             let f: fn<T>(number, T) -> (number, T) = foo;
-            print_number(f(10, true).0);
-            print_number(f(20, false).0);
+            print(f(10, true).0);
+            print(f(20, false).0);
         "#;
         run_ok(source);
     }

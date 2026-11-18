@@ -59,20 +59,15 @@ impl<'a> TypeChecker<'a> {
             .insert(self.bind_ctx.string_type, self.common_types.string);
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
-        self.binding_types.insert(
-            self.bind_ctx.print_number_function,
-            self.types.alloc(Ty::Fn(
-                vec![self.common_types.number],
-                self.common_types.unit,
-            )),
-        );
-        self.binding_types.insert(
-            self.bind_ctx.print_string_function,
-            self.types.alloc(Ty::Fn(
-                vec![self.common_types.string],
-                self.common_types.unit,
-            )),
-        );
+
+        let print_arg_ty = self.types.alloc(Ty::Var);
+        let print_fn_ty = self
+            .types
+            .alloc(Ty::Fn(vec![print_arg_ty], self.common_types.unit));
+        self.binding_types
+            .insert(self.bind_ctx.print_function, print_fn_ty);
+        self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
+
         check_scope(&mut self, nodes);
         if self.has_error {
             Err(Error::TypeCheck)

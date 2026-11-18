@@ -204,11 +204,14 @@ impl<'a> Codegen<'a> {
                     self.process_expr(arg);
                 }
                 let symbol = self.ast.exprs.binding(callee);
-                if symbol == self.ty_ctx.bind_ctx.print_number_function {
-                    self.code.write(Opcode::PrintNumber);
-                    self.code.write(Opcode::Unit);
-                } else if symbol == self.ty_ctx.bind_ctx.print_string_function {
-                    self.code.write(Opcode::PrintString);
+                if symbol == self.ty_ctx.bind_ctx.print_function {
+                    let ty = self.ty_ctx.expr_types[&args[0]];
+                    match self.ty_ctx.types[ty] {
+                        Ty::Number => self.code.write(Opcode::PrintNumber),
+                        Ty::String => self.code.write(Opcode::PrintString),
+                        Ty::Bool => self.code.write(Opcode::PrintBool),
+                        _ => self.code.write(Opcode::PrintObj),
+                    }
                     self.code.write(Opcode::Unit);
                 } else {
                     self.process_expr(callee);

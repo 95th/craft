@@ -12,8 +12,12 @@ pub enum Opcode {
     GetLocalLong,
     SetLocal,
     SetLocalLong,
+
     PrintNumber,
     PrintString,
+    PrintBool,
+    PrintObj,
+
     Call,
     Pop,
     JumpIfFalse,

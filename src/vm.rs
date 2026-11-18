@@ -208,6 +208,14 @@ impl VM {
                     let value = std::str::from_utf8(bytes).unwrap();
                     println!("{value}");
                 }
+                Opcode::PrintBool => {
+                    let value = self.stack.pop().unwrap();
+                    println!("{}", value == TRUE);
+                }
+                Opcode::PrintObj => {
+                    self.stack.pop().unwrap();
+                    println!("<object>");
+                }
                 Opcode::Unit => self.stack.push(0),
                 Opcode::Pop => {
                     self.stack.pop().unwrap();
