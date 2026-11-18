@@ -1,5 +1,6 @@
 use crate::{ast::NodeArena, bind::Binder, parser::Parser};
 
+mod arena;
 mod ast;
 mod bind;
 mod interner;

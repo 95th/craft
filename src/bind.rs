@@ -1,16 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
+    arena::{Arena, Idx},
     ast::{Node, NodeArena, NodeId},
     interner::{StrId, StrInterner},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ScopeId(usize);
-
-impl ScopeId {
-    const ERROR: Self = Self(usize::MAX);
-}
+type ScopeId = Idx<Scope>;
 
 pub struct Symbol {
     pub kind: SymbolKind,
@@ -25,8 +21,7 @@ pub enum SymbolKind {
     Type,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SymbolId(u32);
+type SymbolId = Idx<Symbol>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ScopeKind {
@@ -43,10 +38,10 @@ struct Scope {
 
 pub struct Binder<'a> {
     nodes: &'a NodeArena,
-    scopes: Vec<Scope>,
+    scopes: Arena<Scope>,
     value_scope: ScopeId,
     type_scope: ScopeId,
-    symbols: Vec<Symbol>,
+    symbols: Arena<Symbol>,
     interner: StrInterner,
     bindings: Vec<Option<SymbolId>>,
     has_error: bool,
@@ -56,10 +51,10 @@ impl<'a> Binder<'a> {
     pub fn new(nodes: &'a NodeArena) -> Self {
         Self {
             nodes,
-            scopes: Vec::new(),
-            value_scope: ScopeId::ERROR,
-            type_scope: ScopeId::ERROR,
-            symbols: Vec::new(),
+            scopes: Arena::new(),
+            value_scope: ScopeId::MAX,
+            type_scope: ScopeId::MAX,
+            symbols: Arena::new(),
             interner: StrInterner::new(),
             bindings: vec![None; nodes.len()],
             has_error: false,
@@ -91,7 +86,7 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_type(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.type_scope.0].symbols.contains_key(&name) {
+        if self.scopes[self.type_scope].symbols.contains_key(&name) {
             println!(
                 "Another type with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -103,7 +98,7 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_value(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.value_scope.0].symbols.contains_key(&name) {
+        if self.scopes[self.value_scope].symbols.contains_key(&name) {
             println!(
                 "Another variable with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
@@ -115,14 +110,14 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_symbol(&mut self, scope: ScopeId, name: StrId, symbol: Symbol) {
-        let symbol_id = self.create_symbol(symbol);
-        self.scopes[scope.0].symbols.insert(name, symbol_id);
+        let symbol = self.symbols.alloc(symbol);
+        self.scopes[scope].symbols.insert(name, symbol);
     }
 
     fn lookup_type(&self, name: StrId) -> Option<SymbolId> {
         let mut curr = Some(self.type_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0];
+            let scope = &self.scopes[scope];
             if let Some(symbol) = scope.symbols.get(&name) {
                 return Some(*symbol);
             }
@@ -134,7 +129,7 @@ impl<'a> Binder<'a> {
     fn lookup_value(&self, name: StrId) -> Option<SymbolId> {
         let mut curr = Some(self.value_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0];
+            let scope = &self.scopes[scope];
             if let Some(symbol) = scope.symbols.get(&name) {
                 return Some(*symbol);
             }
@@ -149,19 +144,13 @@ impl<'a> Binder<'a> {
     fn in_value_scope_of(&self, kind: ScopeKind) -> bool {
         let mut curr = Some(self.value_scope);
         while let Some(scope) = curr {
-            let scope = &self.scopes[scope.0];
+            let scope = &self.scopes[scope];
             if scope.kind == kind {
                 return true;
             }
             curr = scope.parent;
         }
         false
-    }
-
-    fn create_symbol(&mut self, symbol: Symbol) -> SymbolId {
-        let id = self.symbols.len();
-        self.symbols.push(symbol);
-        SymbolId(id as u32)
     }
 
     fn with_scope<R>(&mut self, kind: ScopeKind, f: impl FnOnce(&mut Self) -> R) -> R {
@@ -178,13 +167,11 @@ impl<'a> Binder<'a> {
     }
 
     fn create_scope(&mut self, kind: ScopeKind, parent: Option<ScopeId>) -> ScopeId {
-        let id = ScopeId(self.scopes.len());
-        self.scopes.push(Scope {
+        self.scopes.alloc(Scope {
             kind,
             symbols: HashMap::new(),
             parent,
-        });
-        id
+        })
     }
 }
 
