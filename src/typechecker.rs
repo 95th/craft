@@ -14,7 +14,6 @@ use crate::{
 pub struct TyContext {
     pub bind_ctx: BindCtx,
     pub types: Arena<Ty>,
-    pub binding_types: HashMap<SymbolId, TyId>,
     pub struct_properties: HashMap<SymbolId, Vec<(StrId, TyId)>>,
     pub expr_types: HashMap<ExprId, TyId>,
 }
@@ -78,7 +77,6 @@ impl<'a> TypeChecker<'a> {
             Ok(TyContext {
                 bind_ctx: self.bind_ctx,
                 types: self.types,
-                binding_types: self.binding_types,
                 struct_properties: self.struct_properties,
                 expr_types: self.expr_types,
             })

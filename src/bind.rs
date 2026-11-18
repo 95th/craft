@@ -32,7 +32,6 @@ pub struct Scope {
 }
 
 pub struct BindCtx {
-    pub scopes: Arena<Scope>,
     pub symbols: Arena<Symbol>,
     pub interner: StrInterner,
     pub number_type: SymbolId,
@@ -98,7 +97,6 @@ impl<'a> Binder<'a> {
             return Err(Error::Bind);
         }
         Ok(BindCtx {
-            scopes: self.scopes,
             symbols: self.symbols,
             interner: self.interner,
             number_type: self.number_type,

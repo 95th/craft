@@ -118,10 +118,6 @@ impl Span {
         }
     }
 
-    pub fn text(self, source: &str) -> &str {
-        &source[self.start as usize..self.end as usize]
-    }
-
     pub fn to(self, other: Self) -> Self {
         Self {
             start: self.start,
