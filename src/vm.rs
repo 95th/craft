@@ -247,9 +247,7 @@ impl VM {
                 }
                 Opcode::Struct => {
                     let count = self.frame.read_u16() as usize;
-                    let ptr =
-                        self.stack[self.stack.len() - count..].as_ptr() as *const u64 as *const u8;
-                    let data = unsafe { std::slice::from_raw_parts(ptr, count * 8) };
+                    let data = bits_to_bytes(&self.stack[self.stack.len() - count..]);
                     let obj = self.heap.alloc(ObjKind::Struct, data);
                     for _ in 0..count {
                         self.stack.pop().unwrap();
@@ -261,7 +259,7 @@ impl VM {
                     let value = self.stack.pop().unwrap();
                     let count = number_to_usize(count);
                     let data = vec![value; count];
-                    let data: &[u8] = unsafe { std::mem::transmute(&data[..]) };
+                    let data = bits_to_bytes(&data[..]);
                     let obj = self.heap.alloc(ObjKind::Struct, data);
                     self.stack.push(obj as u64);
                 }
@@ -309,4 +307,10 @@ fn number_to_usize(n: u64) -> usize {
         panic!("Value must be an integer");
     }
     n as usize
+}
+
+fn bits_to_bytes(data: &[u64]) -> &[u8] {
+    let ptr = data.as_ptr() as *const u8;
+    let len = data.len() * 8;
+    unsafe { std::slice::from_raw_parts(ptr, len) }
 }
