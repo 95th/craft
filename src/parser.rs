@@ -551,7 +551,7 @@ fn for_expr(p: &mut Parser) -> ExprId {
     let init = if p.eat(Semicolon) {
         None
     } else if p.token == Let {
-        Some(declaration(p))
+        Some(let_declaration(p))
     } else {
         Some(expression_statement(p))
     };
