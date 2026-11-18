@@ -279,6 +279,10 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
                 bind_expr(b, else_clause)
             }
         }
+        Node::While(cond, body) => {
+            bind_expr(b, cond);
+            bind_expr(b, body);
+        }
         Node::Block(ref nodes, expr) => b.with_scope(ScopeKind::Block, |b| {
             bind_scope(b, nodes);
             if let Some(expr) = expr {
