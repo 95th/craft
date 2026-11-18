@@ -4,35 +4,31 @@ use std::collections::HashMap;
 use crate::{
     Error,
     arena::Arena,
-    ast::{BinaryOp, Node, NodeArena, NodeId, Span},
+    ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     bind::{BindCtx, SymbolId},
     diagnostics::Diagnostic,
     interner::StrId,
-    types::{CommonTypes, Type, TypeId},
+    types::{CommonTypes, Ty, TyId},
 };
 
 pub struct TypeChecker<'a> {
-    nodes: &'a NodeArena,
+    ast: &'a AstNodes,
     diagnostics: &'a mut Vec<Diagnostic>,
     bind_ctx: BindCtx,
-    types: Arena<Type>,
+    types: Arena<Ty>,
     common_types: CommonTypes,
     has_error: bool,
-    containing_return_ty: Option<TypeId>,
-    binding_types: HashMap<SymbolId, TypeId>,
-    struct_properties: HashMap<SymbolId, HashMap<StrId, TypeId>>,
+    containing_return_ty: Option<TyId>,
+    binding_types: HashMap<SymbolId, TyId>,
+    struct_properties: HashMap<SymbolId, HashMap<StrId, TyId>>,
 }
 
 impl<'a> TypeChecker<'a> {
-    pub fn new(
-        nodes: &'a NodeArena,
-        diagnostics: &'a mut Vec<Diagnostic>,
-        bind_ctx: BindCtx,
-    ) -> Self {
+    pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Vec<Diagnostic>, bind_ctx: BindCtx) -> Self {
         let mut types = Arena::new();
         let common_types = CommonTypes::new(&mut types);
         Self {
-            nodes,
+            ast,
             diagnostics,
             bind_ctx,
             types,
@@ -44,7 +40,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    pub fn check(&mut self, nodes: &[NodeId]) -> Result<(), Error> {
+    pub fn check(&mut self, nodes: &[StmtId]) -> Result<(), Error> {
         self.binding_types
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
@@ -59,7 +55,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn unify(&mut self, lhs: TypeId, rhs: TypeId, span: Span) {
+    fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
         if !self.try_unify(lhs, rhs) {
             self.error(
                 format!(
@@ -72,12 +68,12 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn try_unify(&mut self, lhs: TypeId, rhs: TypeId) -> bool {
+    fn try_unify(&mut self, lhs: TyId, rhs: TyId) -> bool {
         if lhs == rhs || self.types[lhs] == self.types[rhs] {
             return true;
         }
         match (&self.types[lhs], &self.types[rhs]) {
-            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
                 let mut result = true;
                 for (a, b) in a.clone().iter().zip(b.clone().iter()) {
                     if !self.try_unify(*a, *b) {
@@ -86,7 +82,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 result
             }
-            (&Type::Fn(ref a_params, a_ret), &Type::Fn(ref b_params, b_ret)) => {
+            (&Ty::Fn(ref a_params, a_ret), &Ty::Fn(ref b_params, b_ret)) => {
                 if a_params.len() != b_params.len() {
                     return false;
                 }
@@ -101,12 +97,12 @@ impl<'a> TypeChecker<'a> {
                 }
                 result
             }
-            (Type::Var, Type::Var) => false,
-            (Type::Var, other) => {
+            (Ty::Var, Ty::Var) => false,
+            (Ty::Var, other) => {
                 self.types[lhs] = other.clone();
                 true
             }
-            (other, Type::Var) => {
+            (other, Ty::Var) => {
                 self.types[rhs] = other.clone();
                 true
             }
@@ -123,36 +119,36 @@ impl<'a> TypeChecker<'a> {
     }
 }
 
-fn check_scope(c: &mut TypeChecker, nodes: &[NodeId]) {
+fn check_scope(c: &mut TypeChecker, nodes: &[StmtId]) {
     for node in nodes {
         declare_item(c, *node);
     }
 
     for node in nodes {
-        check_node(c, *node);
+        check_stmt(c, *node);
     }
 }
 
-fn declare_item(c: &mut TypeChecker, node: NodeId) {
-    match *node.get(c.nodes) {
-        Node::Fn(_, ref params, return_ty, _) => {
-            let param_tys = params.iter().map(|p| check_node(c, *p)).collect();
+fn declare_item(c: &mut TypeChecker, node: StmtId) {
+    match c.ast.stmts[node] {
+        Stmt::Fn(_, ref params, return_ty, _) => {
+            let param_tys = params.iter().map(|p| check_stmt(c, *p)).collect();
             let return_ty = return_ty
-                .map(|t| check_node(c, t))
+                .map(|t| check_type(c, t))
                 .unwrap_or(c.common_types.unit);
-            let fn_ty = c.types.alloc(Type::Fn(param_tys, return_ty));
-            let fn_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+            let fn_ty = c.types.alloc(Ty::Fn(param_tys, return_ty));
+            let fn_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
             c.binding_types.insert(fn_symbol, fn_ty);
         }
-        Node::Struct(_, ref fields) => {
+        Stmt::Struct(_, ref fields) => {
             let mut properties = HashMap::new();
             for (name, ty) in fields {
                 let name = c.bind_ctx.interner.intern(name);
-                let ty = check_node(c, *ty);
+                let ty = check_type(c, *ty);
                 properties.insert(name, ty);
             }
-            let struct_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            let struct_ty = c.types.alloc(Type::Named(struct_symbol));
+            let struct_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
             c.binding_types.insert(struct_symbol, struct_ty);
             c.struct_properties.insert(struct_symbol, properties);
         }
@@ -160,25 +156,60 @@ fn declare_item(c: &mut TypeChecker, node: NodeId) {
     }
 }
 
-fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
-    crate::stack_safe(|| check_node_inner(c, node))
-}
-
-fn check_node_inner(c: &mut TypeChecker, node: NodeId) -> TypeId {
-    match *node.get(c.nodes) {
-        Node::Bool(_) => c.common_types.boolean,
-        Node::Number(_) => c.common_types.number,
-        Node::String(_) => c.common_types.string,
-        Node::Assign(lhs, rhs) => {
-            let lhs_ty = check_node(c, lhs);
-            let rhs_ty = check_node(c, rhs);
-            c.unify(lhs_ty, rhs_ty, rhs.span(c.nodes));
+fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
+    match c.ast.stmts[node] {
+        Stmt::Let(_, ty, init) => {
+            let init_ty = check_expr(c, init);
+            if let Some(ty) = ty {
+                let ty = check_type(c, ty);
+                c.unify(ty, init_ty, c.ast.exprs.span(init));
+            }
+            let symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            c.binding_types.insert(symbol, init_ty);
             c.common_types.unit
         }
-        Node::Binary(lhs, op, rhs) => {
-            let lhs_ty = check_node(c, lhs);
-            let rhs_ty = check_node(c, rhs);
-            c.unify(lhs_ty, rhs_ty, rhs.span(c.nodes));
+        Stmt::Fn(_, _, _, body) => {
+            let fn_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let fn_ty = c.binding_types[&fn_symbol];
+            let Ty::Fn(_, return_ty) = c.types[fn_ty] else {
+                unreachable!();
+            };
+
+            let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
+            let body_ty = check_expr(c, body);
+            c.unify(return_ty, body_ty, c.ast.exprs.span(body));
+            c.containing_return_ty = prev_containing_return_ty;
+            c.common_types.unit
+        }
+        Stmt::Param(_, ty) => {
+            let ty = check_type(c, ty);
+            let symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            c.binding_types.insert(symbol, ty);
+            ty
+        }
+        Stmt::Expr(expr, semi) => {
+            let ty = check_expr(c, expr);
+            if semi { c.common_types.unit } else { ty }
+        }
+        Stmt::Struct(..) => c.common_types.unit,
+    }
+}
+
+fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
+    match c.ast.exprs[node] {
+        Expr::Bool(_) => c.common_types.boolean,
+        Expr::Number(_) => c.common_types.number,
+        Expr::String(_) => c.common_types.string,
+        Expr::Assign(lhs, rhs) => {
+            let lhs_ty = check_expr(c, lhs);
+            let rhs_ty = check_expr(c, rhs);
+            c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+            c.common_types.unit
+        }
+        Expr::Binary(lhs, op, rhs) => {
+            let lhs_ty = check_expr(c, lhs);
+            let rhs_ty = check_expr(c, rhs);
+            c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
             match op {
                 BinaryOp::Add
                 | BinaryOp::Sub
@@ -186,158 +217,124 @@ fn check_node_inner(c: &mut TypeChecker, node: NodeId) -> TypeId {
                 | BinaryOp::Div
                 | BinaryOp::BitOr
                 | BinaryOp::BitAnd => {
-                    c.unify(c.common_types.number, lhs_ty, lhs.span(c.nodes));
+                    c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
                     c.common_types.number
                 }
                 BinaryOp::Greater
                 | BinaryOp::GreaterEqual
                 | BinaryOp::Less
                 | BinaryOp::LessEqual => {
-                    c.unify(c.common_types.number, lhs_ty, lhs.span(c.nodes));
+                    c.unify(c.common_types.number, lhs_ty, c.ast.exprs.span(lhs));
                     c.common_types.boolean
                 }
                 BinaryOp::Equal | BinaryOp::NotEqual => c.common_types.boolean,
                 BinaryOp::Or | BinaryOp::And => {
-                    c.unify(c.common_types.boolean, lhs_ty, lhs.span(c.nodes));
+                    c.unify(c.common_types.boolean, lhs_ty, c.ast.exprs.span(lhs));
                     c.common_types.boolean
                 }
             }
         }
-        Node::Not(expr) => {
-            let ty = check_node(c, expr);
-            c.unify(c.common_types.boolean, ty, expr.span(c.nodes));
+        Expr::Not(expr) => {
+            let ty = check_expr(c, expr);
+            c.unify(c.common_types.boolean, ty, c.ast.exprs.span(expr));
             c.common_types.boolean
         }
-        Node::Negate(expr) => {
-            let ty = check_node(c, expr);
-            c.unify(c.common_types.number, ty, expr.span(c.nodes));
+        Expr::Negate(expr) => {
+            let ty = check_expr(c, expr);
+            c.unify(c.common_types.number, ty, c.ast.exprs.span(expr));
             c.common_types.number
         }
-        Node::Let(_, ty, init) => {
-            let init_ty = check_node(c, init);
-            if let Some(ty) = ty {
-                let ty = check_node(c, ty);
-                c.unify(ty, init_ty, init.span(c.nodes));
-            }
-            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            c.binding_types.insert(symbol, init_ty);
-            c.common_types.unit
-        }
-        Node::Variable(..) => {
-            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+        Expr::Variable(..) => {
+            let symbol = c.bind_ctx.expr_bindings[node].unwrap();
             c.binding_types[&symbol]
         }
-        Node::If(cond, then_clause, else_clause) => {
-            let cond_ty = check_node(c, cond);
-            c.unify(c.common_types.boolean, cond_ty, cond.span(c.nodes));
-            let then_clause_ty = check_node(c, then_clause);
+        Expr::If(cond, then_clause, else_clause) => {
+            let cond_ty = check_expr(c, cond);
+            c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
+            let then_clause_ty = check_expr(c, then_clause);
             if let Some(else_clause) = else_clause {
-                let else_clause_ty = check_node(c, else_clause);
-                c.unify(then_clause_ty, else_clause_ty, else_clause.span(c.nodes));
+                let else_clause_ty = check_expr(c, else_clause);
+                c.unify(
+                    then_clause_ty,
+                    else_clause_ty,
+                    c.ast.exprs.span(else_clause),
+                );
                 then_clause_ty
             } else {
                 c.unify(
                     c.common_types.unit,
                     then_clause_ty,
-                    then_clause.span(c.nodes),
+                    c.ast.exprs.span(then_clause),
                 );
                 c.common_types.unit
             }
         }
-        Node::Block(ref nodes, expr) => {
+        Expr::Block(ref nodes, expr) => crate::stack_safe(|| {
             check_scope(c, nodes);
             if let Some(expr) = expr {
-                check_node(c, expr)
+                check_expr(c, expr)
             } else {
                 c.common_types.unit
             }
-        }
-        Node::Semi(expr) => {
-            check_node(c, expr);
+        }),
+        Expr::While(cond, body) => {
+            let cond_ty = check_expr(c, cond);
+            c.unify(c.common_types.boolean, cond_ty, c.ast.exprs.span(cond));
+            check_expr(c, body);
             c.common_types.unit
         }
-        Node::While(cond, body) => {
-            let cond_ty = check_node(c, cond);
-            c.unify(c.common_types.boolean, cond_ty, cond.span(c.nodes));
-            check_node(c, body);
-            c.common_types.unit
-        }
-        Node::Break => c.types.alloc(Type::Var),
-        Node::Continue => c.types.alloc(Type::Var),
-        Node::Fn(_, _, _, body) => {
-            let fn_symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            let fn_ty = c.binding_types[&fn_symbol];
-            let Type::Fn(_, return_ty) = c.types[fn_ty] else {
-                unreachable!();
-            };
-
-            let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
-            let body_ty = check_node(c, body);
-            c.unify(return_ty, body_ty, body.span(c.nodes));
-            c.containing_return_ty = prev_containing_return_ty;
-            c.common_types.unit
-        }
-        Node::Param(_, ty) => {
-            let ty = check_node(c, ty);
-            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
-            c.binding_types.insert(symbol, ty);
-            ty
-        }
-        Node::Call(callee, ref args) => {
-            let callee_ty = check_node(c, callee);
-            let arg_tys = args.iter().map(|a| check_node(c, *a)).collect();
-            let ret_ty = c.types.alloc(Type::Var);
-            let expect_ty = c.types.alloc(Type::Fn(arg_tys, ret_ty));
-            c.unify(callee_ty, expect_ty, node.span(c.nodes));
+        Expr::Break => c.types.alloc(Ty::Var),
+        Expr::Continue => c.types.alloc(Ty::Var),
+        Expr::Call(callee, ref args) => {
+            let callee_ty = check_expr(c, callee);
+            let arg_tys = args.iter().map(|a| check_expr(c, *a)).collect();
+            let ret_ty = c.types.alloc(Ty::Var);
+            let expect_ty = c.types.alloc(Ty::Fn(arg_tys, ret_ty));
+            c.unify(callee_ty, expect_ty, c.ast.exprs.span(node));
             ret_ty
         }
-        Node::Return(value) => {
+        Expr::Return(value) => {
             let value_ty = if let Some(value) = value {
-                check_node(c, value)
+                check_expr(c, value)
             } else {
                 c.common_types.unit
             };
             c.unify(
                 value_ty,
                 c.containing_return_ty.unwrap(),
-                node.span(c.nodes),
+                c.ast.exprs.span(node),
             );
-            c.types.alloc(Type::Var)
+            c.types.alloc(Ty::Var)
         }
-        Node::FnType(ref params, ret) => {
-            let params = params.iter().map(|t| check_node(c, *t)).collect();
-            let ret = ret.map(|t| check_node(c, t)).unwrap_or(c.common_types.unit);
-            c.types.alloc(Type::Fn(params, ret))
+        Expr::Unit => c.common_types.unit,
+        Expr::Tuple(ref types) => {
+            let types = types.iter().map(|t| check_expr(c, *t)).collect();
+            c.types.alloc(Ty::Tuple(types))
         }
-        Node::Unit => c.common_types.unit,
-        Node::Tuple(ref types) => {
-            let types = types.iter().map(|t| check_node(c, *t)).collect();
-            c.types.alloc(Type::Tuple(types))
-        }
-        Node::TupleField(expr, index) => {
-            let expr_ty = check_node(c, expr);
-            let Type::Tuple(ref types) = c.types[expr_ty] else {
-                c.error("Expect expr to be a tuple", expr.span(c.nodes));
-                return c.types.alloc(Type::Var);
+        Expr::TupleField(expr, index) => {
+            let expr_ty = check_expr(c, expr);
+            let Ty::Tuple(ref types) = c.types[expr_ty] else {
+                c.error("Expect expr to be a tuple", c.ast.exprs.span(expr));
+                return c.types.alloc(Ty::Var);
             };
             if index as usize >= types.len() {
-                c.error(format!("Field {index} not found"), node.span(c.nodes));
-                return c.types.alloc(Type::Var);
+                c.error(format!("Field {index} not found"), c.ast.exprs.span(node));
+                return c.types.alloc(Ty::Var);
             }
             types[index as usize]
         }
-        Node::Struct(_, ref fields) => {
-            let symbol = c.bind_ctx.bindings[node.idx()].unwrap();
+        Expr::Struct(_, ref fields) => {
+            let symbol = c.bind_ctx.expr_bindings[node].unwrap();
             let declared = c.struct_properties[&symbol].clone();
-            for (field_name, field_ty) in fields {
+            for (field_name, &value) in fields {
                 let name = c.bind_ctx.interner.intern(field_name);
-                let ty = check_node(c, *field_ty);
+                let ty = check_expr(c, value);
                 if let Some(declared_ty) = declared.get(&name) {
-                    c.unify(*declared_ty, ty, field_ty.span(c.nodes));
+                    c.unify(*declared_ty, ty, c.ast.exprs.span(value));
                 } else {
                     c.error(
                         format!("Unknown field: {field_name}"),
-                        field_ty.span(c.nodes),
+                        c.ast.exprs.span(value),
                     );
                 }
             }
@@ -345,67 +342,92 @@ fn check_node_inner(c: &mut TypeChecker, node: NodeId) -> TypeId {
             for (name, _) in declared {
                 let name = c.bind_ctx.interner.lookup(name);
                 if !fields.contains_key(name) {
-                    c.error(format!("Missing field: {name}"), node.span(c.nodes));
+                    c.error(format!("Missing field: {name}"), c.ast.exprs.span(node));
                 }
             }
 
             c.binding_types[&symbol]
         }
-        Node::StructField(expr, ref name) => {
-            let expr_ty = check_node(c, expr);
-            let Type::Named(symbol) = c.types[expr_ty] else {
-                c.error("Expect expr to be a struct instance", expr.span(c.nodes));
-                return c.types.alloc(Type::Var);
+        Expr::StructField(expr, ref name) => {
+            let expr_ty = check_expr(c, expr);
+            let Ty::Named(symbol) = c.types[expr_ty] else {
+                c.error(
+                    "Expect expr to be a struct instance",
+                    c.ast.exprs.span(expr),
+                );
+                return c.types.alloc(Ty::Var);
             };
             let Some(properties) = c.struct_properties.get(&symbol) else {
-                c.error("Expect expr to be a struct instance", expr.span(c.nodes));
-                return c.types.alloc(Type::Var);
+                c.error(
+                    "Expect expr to be a struct instance",
+                    c.ast.exprs.span(expr),
+                );
+                return c.types.alloc(Ty::Var);
             };
 
             let name_id = c.bind_ctx.interner.intern(name);
             let Some(ty) = properties.get(&name_id) else {
                 c.error(
                     format!("Properties does not exist: '{name}'"),
-                    expr.span(c.nodes),
+                    c.ast.exprs.span(expr),
                 );
-                return c.types.alloc(Type::Var);
+                return c.types.alloc(Ty::Var);
             };
             *ty
         }
-        Node::For(init, cond, incr, body) => {
+        Expr::For(init, cond, incr, body) => {
             if let Some(init) = init {
-                check_node(c, init);
+                check_stmt(c, init);
             }
             if let Some(cond) = cond {
-                check_node(c, cond);
+                check_expr(c, cond);
             }
             if let Some(incr) = incr {
-                check_node(c, incr);
+                check_expr(c, incr);
             }
-            check_node(c, body);
+            check_expr(c, body);
             c.common_types.unit
         }
     }
 }
 
-impl TypeId {
+fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
+    match c.ast.types[node] {
+        Type::FnType(ref params, ret) => {
+            let params = params.iter().map(|t| check_type(c, *t)).collect();
+            let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
+            c.types.alloc(Ty::Fn(params, ret))
+        }
+        Type::Unit => c.common_types.unit,
+        Type::Named(..) => {
+            let symbol = c.bind_ctx.type_bindings[node].unwrap();
+            c.binding_types[&symbol]
+        }
+        Type::Tuple(ref items) => {
+            let types = items.iter().map(|t| check_type(c, *t)).collect();
+            c.types.alloc(Ty::Tuple(types))
+        }
+    }
+}
+
+impl TyId {
     pub fn display<'a>(self, c: &'a TypeChecker) -> impl fmt::Display {
         DisplayType(self, c)
     }
 }
 
-struct DisplayType<'a>(TypeId, &'a TypeChecker<'a>);
+struct DisplayType<'a>(TyId, &'a TypeChecker<'a>);
 
 impl fmt::Display for DisplayType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(ty, c) = *self;
         match c.types[ty] {
-            Type::Named(symbol) => write!(
+            Ty::Named(symbol) => write!(
                 f,
                 "{}",
                 c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name)
             ),
-            Type::Fn(ref params, ret) => {
+            Ty::Fn(ref params, ret) => {
                 write!(f, "fn(")?;
                 let mut sep = "";
                 for p in params {
@@ -414,12 +436,12 @@ impl fmt::Display for DisplayType<'_> {
                 }
                 write!(f, ") -> {}", ret.display(c))
             }
-            Type::Unit => write!(f, "()"),
-            Type::Bool => write!(f, "bool"),
-            Type::Number => write!(f, "number"),
-            Type::String => write!(f, "string"),
-            Type::Var => write!(f, "<cannot infer>"),
-            Type::Tuple(ref types) => {
+            Ty::Unit => write!(f, "()"),
+            Ty::Bool => write!(f, "bool"),
+            Ty::Number => write!(f, "number"),
+            Ty::String => write!(f, "string"),
+            Ty::Var => write!(f, "<cannot infer>"),
+            Ty::Tuple(ref types) => {
                 write!(f, "(")?;
                 let mut sep = "";
                 for t in types {

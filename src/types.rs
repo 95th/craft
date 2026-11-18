@@ -3,34 +3,34 @@ use crate::{
     bind::SymbolId,
 };
 
-pub type TypeId = Idx<Type>;
+pub type TyId = Idx<Ty>;
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum Type {
+pub enum Ty {
     Named(SymbolId),
-    Fn(Vec<TypeId>, TypeId),
+    Fn(Vec<TyId>, TyId),
     Unit,
     Bool,
     Number,
     String,
     Var,
-    Tuple(Vec<TypeId>),
+    Tuple(Vec<TyId>),
 }
 
 pub struct CommonTypes {
-    pub boolean: TypeId,
-    pub number: TypeId,
-    pub unit: TypeId,
-    pub string: TypeId,
+    pub boolean: TyId,
+    pub number: TyId,
+    pub unit: TyId,
+    pub string: TyId,
 }
 
 impl CommonTypes {
-    pub fn new(types: &mut Arena<Type>) -> Self {
+    pub fn new(types: &mut Arena<Ty>) -> Self {
         Self {
-            boolean: types.alloc(Type::Bool),
-            number: types.alloc(Type::Number),
-            unit: types.alloc(Type::Unit),
-            string: types.alloc(Type::String),
+            boolean: types.alloc(Ty::Bool),
+            number: types.alloc(Ty::Number),
+            unit: types.alloc(Ty::Unit),
+            string: types.alloc(Ty::String),
         }
     }
 }

@@ -1,40 +1,68 @@
 use core::fmt;
 use std::collections::HashMap;
 
+use crate::arena::{AstArena, AstIdx};
+
+pub type ExprId = AstIdx<Expr>;
+pub type StmtId = AstIdx<Stmt>;
+pub type TypeId = AstIdx<Type>;
+
+pub struct AstNodes {
+    pub exprs: AstArena<Expr>,
+    pub stmts: AstArena<Stmt>,
+    pub types: AstArena<Type>,
+}
+
+impl AstNodes {
+    pub fn new() -> Self {
+        Self {
+            exprs: AstArena::new(),
+            stmts: AstArena::new(),
+            types: AstArena::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
-pub enum Node {
+pub enum Expr {
     Bool(bool),
     Number(f64),
     String(String),
-    Not(NodeId),
-    Negate(NodeId),
-    Binary(NodeId, BinaryOp, NodeId),
+    Not(ExprId),
+    Negate(ExprId),
+    Binary(ExprId, BinaryOp, ExprId),
     Variable(String),
-    Assign(NodeId, NodeId),
-    If(NodeId, NodeId, Option<NodeId>),
-    Block(Vec<NodeId>, Option<NodeId>),
-    While(NodeId, NodeId),
-    For(Option<NodeId>, Option<NodeId>, Option<NodeId>, NodeId),
+    Assign(ExprId, ExprId),
+    If(ExprId, ExprId, Option<ExprId>),
+    Block(Vec<StmtId>, Option<ExprId>),
+    While(ExprId, ExprId),
+    For(Option<StmtId>, Option<ExprId>, Option<ExprId>, ExprId),
     Break,
     Continue,
-    Call(NodeId, Vec<NodeId>),
-    Return(Option<NodeId>),
+    Call(ExprId, Vec<ExprId>),
+    Return(Option<ExprId>),
     Unit,
-    TupleField(NodeId, u16),
-    Tuple(Vec<NodeId>),
-    Struct(String, HashMap<String, NodeId>),
-    StructField(NodeId, String),
+    TupleField(ExprId, u16),
+    Tuple(Vec<ExprId>),
+    Struct(String, HashMap<String, ExprId>),
+    StructField(ExprId, String),
+}
 
-    // Statements
-    Let(String, Option<NodeId>, NodeId),
-    Semi(NodeId),
-    Param(String, NodeId),
+#[derive(Debug)]
+pub enum Stmt {
+    Let(String, Option<TypeId>, ExprId),
+    Expr(ExprId, bool),
+    Param(String, TypeId),
+    Fn(String, Vec<StmtId>, Option<TypeId>, ExprId),
+    Struct(String, HashMap<String, TypeId>),
+}
 
-    // Items
-    Fn(String, Vec<NodeId>, Option<NodeId>, NodeId),
-
-    // Type
-    FnType(Vec<NodeId>, Option<NodeId>),
+#[derive(Debug)]
+pub enum Type {
+    Named(String),
+    FnType(Vec<TypeId>, Option<TypeId>),
+    Unit,
+    Tuple(Vec<TypeId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,209 +81,6 @@ pub enum BinaryOp {
     And,
     BitOr,
     BitAnd,
-}
-
-pub struct NodeArena {
-    nodes: Vec<Node>,
-    spans: Vec<Span>,
-}
-
-impl NodeArena {
-    pub fn new() -> Self {
-        Self {
-            nodes: vec![],
-            spans: vec![],
-        }
-    }
-
-    pub fn alloc(&mut self, node: Node, span: Span) -> NodeId {
-        self.nodes.push(node);
-        self.spans.push(span);
-        NodeId::new(self.nodes.len() - 1)
-    }
-
-    pub fn dump(&self, source: &str) {
-        for i in 0..self.nodes.len() {
-            let node = NodeId::new(i);
-            println!(
-                "{node:?} = {:?}, source={:?}, parsed={}",
-                self.nodes[i],
-                self.spans[i].text(source),
-                node.display(self)
-            )
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub fn truncate(&mut self, len: usize) {
-        self.nodes.truncate(len);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(u32);
-
-impl NodeId {
-    pub const ERROR: Self = Self(u32::MAX);
-
-    pub fn new(index: usize) -> Self {
-        Self(index as u32)
-    }
-
-    pub fn idx(self) -> usize {
-        self.0 as usize
-    }
-
-    pub fn get(self, arena: &NodeArena) -> &Node {
-        &arena.nodes[self.idx()]
-    }
-
-    pub fn span(self, arena: &NodeArena) -> Span {
-        arena.spans[self.idx()]
-    }
-
-    pub fn display(self, arena: &NodeArena) -> impl fmt::Display {
-        NodeDisplay(self, arena)
-    }
-}
-
-struct NodeDisplay<'a>(NodeId, &'a NodeArena);
-
-impl fmt::Display for NodeDisplay<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self(node, arena) = *self;
-        match node.get(arena) {
-            Node::Bool(x) => write!(f, "{x}"),
-            Node::Number(x) => write!(f, "{x:?}"),
-            Node::String(x) => write!(f, "{x:?}"),
-            Node::Not(x) => write!(f, "!{}", x.display(arena)),
-            Node::Negate(x) => write!(f, "-{}", x.display(arena)),
-            Node::Binary(lhs, op, rhs) => {
-                write!(f, "({} {} {})", lhs.display(arena), op, rhs.display(arena))
-            }
-            Node::Let(name, ty, init) => {
-                write!(f, "let {name}")?;
-                if let Some(ty) = ty {
-                    write!(f, ": {}", ty.display(arena))?;
-                }
-                write!(f, " = {};", init.display(arena))
-            }
-            Node::Variable(x) => write!(f, "{x}"),
-            Node::Assign(lhs, rhs) => write!(f, "{} = {}", lhs.display(arena), rhs.display(arena)),
-            Node::If(cond, then_clause, else_clause) => {
-                write!(
-                    f,
-                    "if {} {}",
-                    cond.display(arena),
-                    then_clause.display(arena)
-                )?;
-                if let Some(else_clause) = else_clause {
-                    write!(f, " else {}", else_clause.display(arena))?;
-                }
-                Ok(())
-            }
-            Node::Block(nodes, expr) => {
-                write!(f, "{{ ")?;
-                for node in nodes {
-                    write!(f, "{}", node.display(arena))?;
-                }
-                if let Some(expr) = expr {
-                    write!(f, "{}", expr.display(arena))?;
-                }
-                write!(f, " }}")
-            }
-            Node::Semi(node) => {
-                write!(f, "{};", node.display(arena))
-            }
-            Node::While(cond, body) => {
-                write!(f, "while {} {}", cond.display(arena), body.display(arena))
-            }
-            Node::For(init, cond, incr, body) => {
-                write!(f, "for (");
-                if let Some(init) = init {
-                    write!(f, "{}", init.display(arena));
-                }
-                write!(f, ";");
-                if let Some(cond) = cond {
-                    write!(f, "{}", cond.display(arena));
-                }
-                write!(f, ";");
-                if let Some(incr) = incr {
-                    write!(f, "{}", incr.display(arena));
-                }
-                write!(f, ") {}", body.display(arena))
-            }
-            Node::Break => write!(f, "break"),
-            Node::Continue => write!(f, "continue"),
-            Node::Fn(name, params, return_ty, body) => {
-                write!(f, "fn {name}(")?;
-                let mut sep = "";
-                for param in params {
-                    write!(f, "{sep}{}", param.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, ")")?;
-                if let Some(return_ty) = return_ty {
-                    write!(f, " -> {}", return_ty.display(arena))?;
-                }
-                write!(f, " {}", body.display(arena))
-            }
-            Node::Param(name, ty) => write!(f, "{name}: {}", ty.display(arena)),
-            Node::Call(target, args) => {
-                write!(f, "{}(", target.display(arena))?;
-                let mut sep = "";
-                for arg in args {
-                    write!(f, "{sep}{}", arg.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, ")")
-            }
-            Node::Return(value) => {
-                write!(f, "return")?;
-                if let Some(value) = value {
-                    write!(f, " {}", value.display(arena))?;
-                }
-                write!(f, ";")
-            }
-            Node::FnType(params, return_ty) => {
-                write!(f, "fn(")?;
-                let mut sep = "";
-                for param in params {
-                    write!(f, "{sep}{}", param.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, ")")?;
-                if let Some(return_ty) = return_ty {
-                    write!(f, " -> {}", return_ty.display(arena))?;
-                }
-                Ok(())
-            }
-            Node::Unit => write!(f, "()"),
-            Node::Tuple(nodes) => {
-                write!(f, "(")?;
-                let mut sep = "";
-                for t in nodes {
-                    write!(f, "{sep}{}", t.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, ")")
-            }
-            Node::TupleField(target, index) => write!(f, "{}.{}", target.display(arena), index),
-            Node::Struct(name, fields) => {
-                write!(f, "struct {name} {{ ")?;
-                let mut sep = "";
-                for (field_name, field_ty) in fields {
-                    write!(f, "{sep}{field_name}: {}", field_ty.display(arena))?;
-                    sep = ", ";
-                }
-                write!(f, " }}")
-            }
-            Node::StructField(target, name) => write!(f, "{}.{}", target.display(arena), name),
-        }
-    }
 }
 
 impl fmt::Display for BinaryOp {

@@ -1,5 +1,5 @@
 use crate::{
-    ast::NodeArena, bind::Binder, diagnostics::Diagnostic, parser::Parser, typechecker::TypeChecker,
+    ast::AstNodes, bind::Binder, diagnostics::Diagnostic, parser::Parser, typechecker::TypeChecker,
 };
 
 mod arena;
@@ -25,14 +25,14 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn compile(source: &str, diagnostics: &mut Vec<Diagnostic>) -> Result<(), Error> {
-    let mut arena = NodeArena::new();
-    let mut parser = Parser::new(source, &mut arena, diagnostics);
+    let mut ast = AstNodes::new();
+    let mut parser = Parser::new(source, &mut ast, diagnostics);
     let nodes = parser.parse()?;
 
-    let binder = Binder::new(&arena, diagnostics);
+    let binder = Binder::new(&ast, diagnostics);
     let bind_ctx = binder.bind(&nodes)?;
 
-    let mut checker = TypeChecker::new(&arena, diagnostics, bind_ctx);
+    let mut checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
     checker.check(&nodes)?;
     Ok(())
 }
@@ -44,7 +44,7 @@ fn main() {
         }
 
         fn bar(f: Foo) -> number {
-            f.a + 10 > 1
+            f.a + 10
         }
 
         let foo = Foo {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     Error,
-    ast::{BinaryOp, Node, NodeArena, NodeId, Span},
+    ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostic,
     scanner::{
         Scanner,
@@ -12,7 +12,9 @@ use crate::{
 
 struct Checkpoint<'a> {
     scanner: Scanner<'a>,
-    nodes: usize,
+    exprs: usize,
+    stmts: usize,
+    types: usize,
     diagnostics: usize,
     token: Token,
     prev_span: Span,
@@ -22,7 +24,7 @@ struct Checkpoint<'a> {
 
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
-    nodes: &'a mut NodeArena,
+    ast: &'a mut AstNodes,
     diagnostics: &'a mut Vec<Diagnostic>,
     token: Token,
     prev_span: Span,
@@ -33,12 +35,12 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(
         source: &'a str,
-        nodes: &'a mut NodeArena,
+        ast: &'a mut AstNodes,
         diagnostics: &'a mut Vec<Diagnostic>,
     ) -> Self {
         Self {
             scanner: Scanner::new(source),
-            nodes,
+            ast,
             diagnostics,
             token: Error,
             prev_span: Span::new(0, 0),
@@ -47,7 +49,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<NodeId>, Error> {
+    pub fn parse(&mut self) -> Result<Vec<StmtId>, Error> {
         self.advance();
         let mut nodes = Vec::new();
         while self.token != Token::Eof {
@@ -79,7 +81,9 @@ impl<'a> Parser<'a> {
     fn checkpoint(&self) -> Checkpoint<'a> {
         Checkpoint {
             scanner: self.scanner.clone(),
-            nodes: self.nodes.len(),
+            exprs: self.ast.exprs.len(),
+            stmts: self.ast.stmts.len(),
+            types: self.ast.types.len(),
             diagnostics: self.diagnostics.len(),
             token: self.token,
             prev_span: self.prev_span,
@@ -90,7 +94,9 @@ impl<'a> Parser<'a> {
 
     fn restore(&mut self, c: Checkpoint<'a>) {
         self.scanner = c.scanner;
-        self.nodes.truncate(c.nodes);
+        self.ast.exprs.truncate(c.exprs);
+        self.ast.stmts.truncate(c.stmts);
+        self.ast.types.truncate(c.types);
         self.diagnostics.truncate(c.diagnostics);
         self.token = c.token;
         self.prev_span = c.prev_span;
@@ -119,13 +125,13 @@ impl<'a> Parser<'a> {
         self.error(message);
     }
 
-    fn error(&mut self, message: &str) -> NodeId {
-        self.error_at(message, self.scanner.span())
+    fn error(&mut self, message: &str) {
+        self.error_at(message, self.scanner.span());
     }
 
-    fn error_at(&mut self, message: &str, span: Span) -> NodeId {
+    fn error_at(&mut self, message: &str, span: Span) {
         if self.panic_mode {
-            return NodeId::ERROR;
+            return;
         }
         self.panic_mode = true;
         self.had_error = true;
@@ -133,11 +139,10 @@ impl<'a> Parser<'a> {
             message: message.into(),
             span,
         });
-        NodeId::ERROR
     }
 }
 
-fn declaration(p: &mut Parser) -> NodeId {
+fn declaration(p: &mut Parser) -> StmtId {
     match p.token {
         Let => let_declaration(p),
         Fn => fn_declaration(p),
@@ -146,7 +151,7 @@ fn declaration(p: &mut Parser) -> NodeId {
     }
 }
 
-fn let_declaration(p: &mut Parser) -> NodeId {
+fn let_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
@@ -155,13 +160,13 @@ fn let_declaration(p: &mut Parser) -> NodeId {
     p.consume(Equal, "Expect '=' before initializer.");
     let init = expression(p);
     p.consume(Semicolon, "Expect ';' after initializer.");
-    p.nodes.alloc(
-        Node::Let(name, type_annotation, init),
+    p.ast.stmts.alloc(
+        Stmt::Let(name, type_annotation, init),
         start.to(p.prev_span),
     )
 }
 
-fn fn_declaration(p: &mut Parser) -> NodeId {
+fn fn_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
@@ -176,8 +181,9 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
             p.consume(Colon, "Expect ':' after parameter name.");
             let ty = ty(p);
             params.push(
-                p.nodes
-                    .alloc(Node::Param(name, ty), param_span.to(p.prev_span)),
+                p.ast
+                    .stmts
+                    .alloc(Stmt::Param(name, ty), param_span.to(p.prev_span)),
             );
             if !p.eat(Comma) {
                 break;
@@ -188,13 +194,13 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
     p.consume(OpenBrace, "Expect '{' before function body");
     let body = block_expr(p);
-    p.nodes.alloc(
-        Node::Fn(name, params, return_ty, body),
+    p.ast.stmts.alloc(
+        Stmt::Fn(name, params, return_ty, body),
         start.to(p.prev_span),
     )
 }
 
-fn struct_declaration(p: &mut Parser) -> NodeId {
+fn struct_declaration(p: &mut Parser) -> StmtId {
     p.advance();
     let start = p.prev_span;
     let name = p.scanner.token_text().to_string();
@@ -217,30 +223,39 @@ fn struct_declaration(p: &mut Parser) -> NodeId {
         }
     }
     p.consume(CloseBrace, "Expect '}' after struct fields.");
-    p.nodes
-        .alloc(Node::Struct(name, fields), start.to(p.prev_span))
+    p.ast
+        .stmts
+        .alloc(Stmt::Struct(name, fields), start.to(p.prev_span))
 }
 
-fn expression_statement(p: &mut Parser) -> NodeId {
+fn expression_statement(p: &mut Parser) -> StmtId {
     let expr = expression(p);
-    if p.eat(Semicolon) {
-        p.nodes
-            .alloc(Node::Semi(expr), expr.span(p.nodes).to(p.prev_span))
-    } else {
-        expr
-    }
+    let semi = p.eat(Semicolon);
+    p.ast.stmts.alloc(
+        Stmt::Expr(expr, semi),
+        p.ast.exprs.span(expr).to(p.prev_span),
+    )
 }
 
-fn ty(p: &mut Parser) -> NodeId {
+fn ty(p: &mut Parser) -> TypeId {
     match p.token {
-        Identifier => variable(p, false),
+        Identifier => named_ty(p),
         Fn => fn_ty(p),
         OpenParen => tuple_ty(p),
-        _ => p.error("Expected a type"),
+        _ => {
+            p.error("Expected a type");
+            TypeId::MAX
+        }
     }
 }
 
-fn fn_ty(p: &mut Parser) -> NodeId {
+fn named_ty(p: &mut Parser) -> TypeId {
+    let name = p.scanner.token_text().to_string();
+    p.advance();
+    p.ast.types.alloc(Type::Named(name), p.prev_span)
+}
+
+fn fn_ty(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
     p.consume(OpenParen, "Expect '(' after 'fn' type.");
@@ -255,15 +270,16 @@ fn fn_ty(p: &mut Parser) -> NodeId {
     }
     p.consume(CloseParen, "Expect ')' after parameters.");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.nodes
-        .alloc(Node::FnType(params, return_ty), start.to(p.prev_span))
+    p.ast
+        .types
+        .alloc(Type::FnType(params, return_ty), start.to(p.prev_span))
 }
 
-fn tuple_ty(p: &mut Parser) -> NodeId {
+fn tuple_ty(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
     if p.eat(CloseParen) {
-        return p.nodes.alloc(Node::Unit, start.to(p.prev_span));
+        return p.ast.types.alloc(Type::Unit, start.to(p.prev_span));
     }
 
     let t = ty(p);
@@ -281,18 +297,18 @@ fn tuple_ty(p: &mut Parser) -> NodeId {
         }
     }
     p.consume(CloseParen, "Expect ')' after tuple types.");
-    p.nodes.alloc(Node::Tuple(types), start.to(p.prev_span))
+    p.ast.types.alloc(Type::Tuple(types), start.to(p.prev_span))
 }
 
-fn expression(p: &mut Parser) -> NodeId {
+fn expression(p: &mut Parser) -> ExprId {
     parse_precedence(p, Precedence::Assignment as u8)
 }
 
-fn tuple(p: &mut Parser) -> NodeId {
+fn tuple(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     if p.eat(CloseParen) {
-        return p.nodes.alloc(Node::Unit, start.to(p.prev_span));
+        return p.ast.exprs.alloc(Expr::Unit, start.to(p.prev_span));
     }
 
     let expr = expression(p);
@@ -305,14 +321,14 @@ fn tuple(p: &mut Parser) -> NodeId {
             }
         }
         p.consume(CloseParen, "Expect ')' after tuple values.");
-        return p.nodes.alloc(Node::Tuple(exprs), start.to(p.prev_span));
+        return p.ast.exprs.alloc(Expr::Tuple(exprs), start.to(p.prev_span));
     }
 
     p.consume(CloseParen, "Expect ')' after grouping.");
     expr
 }
 
-fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
+fn binary(p: &mut Parser, lhs: ExprId) -> ExprId {
     let op = match p.token {
         Plus => BinaryOp::Add,
         Minus => BinaryOp::Sub,
@@ -333,25 +349,29 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
     let precedence = p.token.precedence() as u8;
     p.advance();
     let rhs = parse_precedence(p, precedence + 1);
-    p.nodes.alloc(
-        Node::Binary(lhs, op, rhs),
-        lhs.span(p.nodes).to(p.prev_span),
+    p.ast.exprs.alloc(
+        Expr::Binary(lhs, op, rhs),
+        p.ast.exprs.span(lhs).to(p.prev_span),
     )
 }
 
-fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
+fn assignment(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
     let rhs = expression(p);
-    let lhs_span = lhs.span(p.nodes);
-    match lhs.get(p.nodes) {
-        Node::Variable(..) => p
-            .nodes
-            .alloc(Node::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
-        _ => p.error_at("Invalid assignment target", lhs_span),
+    let lhs_span = p.ast.exprs.span(lhs);
+    match p.ast.exprs[lhs] {
+        Expr::Variable(..) => p
+            .ast
+            .exprs
+            .alloc(Expr::Assign(lhs, rhs), lhs_span.to(p.prev_span)),
+        _ => {
+            p.error_at("Invalid assignment target", lhs_span);
+            ExprId::MAX
+        }
     }
 }
 
-fn call(p: &mut Parser, lhs: NodeId) -> NodeId {
+fn call(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
     let mut args = Vec::new();
     if p.token != CloseParen {
@@ -363,11 +383,12 @@ fn call(p: &mut Parser, lhs: NodeId) -> NodeId {
         }
     }
     p.consume(CloseParen, "Expect ')' after arguments.");
-    p.nodes
-        .alloc(Node::Call(lhs, args), lhs.span(p.nodes).to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::Call(lhs, args), p.ast.exprs.span(lhs).to(p.prev_span))
 }
 
-fn dot(p: &mut Parser, lhs: NodeId) -> NodeId {
+fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
     let name = p.scanner.token_text().to_string();
     if p.eat(NumberLiteral) {
@@ -378,62 +399,63 @@ fn dot(p: &mut Parser, lhs: NodeId) -> NodeId {
                 0
             }
         };
-        p.nodes.alloc(
-            Node::TupleField(lhs, index),
-            lhs.span(p.nodes).to(p.prev_span),
+        p.ast.exprs.alloc(
+            Expr::TupleField(lhs, index),
+            p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else if p.eat(Identifier) {
-        p.nodes.alloc(
-            Node::StructField(lhs, name),
-            lhs.span(p.nodes).to(p.prev_span),
+        p.ast.exprs.alloc(
+            Expr::StructField(lhs, name),
+            p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else {
-        p.error("Expect identifier or integer property name.")
+        p.error("Expect identifier or integer property name.");
+        ExprId::MAX
     }
 }
 
-fn unary(p: &mut Parser) -> NodeId {
+fn unary(p: &mut Parser) -> ExprId {
     let op = p.token;
     p.advance();
     let start = p.prev_span;
     let expr = parse_precedence(p, Precedence::Unary as u8);
     match op {
-        Bang => p.nodes.alloc(Node::Not(expr), start.to(p.prev_span)),
-        Minus => p.nodes.alloc(Node::Negate(expr), start.to(p.prev_span)),
+        Bang => p.ast.exprs.alloc(Expr::Not(expr), start.to(p.prev_span)),
+        Minus => p.ast.exprs.alloc(Expr::Negate(expr), start.to(p.prev_span)),
         _ => unreachable!(),
     }
 }
 
-fn number(p: &mut Parser) -> NodeId {
+fn number(p: &mut Parser) -> ExprId {
     let n = p.scanner.token_text().parse().unwrap();
     p.advance();
-    p.nodes.alloc(Node::Number(n), p.prev_span)
+    p.ast.exprs.alloc(Expr::Number(n), p.prev_span)
 }
 
-fn string(p: &mut Parser) -> NodeId {
+fn string(p: &mut Parser) -> ExprId {
     let text = p.scanner.token_text();
     let text = text[1..text.len() - 1].to_string();
     p.advance();
-    p.nodes.alloc(Node::String(text), p.prev_span)
+    p.ast.exprs.alloc(Expr::String(text), p.prev_span)
 }
 
-fn boolean(p: &mut Parser) -> NodeId {
+fn boolean(p: &mut Parser) -> ExprId {
     let value = p.token == Token::True;
     p.advance();
-    p.nodes.alloc(Node::Bool(value), p.prev_span)
+    p.ast.exprs.alloc(Expr::Bool(value), p.prev_span)
 }
 
-fn break_expr(p: &mut Parser) -> NodeId {
+fn break_expr(p: &mut Parser) -> ExprId {
     p.advance();
-    p.nodes.alloc(Node::Break, p.prev_span)
+    p.ast.exprs.alloc(Expr::Break, p.prev_span)
 }
 
-fn continue_expr(p: &mut Parser) -> NodeId {
+fn continue_expr(p: &mut Parser) -> ExprId {
     p.advance();
-    p.nodes.alloc(Node::Continue, p.prev_span)
+    p.ast.exprs.alloc(Expr::Continue, p.prev_span)
 }
 
-fn return_expr(p: &mut Parser) -> NodeId {
+fn return_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     let value = if p.token != Semicolon {
@@ -441,15 +463,16 @@ fn return_expr(p: &mut Parser) -> NodeId {
     } else {
         None
     };
-    p.nodes.alloc(Node::Return(value), start.to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::Return(value), start.to(p.prev_span))
 }
 
-fn variable(p: &mut Parser, allow_struct: bool) -> NodeId {
+fn variable(p: &mut Parser) -> ExprId {
     let name = p.scanner.token_text().to_string();
     p.advance();
 
-    if allow_struct
-        && p.token == OpenBrace
+    if p.token == OpenBrace
         && p.lookahead(|p| {
             p.advance();
             p.eat(CloseBrace) || p.eat(Identifier) && p.eat(Colon)
@@ -475,14 +498,15 @@ fn variable(p: &mut Parser, allow_struct: bool) -> NodeId {
         }
         p.consume(CloseBrace, "Expect '}' after struct fields.");
         return p
-            .nodes
-            .alloc(Node::Struct(name, fields), start.to(p.prev_span));
+            .ast
+            .exprs
+            .alloc(Expr::Struct(name, fields), start.to(p.prev_span));
     }
 
-    p.nodes.alloc(Node::Variable(name), p.prev_span)
+    p.ast.exprs.alloc(Expr::Variable(name), p.prev_span)
 }
 
-fn if_expr(p: &mut Parser) -> NodeId {
+fn if_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     let cond = expression(p);
@@ -495,28 +519,32 @@ fn if_expr(p: &mut Parser) -> NodeId {
                 block_expr(p)
             }
             If => if_expr(p),
-            _ => p.error("Expect 'if' or '{' after else."),
+            _ => {
+                p.error("Expect 'if' or '{' after else.");
+                ExprId::MAX
+            }
         })
     } else {
         None
     };
-    p.nodes.alloc(
-        Node::If(cond, then_clause, else_clause),
+    p.ast.exprs.alloc(
+        Expr::If(cond, then_clause, else_clause),
         start.to(p.prev_span),
     )
 }
 
-fn while_expr(p: &mut Parser) -> NodeId {
+fn while_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     let cond = expression(p);
     p.consume(OpenBrace, "Expect '{' after 'while' condition.");
     let body = block_expr(p);
-    p.nodes
-        .alloc(Node::While(cond, body), start.to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::While(cond, body), start.to(p.prev_span))
 }
 
-fn for_expr(p: &mut Parser) -> NodeId {
+fn for_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
     p.consume(OpenParen, "Expect '(' after 'for'.");
@@ -525,11 +553,8 @@ fn for_expr(p: &mut Parser) -> NodeId {
     } else if p.token == Let {
         Some(declaration(p))
     } else {
-        let expr = expression(p);
-        p.consume(Semicolon, "Expect ';' after 'for' initializer.");
-        Some(expr)
+        Some(expression_statement(p))
     };
-
     let cond = if p.eat(Semicolon) {
         None
     } else {
@@ -546,42 +571,44 @@ fn for_expr(p: &mut Parser) -> NodeId {
     };
     p.consume(OpenBrace, "Expect '{' before 'for' body.");
     let body = block_expr(p);
-    p.nodes
-        .alloc(Node::For(init, cond, incr, body), start.to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::For(init, cond, incr, body), start.to(p.prev_span))
 }
 
-fn block_expr(p: &mut Parser) -> NodeId {
+fn block_expr(p: &mut Parser) -> ExprId {
     let start = p.prev_span;
     let mut nodes = Vec::new();
     let mut trailing_expr = None;
     if p.token != CloseBrace && p.token != Eof {
         loop {
-            let node = declaration(p);
+            let stmt = declaration(p);
             if p.token == CloseBrace || p.token == Eof {
-                if is_expr(p, node) {
-                    trailing_expr = Some(node);
+                if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
+                    trailing_expr = Some(expr);
                 } else {
-                    nodes.push(node);
+                    nodes.push(stmt);
                 }
                 break;
             }
-            nodes.push(node);
-            if is_expr(p, node) && expr_requires_semi(p, node) {
-                p.error_at("Expect ';' after expression", node.span(p.nodes));
+            nodes.push(stmt);
+            if expr_requires_semi(p, stmt) {
+                p.error_at("Expect ';' after expression", p.ast.stmts.span(stmt));
             }
         }
     }
     p.consume(CloseBrace, "Expect '}' after block.");
-    p.nodes
-        .alloc(Node::Block(nodes, trailing_expr), start.to(p.prev_span))
+    p.ast
+        .exprs
+        .alloc(Expr::Block(nodes, trailing_expr), start.to(p.prev_span))
 }
 
-fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
+fn parse_precedence(p: &mut Parser, precedence: u8) -> ExprId {
     crate::stack_safe(|| {
         let Some(mut expr) = parse_prefix(p) else {
-            let node = p.error("Expect expression.");
+            p.error("Expect expression.");
             p.advance();
-            return node;
+            return ExprId::MAX;
         };
 
         while precedence <= p.token.precedence() as u8 {
@@ -592,7 +619,7 @@ fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
     })
 }
 
-fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
+fn parse_prefix(p: &mut Parser) -> Option<ExprId> {
     Some(match p.token {
         OpenParen => tuple(p),
         Minus | Bang => unary(p),
@@ -602,7 +629,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Break => break_expr(p),
         Continue => continue_expr(p),
         Return => return_expr(p),
-        Identifier => variable(p, true),
+        Identifier => variable(p),
         If => if_expr(p),
         While => while_expr(p),
         For => for_expr(p),
@@ -614,7 +641,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
     })
 }
 
-fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
+fn parse_infix(p: &mut Parser, lhs: ExprId) -> ExprId {
     match p.token {
         Plus | Minus | Star | Slash | Greater | GreaterEqual | Less | LessEqual | EqualEqual
         | BangEqual | Bar | BarBar | Ampersand | AmpersandAmpersand => binary(p, lhs),
@@ -643,19 +670,15 @@ impl Token {
     }
 }
 
-fn is_expr(p: &Parser, node: NodeId) -> bool {
-    node != NodeId::ERROR
-        && !matches!(
-            node.get(p.nodes),
-            Node::Let(..) | Node::Semi(..) | Node::Fn(..) | Node::Param(..)
+fn expr_requires_semi(p: &Parser, stmt: StmtId) -> bool {
+    if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
+        !matches!(
+            p.ast.exprs[expr],
+            Expr::If(..) | Expr::While(..) | Expr::Block(..) | Expr::For(..)
         )
-}
-
-fn expr_requires_semi(p: &Parser, node: NodeId) -> bool {
-    !matches!(
-        node.get(p.nodes),
-        Node::If(..) | Node::While(..) | Node::Block(..) | Node::For(..)
-    )
+    } else {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
