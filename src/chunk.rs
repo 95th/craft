@@ -2,13 +2,31 @@
 #[repr(u8)]
 pub enum Opcode {
     Return,
+    Const,
+    True,
+    False,
+    Not,
+    Negate,
+    GetLocal,
+    GetLocalLong,
+    PrintNumber,
+    Call,
+
     Add,
     Sub,
     Mul,
     Div,
-    Const,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    Equal,
+    NotEqual,
+    BitOr,
+    BitAnd,
 }
 
+#[derive(Debug)]
 pub struct Code {
     code: Vec<u8>,
 }
@@ -18,7 +36,19 @@ impl Code {
         Self { code: Vec::new() }
     }
 
-    pub fn push(&mut self, op: Opcode) {
+    pub fn write(&mut self, op: Opcode) {
         self.code.push(op as u8);
+    }
+
+    pub fn write_u8(&mut self, b: u8) {
+        self.code.push(b);
+    }
+
+    pub fn write_u64(&mut self, n: u64) {
+        self.code.extend(n.to_be_bytes());
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.code
     }
 }

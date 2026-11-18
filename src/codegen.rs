@@ -1,31 +1,109 @@
 use crate::{
-    ast::{AstNodes, AstVisitor, Stmt, StmtId},
+    ast::{AstNodes, AstVisitor, BinaryOp, Expr, ExprId, Stmt, StmtId},
     bind::SymbolId,
-    chunk::Code,
+    chunk::{Code, Opcode},
+    typechecker::TyContext,
 };
 
 pub struct Codegen<'a> {
     ast: &'a AstNodes,
+    ty_ctx: TyContext,
     code: Code,
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ast: &'a AstNodes) -> Self {
+    pub fn new(ast: &'a AstNodes, ty_ctx: TyContext) -> Self {
         Self {
             ast,
+            ty_ctx,
             code: Code::new(),
         }
     }
 
-    pub fn generate(&mut self, stmts: &[StmtId]) {
-        let nodes = NodeCollector::new(stmts, self.ast);
-        println!(
-            "{} structs, {} functions",
-            nodes.structs.len(),
-            nodes.functions.len()
-        );
+    pub fn generate(mut self, stmts: &[StmtId]) -> Code {
+        for &stmt in stmts {
+            self.process_stmt(stmt);
+        }
+        self.code.write(Opcode::Return);
+        self.code
+    }
+
+    fn process_stmt(&mut self, stmt: StmtId) {
+        match self.ast.stmts[stmt] {
+            Stmt::Let(_, _, init) => self.process_expr(init),
+            Stmt::Expr(expr, _) => self.process_expr(expr),
+            _ => {}
+        }
+    }
+
+    fn process_expr(&mut self, expr: ExprId) {
+        match self.ast.exprs[expr] {
+            Expr::Bool(b) => self
+                .code
+                .write(if b { Opcode::True } else { Opcode::False }),
+            Expr::Number(n) => {
+                self.code.write(Opcode::Const);
+                self.code.write_u64(n.to_bits());
+            }
+            Expr::Not(expr) => {
+                self.process_expr(expr);
+                self.code.write(Opcode::Not)
+            }
+            Expr::Negate(expr) => {
+                self.process_expr(expr);
+                self.code.write(Opcode::Negate)
+            }
+            Expr::Variable(_) => {
+                let symbol = self.ast.exprs.binding(expr);
+                let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
+                if index <= u8::MAX as u32 {
+                    self.code.write(Opcode::GetLocal);
+                    self.code.write_u8(index as u8);
+                } else {
+                    self.code.write(Opcode::GetLocalLong);
+                    self.code.write_u64(index as u64);
+                }
+            }
+            Expr::Binary(lhs, op, rhs) => match op {
+                BinaryOp::Or | BinaryOp::And => todo!(),
+                _ => {
+                    self.process_expr(lhs);
+                    self.process_expr(rhs);
+                    match op {
+                        BinaryOp::Add => self.code.write(Opcode::Add),
+                        BinaryOp::Sub => self.code.write(Opcode::Sub),
+                        BinaryOp::Mul => self.code.write(Opcode::Mul),
+                        BinaryOp::Div => self.code.write(Opcode::Div),
+                        BinaryOp::Greater => self.code.write(Opcode::Greater),
+                        BinaryOp::GreaterEqual => self.code.write(Opcode::GreaterEqual),
+                        BinaryOp::Less => self.code.write(Opcode::Less),
+                        BinaryOp::LessEqual => self.code.write(Opcode::LessEqual),
+                        BinaryOp::Equal => self.code.write(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                        BinaryOp::BitOr => self.code.write(Opcode::BitOr),
+                        BinaryOp::BitAnd => self.code.write(Opcode::BitAnd),
+                        _ => {}
+                    }
+                }
+            },
+            Expr::Call(callee, ref args) => {
+                for &arg in args {
+                    self.process_expr(arg);
+                }
+                let symbol = self.ast.exprs.binding(callee);
+                if symbol == self.ty_ctx.bind_ctx.print_number_function {
+                    self.code.write(Opcode::PrintNumber);
+                } else {
+                    self.process_expr(callee);
+                    self.code.write(Opcode::Call);
+                    self.code.write_u8(args.len() as u8);
+                }
+            }
+            _ => todo!(),
+        }
     }
 }
+
 struct NodeCollector {
     structs: Vec<SymbolId>,
     functions: Vec<SymbolId>,

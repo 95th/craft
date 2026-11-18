@@ -11,6 +11,13 @@ use crate::{
     types::{CommonTypes, Ty, TyId},
 };
 
+pub struct TyContext {
+    pub bind_ctx: BindCtx,
+    pub types: Arena<Ty>,
+    pub binding_types: HashMap<SymbolId, TyId>,
+    pub struct_properties: HashMap<SymbolId, HashMap<StrId, TyId>>,
+}
+
 pub struct TypeChecker<'a> {
     ast: &'a AstNodes,
     diagnostics: &'a mut Diagnostics,
@@ -40,18 +47,30 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    pub fn check(&mut self, nodes: &[StmtId]) -> Result<(), Error> {
+    pub fn check(mut self, nodes: &[StmtId]) -> Result<TyContext, Error> {
         self.binding_types
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
             .insert(self.bind_ctx.str_type, self.common_types.string);
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
-        check_scope(self, nodes);
+        self.binding_types.insert(
+            self.bind_ctx.print_number_function,
+            self.types.alloc(Ty::Fn(
+                vec![self.common_types.number],
+                self.common_types.unit,
+            )),
+        );
+        check_scope(&mut self, nodes);
         if self.has_error {
             Err(Error::TypeCheck)
         } else {
-            Ok(())
+            Ok(TyContext {
+                bind_ctx: self.bind_ctx,
+                types: self.types,
+                binding_types: self.binding_types,
+                struct_properties: self.struct_properties,
+            })
         }
     }
 

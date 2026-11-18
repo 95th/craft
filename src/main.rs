@@ -1,6 +1,6 @@
 use crate::{
-    ast::AstNodes, bind::Binder, codegen::Codegen, diagnostics::Diagnostics, parser::Parser,
-    typechecker::TypeChecker,
+    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
+    parser::Parser, typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -14,6 +14,7 @@ mod parser;
 mod scanner;
 mod typechecker;
 mod types;
+mod vm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Error {
@@ -27,7 +28,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
+fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let mut ast = AstNodes::new();
     let mut parser = Parser::new(source, &mut ast, diagnostics);
     let nodes = parser.parse()?;
@@ -35,33 +36,30 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
     let binder = Binder::new(&ast, diagnostics);
     let bind_ctx = binder.bind(&nodes)?;
 
-    let mut checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
-    checker.check(&nodes)?;
+    let checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
+    let ty_ctx = checker.check(&nodes)?;
 
-    let mut codegen = Codegen::new(&ast);
-    codegen.generate(&nodes);
-    Ok(())
+    let codegen = Codegen::new(&ast, ty_ctx);
+    let code = codegen.generate(&nodes);
+    Ok(code)
 }
 
 fn main() {
     let source = r#"
-        struct Foo {
-            a: number
-        }
-
-        fn bar(f: Foo) -> number {
-            f.a + 10
-        }
-
-        let foo = Foo {
-            a: 10
-        };
-        bar(foo);
+        let a = 10;
+        let b = a + 1 - 4 / 2 * 1.2;
+        print_number(b);
     "#;
 
     let mut diagnostics = Diagnostics::new();
-    if compile(source, &mut diagnostics).is_err() {
-        diagnostics.print(source);
+    match compile(source, &mut diagnostics) {
+        Ok(code) => {
+            let mut vm = VM::new(code);
+            vm.run();
+        }
+        Err(_) => {
+            diagnostics.print(source);
+        }
     }
 }
 

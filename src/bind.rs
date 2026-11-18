@@ -12,6 +12,7 @@ type ScopeId = Id<Scope>;
 
 pub struct Symbol {
     pub name: StrId,
+    pub local_index: u32,
 }
 
 pub type SymbolId = Id<Symbol>;
@@ -28,6 +29,7 @@ pub struct BindCtx {
     pub number_type: SymbolId,
     pub str_type: SymbolId,
     pub bool_type: SymbolId,
+    pub print_number_function: SymbolId,
 }
 
 pub struct Binder<'a> {
@@ -43,8 +45,10 @@ pub struct Binder<'a> {
     number_type: SymbolId,
     str_type: SymbolId,
     bool_type: SymbolId,
+    print_number_function: SymbolId,
     loop_depth: u32,
     fn_depth: u32,
+    local_count: u32,
 }
 
 impl<'a> Binder<'a> {
@@ -62,8 +66,10 @@ impl<'a> Binder<'a> {
             number_type: SymbolId::MAX,
             str_type: SymbolId::MAX,
             bool_type: SymbolId::MAX,
+            print_number_function: SymbolId::MAX,
             loop_depth: 0,
             fn_depth: 0,
+            local_count: 0,
         }
     }
 
@@ -73,6 +79,7 @@ impl<'a> Binder<'a> {
         self.value_scope = self.create_scope(None);
 
         self.declare_default_types();
+        self.declare_default_functions();
         bind_block(&mut self, nodes, None);
 
         if self.has_error {
@@ -85,6 +92,7 @@ impl<'a> Binder<'a> {
             number_type: self.number_type,
             str_type: self.str_type,
             bool_type: self.bool_type,
+            print_number_function: self.print_number_function,
         })
     }
 
@@ -97,6 +105,15 @@ impl<'a> Binder<'a> {
     fn declare_default_type(&mut self, name: &str) -> SymbolId {
         let name = self.interner.intern(name);
         self.declare_type(name, StmtId::MAX)
+    }
+
+    fn declare_default_functions(&mut self) {
+        self.print_number_function = self.declare_default_function("print_number");
+    }
+
+    fn declare_default_function(&mut self, name: &str) -> SymbolId {
+        let name = self.interner.intern(name);
+        self.declare_fn(name, StmtId::MAX)
     }
 
     fn declare_type(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
@@ -120,7 +137,9 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.value_scope, name, declaration)
+        let symbol = self.declare_symbol(self.value_scope, name, declaration);
+        self.local_count += 1;
+        symbol
     }
 
     fn declare_fn(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
@@ -136,7 +155,10 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_symbol(&mut self, scope: ScopeId, name: StrId, declaration: StmtId) -> SymbolId {
-        let symbol = self.symbols.alloc(Symbol { name });
+        let symbol = self.symbols.alloc(Symbol {
+            name,
+            local_index: self.local_count,
+        });
         self.scopes[scope].symbols.insert(name, symbol);
         if declaration != StmtId::MAX {
             self.ast.stmts.bind(declaration, symbol);
@@ -239,6 +261,7 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             b.declare_value(name, stmt);
         }
         Stmt::Fn(_, ref params, return_ty, body) => b.with_value_scope(false, |b| {
+            let prev_local_count = std::mem::replace(&mut b.local_count, 0);
             for param in params {
                 bind_statement(b, *param);
             }
@@ -250,6 +273,7 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             bind_expr(b, body);
             b.fn_depth -= 1;
             b.loop_depth = prev_loop_depth;
+            b.local_count = prev_local_count;
         }),
         Stmt::Param(ref name, ty) => {
             bind_ty(b, ty);
