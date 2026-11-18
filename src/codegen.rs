@@ -128,7 +128,9 @@ impl<'a> Codegen<'a> {
                 self.code.write(Opcode::Unit);
             }
             Expr::Binary(lhs, op, rhs) => match op {
-                BinaryOp::Or | BinaryOp::And => todo!(),
+                BinaryOp::Or | BinaryOp::And => {
+                    // todo!()
+                }
                 _ => {
                     self.process_expr(lhs);
                     self.process_expr(rhs);
@@ -246,7 +248,9 @@ impl<'a> Codegen<'a> {
                     self.code.write(Opcode::Return);
                 }
             }
-            _ => {}
+            _ => {
+                // todo!()
+            }
         }
     }
 
