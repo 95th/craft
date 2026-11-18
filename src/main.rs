@@ -13,6 +13,7 @@ mod ast;
 mod bind;
 mod chunk;
 mod codegen;
+mod codegen2;
 mod diagnostics;
 mod heap;
 mod interner;
@@ -1126,11 +1127,11 @@ mod tests {
         let source = r#"
             let i = 0;
             while i < 10 {
+                i = i + 1;
                 if i == 5 {
                     continue;
                 }
                 print(i);
-                i = i + 1;
             }
         "#;
         run_ok(source);
