@@ -204,4 +204,12 @@ mod tests {
         "#;
         check_err(source, Error::Parse);
     }
+
+    #[test]
+    fn test_unit() {
+        let source = r#"
+            let x: () = ();
+        "#;
+        check_ok(source);
+    }
 }
