@@ -10,9 +10,18 @@ use crate::{
 
 type ScopeId = Id<Scope>;
 
+pub enum SymbolKind {
+    Let,
+    Fn,
+    Param,
+    Struct,
+    Builtin,
+}
+
 pub struct Symbol {
     pub name: StrId,
     pub local_index: u32,
+    pub kind: SymbolKind,
 }
 
 pub type SymbolId = Id<Symbol>;
@@ -104,7 +113,7 @@ impl<'a> Binder<'a> {
 
     fn declare_default_type(&mut self, name: &str) -> SymbolId {
         let name = self.interner.intern(name);
-        self.declare_type(name, StmtId::MAX)
+        self.declare_type(name, SymbolKind::Builtin, StmtId::MAX)
     }
 
     fn declare_default_functions(&mut self) {
@@ -116,7 +125,7 @@ impl<'a> Binder<'a> {
         self.declare_fn(name, StmtId::MAX)
     }
 
-    fn declare_type(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
+    fn declare_type(&mut self, name: StrId, kind: SymbolKind, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
             self.diagnostics.push(
                 "already defined in this scope.",
@@ -125,10 +134,10 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.type_scope, name, declaration)
+        self.declare_symbol(self.type_scope, name, kind, declaration)
     }
 
-    fn declare_value(&mut self, name: StrId, declaration: StmtId) -> SymbolId {
+    fn declare_value(&mut self, name: StrId, kind: SymbolKind, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
             self.diagnostics.push(
                 "already defined in this scope.",
@@ -137,7 +146,7 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        let symbol = self.declare_symbol(self.value_scope, name, declaration);
+        let symbol = self.declare_symbol(self.value_scope, name, kind, declaration);
         self.local_count += 1;
         symbol
     }
@@ -151,12 +160,19 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        self.declare_symbol(self.fn_scope, name, declaration)
+        self.declare_symbol(self.fn_scope, name, SymbolKind::Fn, declaration)
     }
 
-    fn declare_symbol(&mut self, scope: ScopeId, name: StrId, declaration: StmtId) -> SymbolId {
+    fn declare_symbol(
+        &mut self,
+        scope: ScopeId,
+        name: StrId,
+        kind: SymbolKind,
+        declaration: StmtId,
+    ) -> SymbolId {
         let symbol = self.symbols.alloc(Symbol {
             name,
+            kind,
             local_index: self.local_count,
         });
         self.scopes[scope].symbols.insert(name, symbol);
@@ -244,7 +260,7 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
         }
         Stmt::Struct(name, ..) => {
             let name = b.interner.intern(name);
-            b.declare_type(name, stmt);
+            b.declare_type(name, SymbolKind::Struct, stmt);
         }
         _ => (),
     }
@@ -258,7 +274,7 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             if let Some(ty) = ty {
                 bind_ty(b, ty);
             }
-            b.declare_value(name, stmt);
+            b.declare_value(name, SymbolKind::Let, stmt);
         }
         Stmt::Fn(_, ref params, return_ty, body) => b.with_value_scope(false, |b| {
             let prev_local_count = std::mem::replace(&mut b.local_count, 0);
@@ -278,7 +294,7 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
         Stmt::Param(ref name, ty) => {
             bind_ty(b, ty);
             let name = b.interner.intern(name);
-            b.declare_value(name, stmt);
+            b.declare_value(name, SymbolKind::Param, stmt);
         }
         Stmt::Expr(expr, _) => bind_expr(b, expr),
         Stmt::Struct(_, ref fields) => {

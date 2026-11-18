@@ -468,7 +468,13 @@ mod tests {
     #[test]
     fn test_run_unit() {
         let source = r#"
-            ();
+            fn foo(n: number) {
+                print_number(n);
+            }
+
+            foo(10);
+            foo(20);
+            foo(30);
         "#;
         run_ok(source);
     }

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use crate::{
     ast::{AstNodes, AstVisitor, BinaryOp, Expr, ExprId, Stmt, StmtId},
-    bind::SymbolId,
+    bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
     typechecker::TyContext,
 };
@@ -24,6 +26,7 @@ pub struct Codegen<'a> {
     ty_ctx: TyContext,
     code: Code,
     loop_ctxts: Vec<LoopCtx>,
+    functions: HashMap<SymbolId, usize>,
 }
 
 impl<'a> Codegen<'a> {
@@ -33,15 +36,32 @@ impl<'a> Codegen<'a> {
             ty_ctx,
             code: Code::new(),
             loop_ctxts: Vec::new(),
+            functions: HashMap::new(),
         }
     }
 
     pub fn generate(mut self, stmts: &[StmtId]) -> Code {
+        let collector = NodeCollector::new(stmts, self.ast);
+        for function in collector.functions {
+            self.process_function(function);
+        }
+
+        self.code.start_main();
         for &stmt in stmts {
             self.process_stmt(stmt);
         }
         self.code.write(Opcode::Return);
         self.code
+    }
+
+    fn process_function(&mut self, function: StmtId) {
+        let symbol = self.ast.stmts.binding(function);
+        self.functions.insert(symbol, self.code.len());
+        let Stmt::Fn(.., body) = self.ast.stmts[function] else {
+            unreachable!();
+        };
+        self.process_expr(body);
+        self.code.write(Opcode::Return);
     }
 
     fn process_stmt(&mut self, stmt: StmtId) {
@@ -73,14 +93,25 @@ impl<'a> Codegen<'a> {
                 self.code.write(Opcode::Negate)
             }
             Expr::Variable(_) => {
-                let symbol = self.ast.exprs.binding(expr);
-                let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
-                if index <= u8::MAX as u32 {
-                    self.code.write(Opcode::GetLocal);
-                    self.code.write_u8(index as u8);
-                } else {
-                    self.code.write(Opcode::GetLocalLong);
-                    self.code.write_u16(index as u16);
+                let symbol_id = self.ast.exprs.binding(expr);
+                let symbol = &self.ty_ctx.bind_ctx.symbols[symbol_id];
+                match symbol.kind {
+                    SymbolKind::Let | SymbolKind::Param => {
+                        let index = symbol.local_index;
+                        if index <= u8::MAX as u32 {
+                            self.code.write(Opcode::GetLocal);
+                            self.code.write_u8(index as u8);
+                        } else {
+                            self.code.write(Opcode::GetLocalLong);
+                            self.code.write_u16(index as u16);
+                        }
+                    }
+                    SymbolKind::Fn => {
+                        let offset = self.functions[&symbol_id];
+                        self.code.write(Opcode::Const);
+                        self.code.write_u64(offset as u64);
+                    }
+                    _ => unreachable!(),
                 }
             }
             Expr::Assign(lhs, rhs) => {
@@ -231,8 +262,8 @@ impl<'a> Codegen<'a> {
 }
 
 struct NodeCollector {
-    structs: Vec<SymbolId>,
-    functions: Vec<SymbolId>,
+    structs: Vec<StmtId>,
+    functions: Vec<StmtId>,
 }
 
 impl NodeCollector {
@@ -249,8 +280,8 @@ impl NodeCollector {
 impl AstVisitor for NodeCollector {
     fn visit_stmt(&mut self, stmt: StmtId, ast: &AstNodes) {
         match ast.stmts[stmt] {
-            Stmt::Struct(..) => self.structs.push(ast.stmts.binding(stmt)),
-            Stmt::Fn(..) => self.functions.push(ast.stmts.binding(stmt)),
+            Stmt::Struct(..) => self.structs.push(stmt),
+            Stmt::Fn(..) => self.functions.push(stmt),
             _ => {}
         }
     }

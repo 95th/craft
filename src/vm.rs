@@ -3,25 +3,35 @@ use crate::chunk::{Code, Opcode};
 const TRUE: u64 = 1;
 const FALSE: u64 = 0;
 
+struct CallFrame {
+    ip: usize,
+    sp: usize,
+}
+
 pub struct VM {
     code: Vec<u8>,
-    ip: usize,
     stack: Vec<u64>,
+    frame: CallFrame,
+    frames: Vec<CallFrame>,
 }
 
 impl VM {
     pub fn new(code: Code) -> Self {
         Self {
-            code: code.into_inner(),
-            ip: 0,
             stack: Vec::new(),
+            frame: CallFrame {
+                ip: code.main(),
+                sp: 0,
+            },
+            frames: Vec::new(),
+            code: code.into_inner(),
         }
     }
 
     pub fn run(&mut self) {
         loop {
-            let instr: Opcode = unsafe { std::mem::transmute(self.code[self.ip]) };
-            self.ip += 1;
+            let instr: Opcode = unsafe { std::mem::transmute(self.code[self.frame.ip]) };
+            self.frame.ip += 1;
             match instr {
                 Opcode::True => self.stack.push(TRUE),
                 Opcode::False => self.stack.push(FALSE),
@@ -111,33 +121,33 @@ impl VM {
                     self.stack.push((value as f64).to_bits());
                 }
                 Opcode::GetLocal => {
-                    let index = self.code[self.ip] as usize;
-                    self.ip += 1;
-                    self.stack.push(self.stack[index]);
+                    let index = self.code[self.frame.ip] as usize;
+                    self.frame.ip += 1;
+                    self.stack.push(self.stack[self.frame.sp + index]);
                 }
                 Opcode::GetLocalLong => {
-                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
+                    let bytes =
+                        unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 2]) };
                     let index = u16::from_be_bytes(bytes) as usize;
-                    self.ip += 2;
-                    self.stack.push(self.stack[index]);
+                    self.frame.ip += 2;
+                    self.stack.push(self.stack[self.frame.sp + index]);
                 }
                 Opcode::SetLocal => {
-                    let index = self.code[self.ip] as usize;
-                    self.ip += 1;
+                    let index = self.code[self.frame.ip] as usize;
+                    self.frame.ip += 1;
                     let value = self.stack.pop().unwrap();
-                    self.stack[index] = value;
+                    self.stack[self.frame.sp + index] = value;
                 }
                 Opcode::SetLocalLong => {
                     let index = self.read_u16() as usize;
                     let value = self.stack.pop().unwrap();
-                    self.stack[index] = value;
+                    self.stack[self.frame.sp + index] = value;
                 }
                 Opcode::Call => {
-                    let arg_count = self.code[self.ip] as usize;
-                    self.ip += 1;
+                    let arg_count = self.code[self.frame.ip] as usize;
+                    self.frame.ip += 1;
                     let callee = self.stack.pop().unwrap();
-                    let mut args = self.stack[self.stack.len() - arg_count..].to_vec();
-                    todo!()
+                    self.call(callee, arg_count);
                 }
                 Opcode::PrintNumber => {
                     let value = self.stack.pop().unwrap();
@@ -150,35 +160,51 @@ impl VM {
                 }
                 Opcode::Jump => {
                     let offset = self.read_u16() as usize;
-                    self.ip += offset;
+                    self.frame.ip += offset;
                 }
                 Opcode::JumpIfFalse => {
                     let value = self.stack.pop().unwrap();
                     let offset = self.read_u16() as usize;
                     if value == FALSE {
-                        self.ip += offset;
+                        self.frame.ip += offset;
                     }
                 }
                 Opcode::Loop => {
                     let offset = self.read_u16() as usize;
-                    self.ip -= offset;
+                    self.frame.ip -= offset;
                 }
-                Opcode::Return => return,
+                Opcode::Return => {
+                    if let Some(frame) = self.frames.pop() {
+                        self.frame = frame;
+                    } else {
+                        return;
+                    }
+                }
             }
         }
     }
 
+    fn call(&mut self, function: u64, arg_count: usize) {
+        self.frames.push(std::mem::replace(
+            &mut self.frame,
+            CallFrame {
+                ip: function as usize,
+                sp: self.stack.len() - arg_count,
+            },
+        ))
+    }
+
     fn read_u16(&mut self) -> u16 {
-        let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
+        let bytes = unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 2]) };
         let value = u16::from_be_bytes(bytes);
-        self.ip += 2;
+        self.frame.ip += 2;
         value
     }
 
     fn read_u64(&mut self) -> u64 {
-        let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 8]) };
+        let bytes = unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 8]) };
         let value = u64::from_be_bytes(bytes);
-        self.ip += 8;
+        self.frame.ip += 8;
         value
     }
 }

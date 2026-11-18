@@ -36,11 +36,23 @@ pub enum Opcode {
 #[derive(Debug)]
 pub struct Code {
     code: Vec<u8>,
+    main_offset: usize,
 }
 
 impl Code {
     pub fn new() -> Self {
-        Self { code: Vec::new() }
+        Self {
+            code: Vec::new(),
+            main_offset: 0,
+        }
+    }
+
+    pub fn start_main(&mut self) {
+        self.main_offset = self.code.len();
+    }
+
+    pub fn main(&self) -> usize {
+        self.main_offset
     }
 
     pub fn write(&mut self, op: Opcode) {
