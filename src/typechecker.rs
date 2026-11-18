@@ -38,7 +38,7 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    pub fn check(&mut self, nodes: &[NodeId]) {
+    pub fn check(&mut self, nodes: &[NodeId]) -> Option<()> {
         self.binding_types
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
@@ -46,6 +46,7 @@ impl<'a> TypeChecker<'a> {
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
         check_scope(self, nodes);
+        if self.has_error { None } else { Some(()) }
     }
 
     fn unify(&mut self, lhs: TypeId, rhs: TypeId, span: Span) {
