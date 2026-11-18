@@ -608,6 +608,21 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_generic_functions() {
+        let source = r#"
+            fn foo<T>(a: T) -> T {
+                fn foo<T>(a: T, b: T) -> (T, T) {
+                    (a, b)
+                }
+
+                foo(a, a).1
+            }
+            print(foo(10));
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_recursive_types() {
         let source = r#"
             struct Foo {

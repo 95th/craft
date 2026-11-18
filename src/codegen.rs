@@ -46,7 +46,10 @@ impl<'a> Codegen<'a> {
 
     pub fn generate(mut self, stmts: &[StmtId]) -> Code {
         let collector = NodeCollector::new(stmts, self.ast);
-        for function in collector.functions {
+
+        // Collector runs in pre-order traversal. Iterate in
+        // reverse order to process innermost functions first.
+        for &function in collector.functions.iter().rev() {
             self.process_function(function);
         }
 
