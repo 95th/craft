@@ -61,6 +61,13 @@ impl<'a> TypeChecker<'a> {
                 self.common_types.unit,
             )),
         );
+        self.binding_types.insert(
+            self.bind_ctx.print_string_function,
+            self.types.alloc(Ty::Fn(
+                vec![self.common_types.string],
+                self.common_types.unit,
+            )),
+        );
         check_scope(&mut self, nodes);
         if self.has_error {
             Err(Error::TypeCheck)

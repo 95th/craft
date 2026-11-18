@@ -1,4 +1,7 @@
-use crate::chunk::{Code, Opcode};
+use crate::{
+    chunk::{Code, Opcode},
+    heap::Heap,
+};
 
 const TRUE: u64 = 1;
 const FALSE: u64 = 0;
@@ -62,12 +65,13 @@ impl CallFrame {
 pub struct VM {
     code: Vec<u8>,
     stack: Vec<u64>,
+    heap: Heap,
     frame: CallFrame,
     frames: Vec<CallFrame>,
 }
 
 impl VM {
-    pub fn new(code: Code) -> Self {
+    pub fn new(code: Code, heap: Heap) -> Self {
         let main = code.main();
         let code = code.into_inner();
         Self {
@@ -75,6 +79,7 @@ impl VM {
             frame: CallFrame::new(&code, main, 0),
             frames: Vec::new(),
             code,
+            heap,
         }
     }
 
@@ -195,6 +200,12 @@ impl VM {
                 Opcode::PrintNumber => {
                     let value = self.stack.pop().unwrap();
                     let value = f64::from_bits(value);
+                    println!("{value}");
+                }
+                Opcode::PrintString => {
+                    let value = self.stack.pop().unwrap();
+                    let bytes = self.heap.data(value as usize);
+                    let value = std::str::from_utf8(bytes).unwrap();
                     println!("{value}");
                 }
                 Opcode::Unit => self.stack.push(0),

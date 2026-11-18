@@ -39,6 +39,7 @@ pub struct BindCtx {
     pub str_type: SymbolId,
     pub bool_type: SymbolId,
     pub print_number_function: SymbolId,
+    pub print_string_function: SymbolId,
 }
 
 pub struct Binder<'a> {
@@ -55,6 +56,7 @@ pub struct Binder<'a> {
     str_type: SymbolId,
     bool_type: SymbolId,
     print_number_function: SymbolId,
+    print_string_function: SymbolId,
     loop_depth: u32,
     fn_depth: u32,
     local_count: u32,
@@ -76,6 +78,7 @@ impl<'a> Binder<'a> {
             str_type: SymbolId::MAX,
             bool_type: SymbolId::MAX,
             print_number_function: SymbolId::MAX,
+            print_string_function: SymbolId::MAX,
             loop_depth: 0,
             fn_depth: 0,
             local_count: 0,
@@ -102,6 +105,7 @@ impl<'a> Binder<'a> {
             str_type: self.str_type,
             bool_type: self.bool_type,
             print_number_function: self.print_number_function,
+            print_string_function: self.print_string_function,
         })
     }
 
@@ -118,6 +122,7 @@ impl<'a> Binder<'a> {
 
     fn declare_default_functions(&mut self) {
         self.print_number_function = self.declare_default_function("print_number");
+        self.print_string_function = self.declare_default_function("print_string");
     }
 
     fn declare_default_function(&mut self, name: &str) -> SymbolId {

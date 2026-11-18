@@ -13,6 +13,7 @@ pub enum Opcode {
     SetLocal,
     SetLocalLong,
     PrintNumber,
+    PrintString,
     Call,
     Pop,
     JumpIfFalse,

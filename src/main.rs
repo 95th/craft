@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
-    parser::Parser, typechecker::TypeChecker, vm::VM,
+    heap::Heap, parser::Parser, typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -31,7 +31,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
+fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let mut ast = AstNodes::new();
     let mut parser = Parser::new(source, &mut ast, diagnostics);
     let nodes = parser.parse()?;
@@ -42,7 +42,7 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
     let ty_ctx = checker.check(&nodes)?;
 
-    let codegen = Codegen::new(&ast, ty_ctx);
+    let codegen = Codegen::new(&ast, heap, ty_ctx);
     let code = codegen.generate(&nodes);
     Ok(code)
 }
@@ -60,10 +60,11 @@ fn main() {
     "#;
 
     let start = Instant::now();
+    let mut heap = Heap::new();
     let mut diagnostics = Diagnostics::new();
-    match compile(source, &mut diagnostics) {
+    match compile(source, &mut heap, &mut diagnostics) {
         Ok(code) => {
-            let mut vm = VM::new(code);
+            let mut vm = VM::new(code, heap);
             vm.run();
         }
         Err(_) => {
@@ -78,25 +79,28 @@ mod tests {
     use super::*;
 
     fn check_ok(source: &str) {
+        let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut diagnostics);
+        let result = compile(source, &mut heap, &mut diagnostics);
         diagnostics.print(source);
         result.expect("ok");
     }
 
     fn check_err(source: &str, error: Error) {
+        let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut diagnostics);
+        let result = compile(source, &mut heap, &mut diagnostics);
         diagnostics.print(source);
         assert_eq!(result.unwrap_err(), error);
     }
 
     fn run_ok(source: &str) {
+        let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut diagnostics);
+        let result = compile(source, &mut heap, &mut diagnostics);
         diagnostics.print(source);
         let code = result.expect("ok");
-        let mut vm = VM::new(code);
+        let mut vm = VM::new(code, heap);
         vm.run();
     }
 
@@ -497,6 +501,15 @@ mod tests {
             }
 
             print_number(fib(35));
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_string() {
+        let source = r#"
+            let s = "hello world";
+            print_string(s);
         "#;
         run_ok(source);
     }

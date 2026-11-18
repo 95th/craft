@@ -4,6 +4,7 @@ use crate::{
     ast::{AstNodes, AstVisitor, BinaryOp, Expr, ExprId, Stmt, StmtId},
     bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
+    heap::{Heap, ObjKind},
     typechecker::TyContext,
 };
 
@@ -27,16 +28,18 @@ pub struct Codegen<'a> {
     code: Code,
     loop_ctxts: Vec<LoopCtx>,
     functions: HashMap<SymbolId, usize>,
+    heap: &'a mut Heap,
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ast: &'a AstNodes, ty_ctx: TyContext) -> Self {
+    pub fn new(ast: &'a AstNodes, heap: &'a mut Heap, ty_ctx: TyContext) -> Self {
         Self {
             ast,
             ty_ctx,
             code: Code::new(),
             loop_ctxts: Vec::new(),
             functions: HashMap::new(),
+            heap,
         }
     }
 
@@ -83,6 +86,11 @@ impl<'a> Codegen<'a> {
             Expr::Number(n) => {
                 self.code.write(Opcode::Const);
                 self.code.write_u64(n.to_bits());
+            }
+            Expr::String(ref s) => {
+                let obj = self.heap.alloc(ObjKind::String, s.as_bytes());
+                self.code.write(Opcode::Const);
+                self.code.write_u64(obj as u64);
             }
             Expr::Not(expr) => {
                 self.process_expr(expr);
@@ -158,6 +166,9 @@ impl<'a> Codegen<'a> {
                 let symbol = self.ast.exprs.binding(callee);
                 if symbol == self.ty_ctx.bind_ctx.print_number_function {
                     self.code.write(Opcode::PrintNumber);
+                    self.code.write(Opcode::Unit);
+                } else if symbol == self.ty_ctx.bind_ctx.print_string_function {
+                    self.code.write(Opcode::PrintString);
                     self.code.write(Opcode::Unit);
                 } else {
                     self.process_expr(callee);
