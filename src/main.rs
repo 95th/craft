@@ -29,7 +29,8 @@ fn main() {
     // "#;
     let source = r#"
         fn foo(a: number, b: number) -> number { 1 }
-        foo(10);
+        fn bar(a: number) -> number { 1 } 
+        let f = if 1 > 2 { foo } else { bar };
     "#;
 
     let mut arena = NodeArena::new();

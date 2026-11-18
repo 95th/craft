@@ -1,3 +1,4 @@
+use core::fmt;
 use std::collections::HashMap;
 
 use crate::{
@@ -68,35 +69,26 @@ impl<'a> TypeChecker<'a> {
                     );
                 }
             }
-            (&Type::Fn(ref params_a, ret_a), &Type::Fn(ref params_b, ret_b)) => {
-                if params_a.len() != params_b.len() {
-                    self.error(
-                        format!(
-                            "Type mismatch, expected {} arguments, got {}",
-                            params_a.len(),
-                            params_b.len()
-                        ),
-                        span,
-                    );
-                } else {
-                    for (a, b) in params_a.clone().into_iter().zip(params_b.clone()) {
-                        self.unify(a, b, span);
-                    }
-                }
-                self.unify(ret_a, ret_b, span);
-            }
             (Type::Var, Type::Var) => {
                 self.pending_unifications.push((lhs, rhs, span));
             }
             (Type::Var, other) => self.types[lhs] = other.clone(),
             (other, Type::Var) => self.types[rhs] = other.clone(),
-            (a, b) => {
+            _ => {
                 self.error(
-                    format!("Type mismatch: Expected '{a:?}' but got '{b:?}'"),
+                    format!(
+                        "Type mismatch: Expected '{}' but got '{}'",
+                        self.display(lhs),
+                        self.display(rhs)
+                    ),
                     span,
                 );
             }
         }
+    }
+
+    fn display(&self, ty: TypeId) -> impl fmt::Display {
+        ty.display(&self.types, &self.bind_ctx.symbols, &self.bind_ctx.interner)
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
@@ -255,11 +247,26 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
         }
         Node::Call(callee, ref args) => {
             let callee_ty = check_node(c, callee);
-            let args = args.iter().map(|arg| check_node(c, *arg)).collect();
-            let ret = c.types.alloc(Type::Var);
-            let expected_ty = c.types.alloc(Type::Fn(args, ret));
-            c.unify(callee_ty, expected_ty, node.span(c.nodes));
-            ret
+            let Type::Fn(params, ret_ty) = c.types[callee_ty].clone() else {
+                c.error("Expect callee to be a function", node.span(c.nodes));
+                return c.types.alloc(Type::Var);
+            };
+            if params.len() == args.len() {
+                for (arg, param) in args.iter().zip(params.iter()) {
+                    let arg_ty = check_node(c, *arg);
+                    c.unify(*param, arg_ty, arg.span(c.nodes));
+                }
+            } else {
+                c.error(
+                    format!(
+                        "Type mismatch: Expect {} arguments, got {}",
+                        params.len(),
+                        args.len()
+                    ),
+                    node.span(c.nodes),
+                );
+            }
+            ret_ty
         }
         Node::Return(value) => {
             let value_ty = if let Some(value) = value {
