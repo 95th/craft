@@ -225,7 +225,7 @@ mod tests {
     fn huge_nesting() {
         let mut s = String::new();
         for _ in 0..1_000_000 {
-            s.push('{');
+            s.push_str("fn foo(){");
         }
         s.push_str("1 + 1;");
         for _ in 0..1_000_000 {

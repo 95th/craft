@@ -594,30 +594,32 @@ fn for_expr(p: &mut Parser) -> ExprId {
 }
 
 fn block_expr(p: &mut Parser) -> ExprId {
-    let start = p.prev_span;
-    let mut nodes = Vec::new();
-    let mut trailing_expr = None;
-    if p.token != CloseBrace && p.token != Eof {
-        loop {
-            let stmt = declaration(p);
-            if p.token == CloseBrace || p.token == Eof {
-                if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
-                    trailing_expr = Some(expr);
-                } else {
-                    nodes.push(stmt);
+    crate::stack_safe(|| {
+        let start = p.prev_span;
+        let mut nodes = Vec::new();
+        let mut trailing_expr = None;
+        if p.token != CloseBrace && p.token != Eof {
+            loop {
+                let stmt = declaration(p);
+                if p.token == CloseBrace || p.token == Eof {
+                    if let Stmt::Expr(expr, false) = p.ast.stmts[stmt] {
+                        trailing_expr = Some(expr);
+                    } else {
+                        nodes.push(stmt);
+                    }
+                    break;
                 }
-                break;
-            }
-            nodes.push(stmt);
-            if expr_requires_semi(p, stmt) {
-                p.error_at("Expect ';' after expression", p.ast.stmts.span(stmt));
+                nodes.push(stmt);
+                if expr_requires_semi(p, stmt) {
+                    p.error_at("Expect ';' after expression", p.ast.stmts.span(stmt));
+                }
             }
         }
-    }
-    p.consume(CloseBrace, "Expect '}' after block.");
-    p.ast
-        .exprs
-        .alloc(Expr::Block(nodes, trailing_expr), start.to(p.prev_span))
+        p.consume(CloseBrace, "Expect '}' after block.");
+        p.ast
+            .exprs
+            .alloc(Expr::Block(nodes, trailing_expr), start.to(p.prev_span))
+    })
 }
 
 fn parse_precedence(p: &mut Parser, precedence: u8) -> ExprId {

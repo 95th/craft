@@ -49,8 +49,8 @@ pub struct Binder<'a> {
     number_type: SymbolId,
     str_type: SymbolId,
     bool_type: SymbolId,
-    loop_depth: u16,
-    fn_depth: u16,
+    loop_depth: u32,
+    fn_depth: u32,
 }
 
 impl<'a> Binder<'a> {
