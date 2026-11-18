@@ -70,6 +70,8 @@ impl<'a> Codegen<'a> {
             }
         }
 
+        let code_end = self.code.len();
+
         let mut string_table = FxHashMap::default();
         for (patch_offset, string) in self.string_worklist {
             let string_offset = *string_table.entry(string).or_insert_with(|| {
@@ -80,6 +82,8 @@ impl<'a> Codegen<'a> {
             });
             self.code.write_u64_at(patch_offset, string_offset as u64);
         }
+
+        self.code.disassemble(code_end);
         self.code
     }
 

@@ -4,8 +4,9 @@ use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
 
 use crate::{
-    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
-    interner::StrInterner, ir::Lowering, parser::Parser, typechecker::TypeChecker, vm::VM,
+    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, codegen2::Codegen2,
+    diagnostics::Diagnostics, interner::StrInterner, ir::Lowering, parser::Parser,
+    typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -55,7 +56,7 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     Ok(code)
 }
 
-fn lower(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
+fn lower_and_compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
     let mut parser = Parser::new(source, ast, interner, diagnostics);
@@ -65,12 +66,15 @@ fn lower(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
     let bind_ctx = binder.bind(&nodes)?;
 
     let checker = TypeChecker::new(ast, interner, diagnostics, bind_ctx);
-    let ty_ctx = checker.check(&nodes)?;
+    let mut ty_ctx = checker.check(&nodes)?;
 
-    let lowering = Lowering::new(ast, ty_ctx);
-    lowering.lower(&nodes);
+    let lowering = Lowering::new(ast, &mut ty_ctx);
+    let body = lowering.lower(&nodes);
 
-    Ok(())
+    let codegen = Codegen2::new(&body, &mut ty_ctx, interner);
+    let code = codegen.generate();
+
+    Ok(code)
 }
 
 fn main() {
@@ -86,10 +90,18 @@ fn main() {
     "#;
 
     if cfg!(feature = "lower") {
+        let start = Instant::now();
         let mut diagnostics = Diagnostics::new();
-        if lower(source, &mut diagnostics).is_err() {
-            diagnostics.print(source);
+        match lower_and_compile(source, &mut diagnostics) {
+            Ok(code) => {
+                let mut vm = VM::new(code);
+                vm.run();
+            }
+            Err(_) => {
+                diagnostics.print(source);
+            }
         }
+        println!("Took {:?}", start.elapsed());
     } else {
         let start = Instant::now();
         let mut diagnostics = Diagnostics::new();
@@ -113,17 +125,15 @@ mod tests {
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
 
-        if cfg!(feature = "lower") {
-            let result = lower(source, &mut diagnostics);
-            diagnostics.print(source);
-            result.expect("ok");
+        let result = if cfg!(feature = "lower") {
+            lower_and_compile(source, &mut diagnostics)
         } else {
-            let result = compile(source, &mut diagnostics);
-            diagnostics.print(source);
-            let code = result.expect("ok");
-            let mut vm = VM::new(code);
-            vm.run();
-        }
+            compile(source, &mut diagnostics)
+        };
+        diagnostics.print(source);
+        let code = result.expect("ok");
+        let mut vm = VM::new(code);
+        vm.run();
     }
 
     fn check_err(source: &str, error: Error) {
@@ -754,6 +764,30 @@ mod tests {
     }
 
     #[test]
+    fn test_tuple_struct_repro_issue() {
+        let source = r#"
+            struct Bar(u64);
+            struct Foo(u64, Bar);
+            print(Bar(200).0);
+            print(Foo(10, Bar(1000)).1.0);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_tuple_struct_constructor_as_value() {
+        let source = r#"
+            struct Foo(u64, string, i64);
+            let c = Foo;
+            let foo = c(10, "hello", -14);
+            print(foo.0);
+            print(foo.1);
+            print(foo.2);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_empty_tuple_struct() {
         let source = r#"
             struct Foo();
@@ -870,6 +904,15 @@ mod tests {
 
             print(a == a);
             print(a == b);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_nested_arrays_simplest() {
+        let source = r#"
+            let a = [[1],[2],[3]];
+            print(a[1][0] == 2);
         "#;
         run_ok(source);
     }
@@ -1032,7 +1075,13 @@ mod tests {
     #[test]
     fn test_lower_if_else() {
         let source = r#"
-
+            let a = 1;
+            if a == 1 {
+                a = 2;
+            } else {
+                a = 3;
+            }
+            print(a);
         "#;
         run_ok(source);
     }

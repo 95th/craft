@@ -15,108 +15,101 @@ use crate::{
 struct LoopContext {
     continue_target: BasicBlockId,
     break_target: BasicBlockId,
-    locals: usize,
 }
 
 pub struct Lowering<'a> {
     ast: &'a ast::AstNodes,
-    tcx: TyCtxt,
-    body: Body,
+    tcx: &'a mut TyCtxt,
+    basic_blocks: Arena<BasicBlock>,
+    next_register: RegId,
     current_block: BasicBlockId,
     function_worklist: VecDeque<SymbolId>,
     loop_contexts: Vec<LoopContext>,
-    local_stack: Vec<LocalId>,
-    local_symbols: FxHashMap<SymbolId, LocalId>,
+    symbol_registers: FxHashMap<SymbolId, RegId>,
+    return_reg: RegId,
 }
 
 impl<'a> Lowering<'a> {
-    pub fn new(ast: &'a ast::AstNodes, tcx: TyCtxt) -> Self {
+    pub fn new(ast: &'a ast::AstNodes, tcx: &'a mut TyCtxt) -> Self {
         Self {
             ast,
             tcx,
-            body: Body::new(),
+            basic_blocks: Arena::new(),
+            next_register: 0,
             current_block: BasicBlockId::MAX,
             function_worklist: VecDeque::new(),
             loop_contexts: Vec::new(),
-            local_stack: Vec::new(),
-            local_symbols: FxHashMap::default(),
+            symbol_registers: FxHashMap::default(),
+            return_reg: RegId::MAX,
         }
     }
 
-    pub fn lower(mut self, stmts: &[ast::StmtId]) -> Body {
-        self.body.entry = self.create_block();
-        self.current_block = self.body.entry;
+    pub fn lower(mut self, stmts: &[ast::StmtId]) -> Ir {
+        let main = self.create_block();
+        self.current_block = main;
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
-        self.pop_locals(0, true);
 
+        let mut functions = FxHashMap::default();
         while let Some(symbol) = self.function_worklist.pop_front() {
-            if self.body.functions.contains_key(&symbol) {
+            if functions.contains_key(&symbol) {
                 continue;
             }
             let function = self.tcx.bcx.symbols[symbol].declaration;
-            let prev_body = std::mem::replace(&mut self.body, Body::new());
-            self.local_symbols = FxHashMap::default();
-            self.local_stack = Vec::new();
-            self.body.entry = self.create_block();
-            self.current_block = self.body.entry;
+            self.next_register = 0;
+            let entry = self.create_block();
+            functions.insert(symbol, entry);
+            self.current_block = entry;
             self.lower_function(function);
-            let function = std::mem::replace(&mut self.body, prev_body);
-            self.body.functions.insert(symbol, function);
         }
 
-        self.body
+        Ir {
+            main,
+            functions,
+            basic_blocks: self.basic_blocks,
+        }
     }
 
     fn lower_function(&mut self, function: ast::StmtId) {
-        let fn_symbol = self.ast.stmts.value_binding(function);
-        let fn_ty = self.tcx.value_bindings[&fn_symbol];
-        let Ty::Fn(params, return_ty) = self.tcx.types.probe_value(fn_ty) else {
-            unreachable!();
-        };
-        let result_local = self.create_local(return_ty);
+        self.return_reg = self.create_register(true);
 
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
                     self.lower_stmt(p);
                 }
-                self.lower_expr(f.body, Some(Place::local(result_local)));
+                self.lower_expr(f.body, Some(Place::reg(self.return_reg)));
             }
-            ast::Stmt::TupleStruct(_) => {
-                let fields = params
+            ast::Stmt::TupleStruct(args) => {
+                let fields = args
+                    .fields
                     .iter()
-                    .map(|&p| {
-                        let p = self.create_local(p);
-                        Operand::Place(Place::local(p))
-                    })
+                    .map(|_| Operand::Place(Place::reg(self.create_register(true))))
                     .collect();
                 self.push_stmt(Statement::Assign {
-                    place: Place::local(result_local),
+                    place: Place::reg(self.return_reg),
                     value: RValue::Struct { fields },
                 });
             }
             _ => unreachable!(),
         }
-        self.pop_locals(1, true);
     }
 
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
         match self.ast.stmts[stmt] {
             ast::Stmt::Let { init, .. } => {
-                let local = self.lower_expr_to_local(init);
+                let reg = self.lower_expr_to_reg(init);
                 let symbol = self.ast.stmts.value_binding(stmt);
-                self.local_symbols.insert(symbol, local);
+                self.symbol_registers.insert(symbol, reg);
             }
             ast::Stmt::Expr { expr, .. } => {
                 self.lower_expr(expr, None);
             }
             ast::Stmt::Param { .. } => {
                 let symbol = self.ast.stmts.value_binding(stmt);
-                let ty = self.tcx.value_bindings[&symbol];
-                let local = self.create_local(ty);
-                self.local_symbols.insert(symbol, local);
+                let reg = self.create_register(true);
+                self.symbol_registers.insert(symbol, reg);
             }
             _ => {}
         }
@@ -147,9 +140,15 @@ impl<'a> Lowering<'a> {
                 return self.constant_operand(place, Constant::String(s));
             }
             ast::Expr::Binary { lhs, op, rhs } => {
+                let lhs_ty = self.tcx.expr_types[&lhs];
                 let lhs = self.lower_expr(lhs, None);
                 let rhs = self.lower_expr(rhs, None);
-                RValue::Binary { op, lhs, rhs }
+                RValue::Binary {
+                    op,
+                    lhs,
+                    rhs,
+                    ty: lhs_ty,
+                }
             }
             ast::Expr::Not(e) => {
                 let operand = self.lower_expr(e, None);
@@ -157,19 +156,27 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Negate(e) => {
                 let operand = self.lower_expr(e, None);
-                RValue::Neg(operand)
+                RValue::Neg(operand, ty)
             }
             ast::Expr::Call { callee, ref args } => {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.tcx.bcx.std.print {
                     let arg = self.lower_expr(args[0], None);
-                    self.push_stmt(Statement::Print(arg));
-                    return Operand::Constant(Constant::Unit);
+                    let arg_ty = self.tcx.expr_types[&args[0]];
+                    self.push_stmt(Statement::Print(arg, arg_ty));
+                    return self.constant_operand(place, Constant::Unit);
                 }
 
                 let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
-                let callee = self.lower_expr(callee, None);
-                RValue::Call { callee, args }
+                if symbol != SymbolId::MAX
+                    && let decl = self.tcx.bcx.symbols[symbol].declaration
+                    && let ast::Stmt::TupleStruct(_) = &self.ast.stmts[decl]
+                {
+                    RValue::Struct { fields: args }
+                } else {
+                    let callee = self.lower_expr(callee, None);
+                    RValue::Call { callee, args }
+                }
             }
             ast::Expr::Array(ref args) => {
                 let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
@@ -181,10 +188,11 @@ impl<'a> Lowering<'a> {
                 RValue::StructRepeat { value, count }
             }
             ast::Expr::Struct(ref s) => {
-                let args = s
-                    .fields
-                    .values()
-                    .map(|x| self.lower_expr(*x, None))
+                let symbol = self.ast.exprs.value_binding(expr);
+                let declared = self.tcx.struct_properties[&symbol].clone();
+                let args = declared
+                    .keys()
+                    .map(|name| self.lower_expr(s.fields[name], None))
                     .collect();
                 RValue::Struct { fields: args }
             }
@@ -194,31 +202,40 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
-                let local = self.lower_expr_to_local(obj);
+                let reg = self.lower_expr_to_reg(obj);
                 let Ty::Named(symbol) = self.tcx.types.probe_value(obj_ty) else {
                     unreachable!();
                 };
                 let properties = &self.tcx.struct_properties[&symbol];
                 let index = properties.get_index_of(&name).unwrap();
-                return Operand::Place(Place {
-                    local,
-                    projection: Some(Projection::Field(index as u16)),
-                });
+                return self.store_in_place(
+                    place,
+                    Operand::Place(Place {
+                        reg,
+                        projection: Projection::Field(index as u16),
+                    }),
+                );
             }
             ast::Expr::TupleField { obj, index } => {
-                let local = self.lower_expr_to_local(obj);
-                return Operand::Place(Place {
-                    local,
-                    projection: Some(Projection::Field(index as u16)),
-                });
+                let reg = self.lower_expr_to_reg(obj);
+                return self.store_in_place(
+                    place,
+                    Operand::Place(Place {
+                        reg,
+                        projection: Projection::Field(index as u16),
+                    }),
+                );
             }
             ast::Expr::ArrayIndex { array, index } => {
-                let array = self.lower_expr_to_local(array);
-                let index = self.lower_expr_to_local(index);
-                return Operand::Place(Place {
-                    local: array,
-                    projection: Some(Projection::Index(index)),
-                });
+                let array = self.lower_expr_to_reg(array);
+                let index = self.lower_expr_to_reg(index);
+                return self.store_in_place(
+                    place,
+                    Operand::Place(Place {
+                        reg: array,
+                        projection: Projection::Index(index),
+                    }),
+                );
             }
             ast::Expr::Block { ref stmts, expr } => {
                 if stmts.is_empty() {
@@ -228,25 +245,22 @@ impl<'a> Lowering<'a> {
                     };
                 }
 
-                let prev_locals = self.local_stack.len();
                 for &stmt in stmts {
                     self.lower_stmt(stmt);
                 }
-                let value = if let Some(expr) = expr {
-                    return self.lower_expr(expr, place);
+                return if let Some(expr) = expr {
+                    self.lower_expr(expr, place)
                 } else {
                     self.constant_operand(place, Constant::Unit)
                 };
-                self.pop_locals(prev_locals, true);
-                return value;
             }
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
                 let symbol = &self.tcx.bcx.symbols[symbol_id];
                 return match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
-                        let local = self.local_symbols[&symbol_id];
-                        self.store_in_place(place, Operand::Place(Place::local(local)))
+                        let reg = self.symbol_registers[&symbol_id];
+                        self.store_in_place(place, Operand::Place(Place::reg(reg)))
                     }
                     SymbolKind::Fn => {
                         self.function_worklist.push_back(symbol_id);
@@ -295,14 +309,14 @@ impl<'a> Lowering<'a> {
                 let lhs_place = match self.ast.exprs[lhs] {
                     ast::Expr::Variable(_) => {
                         let symbol = self.ast.exprs.value_binding(lhs);
-                        let local = self.local_symbols[&symbol];
-                        Place::local(local)
+                        let reg = self.symbol_registers[&symbol];
+                        Place::reg(reg)
                     }
                     ast::Expr::TupleField { obj, index } => {
-                        let obj = self.lower_expr_to_local(obj);
+                        let obj = self.lower_expr_to_reg(obj);
                         Place {
-                            local: obj,
-                            projection: Some(Projection::Field(index)),
+                            reg: obj,
+                            projection: Projection::Field(index),
                         }
                     }
                     ast::Expr::StructField { obj, name } => {
@@ -313,18 +327,18 @@ impl<'a> Lowering<'a> {
                         let properties = &self.tcx.struct_properties[&symbol];
                         let index = properties.get_index_of(&name).unwrap();
 
-                        let obj = self.lower_expr_to_local(obj);
+                        let obj = self.lower_expr_to_reg(obj);
                         Place {
-                            local: obj,
-                            projection: Some(Projection::Field(index as u16)),
+                            reg: obj,
+                            projection: Projection::Field(index as u16),
                         }
                     }
                     ast::Expr::ArrayIndex { array, index } => {
-                        let array = self.lower_expr_to_local(array);
-                        let index = self.lower_expr_to_local(index);
+                        let array = self.lower_expr_to_reg(array);
+                        let index = self.lower_expr_to_reg(index);
                         Place {
-                            local: array,
-                            projection: Some(Projection::Index(index)),
+                            reg: array,
+                            projection: Projection::Index(index),
                         }
                     }
                     _ => unreachable!(),
@@ -336,13 +350,11 @@ impl<'a> Lowering<'a> {
                 let cond_block = self.create_block();
                 let body_block = self.create_block();
                 let merge_block = self.create_block();
-
-                let cond_ty = self.tcx.expr_types[&cond];
-                let cond_local = self.create_local(cond_ty);
+                let cond_reg = self.create_register(false);
 
                 self.add_edge(self.current_block, cond_block);
                 self.current_block = cond_block;
-                let cond = self.lower_expr(cond, Some(Place::local(cond_local)));
+                let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
 
                 self.set_terminator(Terminator::Branch {
                     cond,
@@ -369,14 +381,10 @@ impl<'a> Lowering<'a> {
                 incr,
                 body,
             } => {
-                let prev_locals = self.local_stack.len();
                 if let Some(init) = init {
                     self.lower_stmt(init);
                 }
-                let cond_local = cond.map(|cond| {
-                    let ty = self.tcx.expr_types[&cond];
-                    self.create_local(ty)
-                });
+                let cond_reg = cond.map(|_| self.create_register(false));
                 let cond_block = cond.map(|_| self.create_block());
                 let body_block = self.create_block();
                 let incr_block = incr.map(|_| self.create_block());
@@ -384,11 +392,11 @@ impl<'a> Lowering<'a> {
 
                 if let Some(cond) = cond
                     && let Some(cond_block) = cond_block
-                    && let Some(cond_local) = cond_local
+                    && let Some(cond_reg) = cond_reg
                 {
                     self.add_edge(self.current_block, cond_block);
                     self.current_block = cond_block;
-                    let cond = self.lower_expr(cond, Some(Place::local(cond_local)));
+                    let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
                     self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
@@ -424,30 +432,27 @@ impl<'a> Lowering<'a> {
 
                 self.current_block = merge_block;
                 self.loop_contexts.pop();
-                self.pop_locals(prev_locals, true);
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
-                self.pop_locals(context.locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.break_target,
                 });
                 self.add_edge(self.current_block, context.break_target);
 
                 self.current_block = self.create_block();
-                return Operand::Constant(Constant::Unit);
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Continue => {
                 let context = *self.loop_contexts.last().unwrap();
-                self.pop_locals(context.locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.continue_target,
                 });
                 self.add_edge(self.current_block, context.continue_target);
 
                 self.current_block = self.create_block();
-                return Operand::Constant(Constant::Unit);
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Return(expr) => {
                 let value = if let Some(expr) = expr {
@@ -456,24 +461,23 @@ impl<'a> Lowering<'a> {
                     Operand::Constant(Constant::Unit)
                 };
                 self.push_stmt(Statement::Assign {
-                    place: Place::local(LocalId::RETURN),
+                    place: Place::reg(self.return_reg),
                     value: RValue::Use(value),
                 });
-                self.pop_locals(1, false);
-                return Operand::Constant(Constant::Unit);
+                self.current_block = self.create_block();
+                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Unit => return self.constant_operand(place, Constant::Unit),
         };
-        let place = place.unwrap_or_else(|| Place::local(self.create_local(ty)));
+        let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
         self.push_stmt(Statement::Assign { place, value });
         Operand::Place(place)
     }
 
-    fn lower_expr_to_local(&mut self, expr: ast::ExprId) -> LocalId {
-        let ty = self.tcx.expr_types[&expr];
-        let local = self.create_local(ty);
-        self.lower_expr(expr, Some(Place::local(local)));
-        local
+    fn lower_expr_to_reg(&mut self, expr: ast::ExprId) -> RegId {
+        let reg = self.create_register(false);
+        self.lower_expr(expr, Some(Place::reg(reg)));
+        reg
     }
 
     fn constant_operand(&mut self, place: Option<Place>, value: Constant) -> Operand {
@@ -491,79 +495,55 @@ impl<'a> Lowering<'a> {
     }
 
     fn set_terminator(&mut self, terminator: Terminator) {
-        self.body.basic_blocks[self.current_block].terminator = Some(terminator);
+        if cfg!(feature = "trace") {
+            println!("{:?} => {:?}", self.current_block, terminator);
+        }
+        self.basic_blocks[self.current_block].terminator = Some(terminator);
     }
 
     fn create_block(&mut self) -> BasicBlockId {
-        self.body.basic_blocks.alloc(BasicBlock {
+        self.basic_blocks.alloc(BasicBlock {
             statements: Vec::new(),
             terminator: None,
             successors: Vec::new(),
         })
     }
 
-    fn create_local(&mut self, ty: TyId) -> LocalId {
-        let local = self.body.locals.alloc(Local { ty });
-        self.push_stmt(Statement::StorageLive(local));
-        self.local_stack.push(local);
-        local
+    fn create_register(&mut self, implicit: bool) -> RegId {
+        let reg = self.next_register;
+        self.next_register += 1;
+        self.push_stmt(Statement::StorageLive { reg, implicit });
+        reg
     }
 
     fn add_edge(&mut self, from: BasicBlockId, to: BasicBlockId) {
-        self.body.basic_blocks[from].successors.push(to);
+        self.basic_blocks[from].successors.push(to);
     }
 
     fn push_stmt(&mut self, statement: Statement) {
-        self.body.basic_blocks[self.current_block]
+        if cfg!(feature = "trace") {
+            println!("{:?} => {:?}", self.current_block, statement);
+        }
+        self.basic_blocks[self.current_block]
             .statements
             .push(statement);
-    }
-
-    fn pop_locals(&mut self, keep_len: usize, drop: bool) {
-        for i in (keep_len..self.local_stack.len()).rev() {
-            self.push_stmt(Statement::StorageDead(self.local_stack[i]));
-        }
-        if drop {
-            self.local_stack.truncate(keep_len);
-        }
     }
 
     fn enter_loop(&mut self, continue_target: BasicBlockId, break_target: BasicBlockId) {
         self.loop_contexts.push(LoopContext {
             continue_target,
             break_target,
-            locals: self.local_stack.len(),
         })
     }
 }
 
 pub type BasicBlockId = Id<BasicBlock>;
-pub type LocalId = Id<Local>;
+pub type RegId = u32;
 
-impl LocalId {
-    const RETURN: Self = Self::ZERO;
-}
-
-pub struct Body {
+pub struct Ir {
+    pub main: BasicBlockId,
+    pub functions: FxHashMap<SymbolId, BasicBlockId>,
     pub basic_blocks: Arena<BasicBlock>,
-    pub entry: BasicBlockId,
-    pub locals: Arena<Local>,
-    pub functions: FxHashMap<SymbolId, Body>,
-}
-
-impl Body {
-    fn new() -> Self {
-        Self {
-            basic_blocks: Arena::new(),
-            locals: Arena::new(),
-            entry: BasicBlockId::MAX,
-            functions: FxHashMap::default(),
-        }
-    }
-}
-
-pub struct Local {
-    pub ty: TyId,
 }
 
 pub struct BasicBlock {
@@ -572,13 +552,14 @@ pub struct BasicBlock {
     pub successors: Vec<BasicBlockId>,
 }
 
+#[derive(Debug)]
 pub enum Statement {
     Assign { place: Place, value: RValue },
-    StorageLive(LocalId),
-    StorageDead(LocalId),
-    Print(Operand),
+    StorageLive { reg: RegId, implicit: bool },
+    Print(Operand, TyId),
 }
 
+#[derive(Debug)]
 pub enum Terminator {
     Jump {
         target: BasicBlockId,
@@ -588,18 +569,19 @@ pub enum Terminator {
         then_block: BasicBlockId,
         else_block: BasicBlockId,
     },
-    Return,
 }
 
+#[derive(Debug)]
 pub enum RValue {
     Use(Operand),
     Binary {
         op: ast::BinaryOp,
         lhs: Operand,
         rhs: Operand,
+        ty: TyId,
     },
     Not(Operand),
-    Neg(Operand),
+    Neg(Operand, TyId),
     Struct {
         fields: Vec<Operand>,
     },
@@ -613,25 +595,26 @@ pub enum RValue {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Operand {
     Place(Place),
     Constant(Constant),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Place {
-    pub local: LocalId,
-    pub projection: Option<Projection>,
+    pub reg: RegId,
+    pub projection: Projection,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Projection {
+    None,
     Field(u16),
-    Index(LocalId),
+    Index(RegId),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Constant {
     Unit,
     Bool(bool),
@@ -643,10 +626,10 @@ pub enum Constant {
 }
 
 impl Place {
-    fn local(local: LocalId) -> Self {
+    fn reg(reg: RegId) -> Self {
         Self {
-            local,
-            projection: None,
+            reg,
+            projection: Projection::None,
         }
     }
 }

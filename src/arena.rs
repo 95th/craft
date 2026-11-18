@@ -14,7 +14,6 @@ pub struct Id<T> {
 }
 
 impl<T> Id<T> {
-    pub const ZERO: Self = Self::new(0);
     pub const MAX: Self = Self::new(u32::MAX as usize);
 
     const fn new(index: usize) -> Self {

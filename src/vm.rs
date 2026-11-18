@@ -185,31 +185,31 @@ impl VM {
                 }
                 Opcode::I64Neg => {
                     let value = self.stack.pop().unwrap();
-                    let value = -cast!(value, i64);
+                    let value = cast!(value, i64).wrapping_mul(-1);
                     self.stack.push(cast!(value, u64));
                 }
                 Opcode::I64Add => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = cast!(a, i64) + cast!(b, i64);
+                    let value = cast!(a, i64).wrapping_add(cast!(b, i64));
                     self.stack.push(cast!(value, u64));
                 }
                 Opcode::I64Sub => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = cast!(a, i64) - cast!(b, i64);
+                    let value = cast!(a, i64).wrapping_sub(cast!(b, i64));
                     self.stack.push(cast!(value, u64));
                 }
                 Opcode::I64Mul => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = cast!(a, i64) * cast!(b, i64);
+                    let value = cast!(a, i64).wrapping_mul(cast!(b, i64));
                     self.stack.push(cast!(value, u64));
                 }
                 Opcode::I64Div => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = cast!(a, i64) / cast!(b, i64);
+                    let value = cast!(a, i64).wrapping_div(cast!(b, i64));
                     self.stack.push(cast!(value, u64));
                 }
                 Opcode::I64Greater => {
@@ -251,25 +251,25 @@ impl VM {
                 Opcode::U64Add => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = a + b;
+                    let value = a.wrapping_add(b);
                     self.stack.push(value);
                 }
                 Opcode::U64Sub => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = a - b;
+                    let value = a.wrapping_sub(b);
                     self.stack.push(value);
                 }
                 Opcode::U64Mul => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = a * b;
+                    let value = a.wrapping_mul(b);
                     self.stack.push(value);
                 }
                 Opcode::U64Div => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-                    let value = a / b;
+                    let value = a.wrapping_div(b);
                     self.stack.push(value);
                 }
                 Opcode::U64Greater => {
@@ -341,7 +341,14 @@ impl VM {
                 Opcode::Call => {
                     let arg_count = self.frame.read_u8() as usize;
                     let callee = self.stack.pop().unwrap();
-                    self.call(callee, arg_count);
+                    self.call(
+                        callee,
+                        if cfg!(feature = "lower") {
+                            arg_count + 1
+                        } else {
+                            arg_count
+                        },
+                    );
                 }
                 Opcode::PrintF64 => {
                     let value = self.stack.pop().unwrap();
@@ -406,9 +413,13 @@ impl VM {
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
-                        let value = self.stack.pop().unwrap();
-                        self.stack.truncate(self.frame.sp);
-                        self.stack.push(value);
+                        if cfg!(feature = "lower") {
+                            self.stack.truncate(self.frame.sp + 1);
+                        } else {
+                            let value = self.stack.pop().unwrap();
+                            self.stack.truncate(self.frame.sp);
+                            self.stack.push(value);
+                        }
                         self.frame = frame;
                     } else {
                         return;

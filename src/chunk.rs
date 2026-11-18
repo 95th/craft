@@ -83,6 +83,113 @@ impl Code {
         Self { code: Vec::new() }
     }
 
+    pub fn disassemble(&self, end: usize) {
+        if !cfg!(feature = "trace") {
+            return;
+        }
+
+        println!("-- disassembly --");
+        let mut i = 0;
+        while i < end {
+            let instr: Opcode = unsafe { std::mem::transmute(self.code[i]) };
+            print!("{i:<05} {instr:?}");
+            i += 1;
+            match instr {
+                Opcode::Const => {
+                    let n = self.code[i..].first_chunk().unwrap();
+                    let n = u64::from_ne_bytes(*n);
+                    println!(" {n}");
+                    i += 8;
+                }
+                Opcode::GetLocal | Opcode::SetLocal => {
+                    let n = self.code[i];
+                    println!(" {n}");
+                    i += 1;
+                }
+                Opcode::GetLocalLong
+                | Opcode::SetLocalLong
+                | Opcode::PopN
+                | Opcode::PopScope
+                | Opcode::Struct
+                | Opcode::GetStructProperty
+                | Opcode::SetStructProperty => {
+                    let n = self.code[i..].first_chunk().unwrap();
+                    let n = u16::from_ne_bytes(*n);
+                    println!(" {n}");
+                    i += 2;
+                }
+                Opcode::JumpIfFalse | Opcode::Jump => {
+                    let n = self.code[i..].first_chunk().unwrap();
+                    let n = u16::from_ne_bytes(*n) as usize;
+                    println!(" {} (target: {})", n, i + 2 + n);
+                    i += 2;
+                }
+                Opcode::Loop => {
+                    let n = self.code[i..].first_chunk().unwrap();
+                    let n = u16::from_ne_bytes(*n) as usize;
+                    println!(" {} (target: {})", n, i + 2 - n);
+                    i += 2;
+                }
+                Opcode::Call => {
+                    let n = self.code[i];
+                    println!(" ({n} args)");
+                    i += 1;
+                }
+                Opcode::Equal
+                | Opcode::NotEqual
+                | Opcode::F64Neg
+                | Opcode::F64Add
+                | Opcode::F64Sub
+                | Opcode::F64Mul
+                | Opcode::F64Div
+                | Opcode::F64Greater
+                | Opcode::F64GreaterEqual
+                | Opcode::F64Less
+                | Opcode::F64LessEqual
+                | Opcode::F64Equal
+                | Opcode::F64NotEqual
+                | Opcode::I64Neg
+                | Opcode::I64Add
+                | Opcode::I64Sub
+                | Opcode::I64Mul
+                | Opcode::I64Div
+                | Opcode::I64Greater
+                | Opcode::I64GreaterEqual
+                | Opcode::I64Less
+                | Opcode::I64LessEqual
+                | Opcode::I64Or
+                | Opcode::I64And
+                | Opcode::U64Add
+                | Opcode::U64Sub
+                | Opcode::U64Mul
+                | Opcode::U64Div
+                | Opcode::U64Greater
+                | Opcode::U64GreaterEqual
+                | Opcode::U64Less
+                | Opcode::U64LessEqual
+                | Opcode::U64Or
+                | Opcode::U64And
+                | Opcode::True
+                | Opcode::False
+                | Opcode::Unit
+                | Opcode::Not
+                | Opcode::Pop
+                | Opcode::PrintBool
+                | Opcode::PrintF64
+                | Opcode::PrintI64
+                | Opcode::PrintObj
+                | Opcode::PrintString
+                | Opcode::PrintU64
+                | Opcode::RepeatStruct
+                | Opcode::GetStructIndex
+                | Opcode::SetStructIndex
+                | Opcode::String
+                | Opcode::Return => println!(),
+            }
+        }
+        println!("----");
+    }
+
     pub fn op_const(&mut self, value: u64) {
         self.op(Opcode::Const);
         self.write_u64(value);
@@ -188,6 +295,18 @@ impl Code {
     pub fn patch_jump(&mut self, start: usize) {
         let offset = self.code.len() - start - 2;
         self.write_u16_at(start, offset as u16);
+    }
+
+    pub fn patch_jump_with(&mut self, from: usize, to: usize) {
+        if to > from {
+            let offset = to - (from + 2);
+            self.write_u16_at(from, offset as u16);
+        } else {
+            debug_assert_eq!(self.code[from - 1], Opcode::Jump as u8);
+            self.code[from - 1] = Opcode::Loop as u8;
+            let offset = (from + 2) - to;
+            self.write_u16_at(from, offset as u16);
+        }
     }
 
     pub fn write_loop(&mut self, start: usize) {
