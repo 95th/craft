@@ -21,10 +21,10 @@ pub enum SymbolKind {
     Type,
 }
 
-type SymbolId = Idx<Symbol>;
+pub type SymbolId = Idx<Symbol>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ScopeKind {
+pub enum ScopeKind {
     Fn,
     Loop,
     Block,
@@ -36,6 +36,15 @@ struct Scope {
     parent: Option<ScopeId>,
 }
 
+pub struct BindCtx {
+    pub scopes: Arena<Scope>,
+    pub symbols: Arena<Symbol>,
+    pub interner: StrInterner,
+    pub bindings: Vec<Option<SymbolId>>,
+    pub number_type: SymbolId,
+    pub str_type: SymbolId,
+}
+
 pub struct Binder<'a> {
     nodes: &'a NodeArena,
     scopes: Arena<Scope>,
@@ -45,6 +54,8 @@ pub struct Binder<'a> {
     interner: StrInterner,
     bindings: Vec<Option<SymbolId>>,
     has_error: bool,
+    number_type: SymbolId,
+    str_type: SymbolId,
 }
 
 impl<'a> Binder<'a> {
@@ -58,60 +69,80 @@ impl<'a> Binder<'a> {
             interner: StrInterner::new(),
             bindings: vec![None; nodes.len()],
             has_error: false,
+            number_type: SymbolId::MAX,
+            str_type: SymbolId::MAX,
         }
     }
 
-    pub fn bind(&mut self, nodes: &[NodeId]) {
+    pub fn bind(mut self, nodes: &[NodeId]) -> Option<BindCtx> {
         self.value_scope = self.create_scope(ScopeKind::Block, None);
         self.type_scope = self.create_scope(ScopeKind::Block, None);
         self.declare_default_types();
-        bind_scope(self, nodes);
+        bind_scope(&mut self, nodes);
+        if self.has_error {
+            return None;
+        }
+        Some(BindCtx {
+            scopes: self.scopes,
+            symbols: self.symbols,
+            interner: self.interner,
+            bindings: self.bindings,
+            number_type: self.number_type,
+            str_type: self.str_type,
+        })
     }
 
     fn declare_default_types(&mut self) {
-        self.declare_default_type("number");
-        self.declare_default_type("str");
+        self.number_type = self.declare_default_type("number");
+        self.str_type = self.declare_default_type("str");
     }
 
-    fn declare_default_type(&mut self, name: &str) {
+    fn declare_default_type(&mut self, name: &str) -> SymbolId {
         let name = self.interner.intern(name);
-        self.declare_type(
-            name,
-            Symbol {
-                kind: SymbolKind::Type,
-                name,
-                declaration: NodeId::ERROR,
-            },
-        );
+        self.declare_type(name, SymbolKind::Type, NodeId::ERROR)
     }
 
-    fn declare_type(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.type_scope].symbols.contains_key(&name) {
+    fn declare_type(&mut self, name: StrId, kind: SymbolKind, declaration: NodeId) -> SymbolId {
+        if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
             println!(
                 "Another type with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
             );
             self.has_error = true;
-            return;
+            return *s;
         }
-        self.declare_symbol(self.type_scope, name, symbol);
+        self.declare_symbol(self.type_scope, name, kind, declaration)
     }
 
-    fn declare_value(&mut self, name: StrId, symbol: Symbol) {
-        if self.scopes[self.value_scope].symbols.contains_key(&name) {
+    fn declare_value(&mut self, name: StrId, kind: SymbolKind, declaration: NodeId) -> SymbolId {
+        if let Some(s) = self.scopes[self.value_scope].symbols.get(&name) {
             println!(
                 "Another variable with name '{}' already defined in this scope.",
                 self.interner.lookup(name)
             );
             self.has_error = true;
-            return;
+            return *s;
         }
-        self.declare_symbol(self.value_scope, name, symbol);
+        self.declare_symbol(self.value_scope, name, kind, declaration)
     }
 
-    fn declare_symbol(&mut self, scope: ScopeId, name: StrId, symbol: Symbol) {
-        let symbol = self.symbols.alloc(symbol);
+    fn declare_symbol(
+        &mut self,
+        scope: ScopeId,
+        name: StrId,
+        kind: SymbolKind,
+        declaration: NodeId,
+    ) -> SymbolId {
+        let symbol = self.symbols.alloc(Symbol {
+            kind,
+            name,
+            declaration,
+        });
+        if declaration != NodeId::ERROR {
+            self.bindings[declaration.idx()] = Some(symbol);
+        }
         self.scopes[scope].symbols.insert(name, symbol);
+        symbol
     }
 
     fn lookup_type(&self, name: StrId) -> Option<SymbolId> {
@@ -189,14 +220,7 @@ fn declare_item(b: &mut Binder, node: NodeId) {
     match node.get(b.nodes) {
         Node::Fn(name, ..) => {
             let name = b.interner.intern(name);
-            b.declare_value(
-                name,
-                Symbol {
-                    kind: SymbolKind::Fn,
-                    name,
-                    declaration: node,
-                },
-            )
+            b.declare_value(name, SymbolKind::Fn, node);
         }
         _ => {}
     }
@@ -210,14 +234,7 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
                 bind_ty(b, ty);
             }
             let name = b.interner.intern(name);
-            b.declare_value(
-                name,
-                Symbol {
-                    kind: SymbolKind::Var,
-                    name,
-                    declaration: node,
-                },
-            );
+            b.declare_value(name, SymbolKind::Var, node);
         }
         Node::Fn(_, ref params, return_ty, body) => b.with_scope(ScopeKind::Fn, |b| {
             for param in params {
@@ -231,16 +248,9 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
         Node::Param(ref name, ty) => {
             bind_ty(b, ty);
             let name = b.interner.intern(name);
-            b.declare_value(
-                name,
-                Symbol {
-                    kind: SymbolKind::Param,
-                    name,
-                    declaration: node,
-                },
-            );
+            b.declare_value(name, SymbolKind::Param, node);
         }
-        Node::ExprStatement(expr) => bind_expr(b, expr),
+        Node::Semi(expr) => bind_expr(b, expr),
         _ => bind_expr(b, node),
     }
 }

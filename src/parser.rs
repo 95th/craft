@@ -159,10 +159,8 @@ fn while_statement(p: &mut Parser) -> NodeId {
 fn expression_statement(p: &mut Parser) -> NodeId {
     let expr = expression(p);
     if p.eat(Semicolon) {
-        p.nodes.alloc(
-            Node::ExprStatement(expr),
-            expr.span(p.nodes).to(p.prev_span),
-        )
+        p.nodes
+            .alloc(Node::Semi(expr), expr.span(p.nodes).to(p.prev_span))
     } else {
         expr
     }

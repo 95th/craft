@@ -13,7 +13,7 @@ pub enum Node {
     Assign(NodeId, NodeId),
     If(NodeId, NodeId, Option<NodeId>),
     Block(Vec<NodeId>),
-    ExprStatement(NodeId),
+    Semi(NodeId),
     While(NodeId, NodeId),
     Break,
     Continue,
@@ -146,7 +146,7 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, " }}")
             }
-            Node::ExprStatement(node) => {
+            Node::Semi(node) => {
                 write!(f, "{};", node.display(arena))
             }
             Node::While(cond, body) => {

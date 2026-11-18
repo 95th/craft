@@ -1,10 +1,10 @@
+use core::fmt;
 use std::{
     hash::Hash,
     marker::PhantomData,
     ops::{Index, IndexMut},
 };
 
-#[derive(Debug)]
 pub struct Idx<T> {
     idx: u32,
     ph: PhantomData<T>,
@@ -18,6 +18,12 @@ impl<T> Idx<T> {
             idx: index as u32,
             ph: PhantomData,
         }
+    }
+}
+
+impl<T> fmt::Debug for Idx<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Idx({})", self.idx)
     }
 }
 

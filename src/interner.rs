@@ -31,10 +31,6 @@ impl StrInterner {
         id
     }
 
-    pub fn find(&self, name: &str) -> Option<StrId> {
-        self.map.get(name).copied()
-    }
-
     pub fn lookup(&self, s: StrId) -> &str {
         self.vec[s.0 as usize]
     }

@@ -1,4 +1,4 @@
-use crate::{ast::NodeArena, bind::Binder, parser::Parser};
+use crate::{ast::NodeArena, bind::Binder, parser::Parser, typechecker::TypeChecker};
 
 mod arena;
 mod ast;
@@ -6,6 +6,8 @@ mod bind;
 mod interner;
 mod parser;
 mod scanner;
+mod typechecker;
+mod types;
 
 fn main() {
     // let source = r#"
@@ -21,14 +23,9 @@ fn main() {
     //     foo(foo(1, 2), x);
     // "#;
     let source = r#"
-        fn foo(x: number) { x }
+        fn foo(x: number) -> number { x }
         let x = 1;
-        {
-            foo(x);
-            let x = 2;
-            foo(x);
-        }
-        foo(x);
+        1 + foo(x);
     "#;
 
     let mut arena = NodeArena::new();
@@ -40,7 +37,9 @@ fn main() {
     }
     arena.dump(source);
 
-    let mut binder = Binder::new(&arena);
-    binder.bind(&nodes);
-    println!("done");
+    let binder = Binder::new(&arena);
+    let bind_ctx = binder.bind(&nodes).unwrap();
+
+    let mut checker = TypeChecker::new(&arena, bind_ctx);
+    checker.check(&nodes);
 }
