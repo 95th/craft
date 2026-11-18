@@ -336,4 +336,19 @@ mod tests {
         "#;
         check_err(source, Error::TypeCheck);
     }
+
+    #[test]
+    fn test_assign_block() {
+        let source = r#"
+            let a = 10;
+            a = a + 1 - 4 / 2 * 1.2;
+            print_number(a);
+            a = {
+                let b = 20;
+                b + 1
+            };
+            print_number(a);
+        "#;
+        check_ok(source);
+    }
 }
