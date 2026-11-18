@@ -30,15 +30,20 @@ pub enum BinaryOp {
 
 pub struct NodeArena {
     nodes: Vec<Node>,
+    spans: Vec<Span>,
 }
 
 impl NodeArena {
     pub fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            spans: Vec::new(),
+        }
     }
 
-    pub fn alloc(&mut self, node: Node) -> NodeId {
+    pub fn alloc(&mut self, node: Node, span: Span) -> NodeId {
         self.nodes.push(node);
+        self.spans.push(span);
         NodeId::new(self.nodes.len() - 1)
     }
 }
@@ -53,6 +58,10 @@ impl NodeId {
 
     pub fn get(self, arena: &NodeArena) -> &Node {
         &arena.nodes[self.0 as usize]
+    }
+
+    pub fn span(self, arena: &NodeArena) -> Span {
+        arena.spans[self.0 as usize]
     }
 
     pub fn display(self, arena: &NodeArena) -> impl fmt::Display {
@@ -101,6 +110,32 @@ impl fmt::Display for BinaryOp {
             Self::LessEqual => write!(f, "<="),
             Self::Equal => write!(f, "=="),
             Self::NotEqual => write!(f, "!="),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self {
+            start: start as u32,
+            end: end as u32,
+        }
+    }
+
+    pub fn text(self, source: &str) -> &str {
+        &source[self.start as usize..self.end as usize]
+    }
+
+    pub fn to(self, other: Self) -> Self {
+        Self {
+            start: self.start,
+            end: other.end,
         }
     }
 }

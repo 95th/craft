@@ -1,7 +1,7 @@
 use std::ops::Add;
 
 use crate::{
-    ast::{BinaryOp, Node, NodeArena, NodeId},
+    ast::{BinaryOp, Node, NodeArena, NodeId, Span},
     scanner::{
         Scanner,
         Token::{self, *},
@@ -9,6 +9,7 @@ use crate::{
 };
 
 pub struct Parser<'a> {
+    source: &'a str,
     scanner: Scanner<'a>,
     nodes: &'a mut NodeArena,
     token: Token,
@@ -19,6 +20,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str, nodes: &'a mut NodeArena) -> Self {
         Self {
+            source,
             scanner: Scanner::new(source),
             nodes,
             token: Error,
@@ -57,25 +59,16 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&mut self, message: &str) {
-        self.error_at(
-            message,
-            self.token,
-            self.scanner.line(),
-            self.scanner.token_text(),
-        );
+        self.error_at(message, self.scanner.span());
     }
 
-    fn error_at(&mut self, message: &str, token: Token, line: u32, token_text: &str) {
+    fn error_at(&mut self, message: &str, span: Span) {
         if self.panic_mode {
             return;
         }
         self.panic_mode = true;
         self.had_error = true;
-        match token {
-            Eof => print!("Error at end of file: {message}"),
-            Error => print!("[Line: {line}] Error: {message}"),
-            _ => print!("[Line: {line}] Error at '{token_text}': {message}"),
-        }
+        print!("Error at '{}': {message}", span.text(self.source),);
     }
 }
 
@@ -88,6 +81,7 @@ fn declaration(p: &mut Parser) -> NodeId {
 }
 
 fn let_declaration(p: &mut Parser) -> NodeId {
+    let start = p.scanner.span();
     p.advance();
     let name = p.scanner.token_text().to_string();
     p.consume(Identifier, "Expect variable name.");
@@ -99,8 +93,9 @@ fn let_declaration(p: &mut Parser) -> NodeId {
     };
     p.consume(Equal, "Expect '=' before initializer.");
     let init = expression(p);
+    let span = start.to(p.scanner.span());
     p.consume(Semicolon, "Expect ';' after initializer.");
-    p.nodes.alloc(Node::Let(name, type_annotation, init))
+    p.nodes.alloc(Node::Let(name, type_annotation, init), span)
 }
 
 fn fn_declaration(p: &mut Parser) -> NodeId {
@@ -149,62 +144,76 @@ fn binary(p: &mut Parser, lhs: NodeId) -> NodeId {
     let precedence = precedence_of(p.token);
     p.advance();
     let rhs = parse_precedence(p, precedence + 1);
-    p.nodes.alloc(Node::Binary(lhs, op, rhs))
+    p.nodes.alloc(
+        Node::Binary(lhs, op, rhs),
+        lhs.span(p.nodes).to(rhs.span(p.nodes)),
+    )
 }
 
 fn assignment(p: &mut Parser, lhs: NodeId) -> NodeId {
     p.advance();
     let rhs = expression(p);
     match lhs.get(p.nodes) {
-        Node::Variable(..) => p.nodes.alloc(Node::Assign(lhs, rhs)),
+        Node::Variable(..) => p.nodes.alloc(
+            Node::Assign(lhs, rhs),
+            lhs.span(p.nodes).to(rhs.span(p.nodes)),
+        ),
         _ => {
-            p.error("Invalid assignment target");
-            p.nodes.alloc(Node::Error)
+            p.error_at("Invalid assignment target", lhs.span(p.nodes));
+            p.nodes.alloc(Node::Error, lhs.span(p.nodes))
         }
     }
 }
 
 fn unary(p: &mut Parser) -> NodeId {
+    let start = p.scanner.span();
     let op = p.token;
     p.advance();
     let expr = parse_precedence(p, Precedence::UNARY);
     match op {
-        Bang => p.nodes.alloc(Node::Not(expr)),
-        Minus => p.nodes.alloc(Node::Negate(expr)),
+        Bang => p.nodes.alloc(Node::Not(expr), start.to(expr.span(p.nodes))),
+        Minus => p
+            .nodes
+            .alloc(Node::Negate(expr), start.to(expr.span(p.nodes))),
         _ => unreachable!(),
     }
 }
 
 fn number(p: &mut Parser) -> NodeId {
+    let span = p.scanner.span();
     let n = p.scanner.token_text().parse().unwrap();
     p.advance();
-    p.nodes.alloc(Node::Number(n))
+    p.nodes.alloc(Node::Number(n), span)
 }
 
 fn string(p: &mut Parser) -> NodeId {
+    let span = p.scanner.span();
     let text = p.scanner.token_text();
     let text = text[1..text.len() - 1].to_string();
     p.advance();
-    p.nodes.alloc(Node::String(text))
+    p.nodes.alloc(Node::String(text), span)
 }
 
 fn boolean(p: &mut Parser) -> NodeId {
+    let span = p.scanner.span();
     let value = p.token == Token::True;
     p.advance();
-    p.nodes.alloc(Node::Bool(value))
+    p.nodes.alloc(Node::Bool(value), span)
 }
 
 fn variable(p: &mut Parser) -> NodeId {
+    let span = p.scanner.span();
     let name = p.scanner.token_text().to_string();
     p.advance();
-    p.nodes.alloc(Node::Variable(name))
+    p.nodes.alloc(Node::Variable(name), span)
 }
 
 fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
+        let span = p.scanner.span();
         p.error("Expect expression.");
         p.advance();
-        return p.nodes.alloc(Node::Error);
+        return p.nodes.alloc(Node::Error, span);
     };
 
     while precedence <= precedence_of(p.token) {

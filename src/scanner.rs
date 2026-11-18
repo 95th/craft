@@ -2,6 +2,8 @@ use std::str::Chars;
 
 use Token::*;
 
+use crate::ast::Span;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Token {
@@ -52,25 +54,25 @@ pub enum Token {
 }
 
 pub struct Scanner<'a> {
-    start: &'a str,
+    source: &'a str,
     current: Chars<'a>,
-    line: u32,
+    start: usize,
     error_message: &'a str,
 }
 
 impl<'a> Scanner<'a> {
     pub fn new(source: &'a str) -> Self {
         Self {
-            start: source,
+            source,
             current: source.chars(),
-            line: 0,
+            start: 0,
             error_message: "",
         }
     }
 
     pub fn scan_token(&mut self) -> Token {
         self.skip_whitespace();
-        self.start = self.current.as_str();
+        self.start = self.pos();
         let Some(c) = self.current.next() else {
             return Eof;
         };
@@ -108,16 +110,19 @@ impl<'a> Scanner<'a> {
     }
 
     pub fn token_text(&self) -> &'a str {
-        let len = self.start.len() - self.current.as_str().len();
-        &self.start[..len]
+        &self.source[self.start..self.pos()]
     }
 
-    pub fn line(&self) -> u32 {
-        self.line
+    pub fn span(&self) -> Span {
+        Span::new(self.start, self.pos())
     }
 
     pub fn error_message(&self) -> &'a str {
         self.error_message
+    }
+
+    fn pos(&self) -> usize {
+        self.source.len() - self.current.as_str().len()
     }
 
     fn scan_string(&mut self) -> Token {
@@ -184,12 +189,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(c) = self.peek_char() {
-            match c {
-                ' ' | '\r' | '\t' => {}
-                '\n' => self.line += 1,
-                _ => break,
-            }
+        while let Some(' ' | '\r' | '\t' | '\n') = self.peek_char() {
             self.current.next();
         }
     }
