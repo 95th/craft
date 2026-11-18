@@ -18,7 +18,7 @@ impl<'a> Codegen<'a> {
     }
 
     pub fn generate(&mut self, stmts: &[StmtId]) {
-        let nodes = self.collect_structs_in_stmts(stmts);
+        let nodes = self.collect_nodes(stmts);
         println!(
             "{} structs, {} functions",
             nodes.structs.len(),
@@ -26,7 +26,7 @@ impl<'a> Codegen<'a> {
         );
     }
 
-    fn collect_structs_in_stmts(&mut self, stmts: &[StmtId]) -> NodeCollector {
+    fn collect_nodes(&mut self, stmts: &[StmtId]) -> NodeCollector {
         let mut nodes = NodeCollector {
             structs: Vec::new(),
             functions: Vec::new(),
