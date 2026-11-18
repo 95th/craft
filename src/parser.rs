@@ -229,6 +229,16 @@ fn boolean(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::Bool(value), p.prev_span)
 }
 
+fn break_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    p.nodes.alloc(Node::Break, p.prev_span)
+}
+
+fn continue_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    p.nodes.alloc(Node::Continue, p.prev_span)
+}
+
 fn variable(p: &mut Parser) -> NodeId {
     let name = p.scanner.token_text().to_string();
     p.advance();
@@ -294,6 +304,8 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         NumberLiteral => number(p),
         StringLiteral => string(p),
         True | False => boolean(p),
+        Break => break_expr(p),
+        Continue => continue_expr(p),
         Identifier => variable(p),
         If => if_expr(p),
         OpenBrace => block_expr(p),

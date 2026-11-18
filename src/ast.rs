@@ -16,6 +16,8 @@ pub enum Node {
     Block(Vec<NodeId>),
     ExprStatement(NodeId),
     While(NodeId, NodeId),
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +139,8 @@ impl fmt::Display for NodeDisplay<'_> {
             Node::While(cond, body) => {
                 write!(f, "while {} {}", cond.display(arena), body.display(arena))
             }
+            Node::Break => write!(f, "break"),
+            Node::Continue => write!(f, "continue"),
         }
     }
 }
