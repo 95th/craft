@@ -36,7 +36,7 @@ pub struct BindCtx {
     pub symbols: Arena<Symbol>,
     pub interner: StrInterner,
     pub number_type: SymbolId,
-    pub str_type: SymbolId,
+    pub string_type: SymbolId,
     pub bool_type: SymbolId,
     pub print_number_function: SymbolId,
     pub print_string_function: SymbolId,
@@ -53,7 +53,7 @@ pub struct Binder<'a> {
     interner: StrInterner,
     has_error: bool,
     number_type: SymbolId,
-    str_type: SymbolId,
+    string_type: SymbolId,
     bool_type: SymbolId,
     print_number_function: SymbolId,
     print_string_function: SymbolId,
@@ -75,7 +75,7 @@ impl<'a> Binder<'a> {
             interner: StrInterner::new(),
             has_error: false,
             number_type: SymbolId::MAX,
-            str_type: SymbolId::MAX,
+            string_type: SymbolId::MAX,
             bool_type: SymbolId::MAX,
             print_number_function: SymbolId::MAX,
             print_string_function: SymbolId::MAX,
@@ -102,7 +102,7 @@ impl<'a> Binder<'a> {
             symbols: self.symbols,
             interner: self.interner,
             number_type: self.number_type,
-            str_type: self.str_type,
+            string_type: self.string_type,
             bool_type: self.bool_type,
             print_number_function: self.print_number_function,
             print_string_function: self.print_string_function,
@@ -111,7 +111,7 @@ impl<'a> Binder<'a> {
 
     fn declare_default_types(&mut self) {
         self.number_type = self.declare_default_type("number");
-        self.str_type = self.declare_default_type("str");
+        self.string_type = self.declare_default_type("string");
         self.bool_type = self.declare_default_type("bool");
     }
 

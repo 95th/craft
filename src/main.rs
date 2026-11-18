@@ -522,4 +522,25 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_run_struct() {
+        let source = r#"
+            struct Foo {
+                a: number,
+                b: string,
+                c: bool
+            }
+
+            let foo = Foo {
+                a: 10,
+                b: "hello world",
+                c: true
+            };
+
+            print_string(foo.b);
+            print_number(foo.a);
+        "#;
+        run_ok(source);
+    }
 }

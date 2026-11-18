@@ -15,7 +15,8 @@ pub struct TyContext {
     pub bind_ctx: BindCtx,
     pub types: Arena<Ty>,
     pub binding_types: HashMap<SymbolId, TyId>,
-    pub struct_properties: HashMap<SymbolId, HashMap<StrId, TyId>>,
+    pub struct_properties: HashMap<SymbolId, Vec<(StrId, TyId)>>,
+    pub expr_types: HashMap<ExprId, TyId>,
 }
 
 pub struct TypeChecker<'a> {
@@ -27,7 +28,8 @@ pub struct TypeChecker<'a> {
     has_error: bool,
     containing_return_ty: Option<TyId>,
     binding_types: HashMap<SymbolId, TyId>,
-    struct_properties: HashMap<SymbolId, HashMap<StrId, TyId>>,
+    struct_properties: HashMap<SymbolId, Vec<(StrId, TyId)>>,
+    expr_types: HashMap<ExprId, TyId>,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -44,6 +46,7 @@ impl<'a> TypeChecker<'a> {
             containing_return_ty: None,
             binding_types: HashMap::new(),
             struct_properties: HashMap::new(),
+            expr_types: HashMap::new(),
         }
     }
 
@@ -51,7 +54,7 @@ impl<'a> TypeChecker<'a> {
         self.binding_types
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
-            .insert(self.bind_ctx.str_type, self.common_types.string);
+            .insert(self.bind_ctx.string_type, self.common_types.string);
         self.binding_types
             .insert(self.bind_ctx.bool_type, self.common_types.boolean);
         self.binding_types.insert(
@@ -77,6 +80,7 @@ impl<'a> TypeChecker<'a> {
                 types: self.types,
                 binding_types: self.binding_types,
                 struct_properties: self.struct_properties,
+                expr_types: self.expr_types,
             })
         }
     }
@@ -164,12 +168,13 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
             c.binding_types.insert(fn_symbol, fn_ty);
         }
         Stmt::Struct(_, ref fields) => {
-            let mut properties = HashMap::new();
-            for (name, ty) in fields {
+            let mut properties = Vec::new();
+            for (name, ty) in fields.iter() {
                 let name = c.bind_ctx.interner.intern(name);
                 let ty = check_type(c, *ty);
-                properties.insert(name, ty);
+                properties.push((name, ty));
             }
+            properties.sort_by_key(|(name, _)| *name);
             let struct_symbol = c.ast.stmts.binding(node);
             let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
             c.binding_types.insert(struct_symbol, struct_ty);
@@ -219,6 +224,13 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
 }
 
 fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
+    let ty = check_expr_inner(c, node);
+    let prev = c.expr_types.insert(node, ty);
+    debug_assert_eq!(prev, None);
+    ty
+}
+
+fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
     match c.ast.exprs[node] {
         Expr::Bool(_) => c.common_types.boolean,
         Expr::Number(_) => c.common_types.number,
@@ -368,8 +380,8 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
             for (name, &value) in fields {
                 let name = c.bind_ctx.interner.intern(name);
                 let ty = check_expr(c, value);
-                if let Some(declared_ty) = declared.get(&name) {
-                    c.unify(*declared_ty, ty, c.ast.exprs.span(value));
+                if let Ok(i) = declared.binary_search_by_key(&name, |(name, _)| *name) {
+                    c.unify(declared[i].1, ty, c.ast.exprs.span(value));
                 } else {
                     c.error("unknown field", c.ast.exprs.span(value));
                 }
@@ -404,11 +416,11 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
             };
 
             let name_id = c.bind_ctx.interner.intern(name);
-            let Some(ty) = properties.get(&name_id) else {
+            let Ok(i) = properties.binary_search_by_key(&name_id, |(name, _)| *name) else {
                 c.error("unknown field", c.ast.exprs.span(expr));
                 return c.types.alloc(Ty::Var);
             };
-            *ty
+            properties[i].1
         }
         Expr::For(init, cond, incr, body) => {
             if let Some(init) = init {

@@ -6,6 +6,7 @@ use crate::{
     chunk::{Code, Opcode},
     heap::{Heap, ObjKind},
     typechecker::TyContext,
+    types::Ty,
 };
 
 struct LoopCtx {
@@ -271,8 +272,33 @@ impl<'a> Codegen<'a> {
                 self.code.write(Opcode::StructProperty);
                 self.code.write_u16(index);
             }
-            _ => {
-                // todo!()
+            Expr::Struct(.., ref fields) => {
+                let symbol = self.ast.exprs.binding(expr);
+                let properties = &self.ty_ctx.struct_properties[&symbol];
+                let mut exprs = Vec::with_capacity(properties.len());
+                for (name, _) in properties {
+                    let name = self.ty_ctx.bind_ctx.interner.lookup(*name);
+                    exprs.push(fields[name]);
+                }
+                for &expr in exprs.iter() {
+                    self.process_expr(expr);
+                }
+                self.code.write(Opcode::Struct);
+                self.code.write_u16(exprs.len() as u16);
+            }
+            Expr::StructField(expr, ref name) => {
+                let ty = self.ty_ctx.expr_types[&expr];
+                let Ty::Named(symbol) = self.ty_ctx.types[ty] else {
+                    unreachable!();
+                };
+                let properties = &self.ty_ctx.struct_properties[&symbol];
+                let name = self.ty_ctx.bind_ctx.interner.intern(name);
+                let index = properties
+                    .binary_search_by_key(&name, |(name, _)| *name)
+                    .unwrap();
+                self.process_expr(expr);
+                self.code.write(Opcode::StructProperty);
+                self.code.write_u16(index as u16);
             }
         }
     }
