@@ -464,4 +464,12 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_run_unit() {
+        let source = r#"
+            ();
+        "#;
+        run_ok(source);
+    }
 }
