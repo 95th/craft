@@ -10,6 +10,13 @@ use crate::{
     },
 };
 
+bitflags::bitflags! {
+    #[derive(Clone, Copy)]
+    struct Restrictions: u8 {
+        const DisallowStruct = 1 << 0;
+    }
+}
+
 struct Checkpoint<'a> {
     scanner: Scanner<'a>,
     exprs: usize,
@@ -20,6 +27,7 @@ struct Checkpoint<'a> {
     prev_span: Span,
     had_error: bool,
     panic_mode: bool,
+    restrictions: Restrictions,
 }
 
 pub struct Parser<'a> {
@@ -30,6 +38,7 @@ pub struct Parser<'a> {
     prev_span: Span,
     had_error: bool,
     panic_mode: bool,
+    restrictions: Restrictions,
 }
 
 impl<'a> Parser<'a> {
@@ -46,6 +55,7 @@ impl<'a> Parser<'a> {
             prev_span: Span::new(0, 0),
             had_error: false,
             panic_mode: false,
+            restrictions: Restrictions::empty(),
         }
     }
 
@@ -78,6 +88,30 @@ impl<'a> Parser<'a> {
         result
     }
 
+    fn with_restriction<T>(
+        &mut self,
+        restriction: Restrictions,
+        callback: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let prev = self.restrictions;
+        self.restrictions.insert(restriction);
+        let result = callback(self);
+        self.restrictions = prev;
+        result
+    }
+
+    fn without_restriction<T>(
+        &mut self,
+        restriction: Restrictions,
+        callback: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let prev = self.restrictions;
+        self.restrictions.remove(restriction);
+        let result = callback(self);
+        self.restrictions = prev;
+        result
+    }
+
     fn checkpoint(&self) -> Checkpoint<'a> {
         Checkpoint {
             scanner: self.scanner.clone(),
@@ -89,6 +123,7 @@ impl<'a> Parser<'a> {
             prev_span: self.prev_span,
             had_error: self.had_error,
             panic_mode: self.panic_mode,
+            restrictions: self.restrictions,
         }
     }
 
@@ -102,6 +137,7 @@ impl<'a> Parser<'a> {
         self.prev_span = c.prev_span;
         self.had_error = c.had_error;
         self.panic_mode = c.panic_mode;
+        self.restrictions = c.restrictions;
     }
 
     fn advance(&mut self) {
@@ -229,12 +265,12 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
 }
 
 fn expression_statement(p: &mut Parser) -> StmtId {
+    let start = p.scanner.span();
     let expr = expression(p);
     let semi = p.eat(Semicolon);
-    p.ast.stmts.alloc(
-        Stmt::Expr(expr, semi),
-        p.ast.exprs.span(expr).to(p.prev_span),
-    )
+    p.ast
+        .stmts
+        .alloc(Stmt::Expr(expr, semi), start.to(p.prev_span))
 }
 
 fn ty(p: &mut Parser) -> TypeId {
@@ -305,27 +341,29 @@ fn expression(p: &mut Parser) -> ExprId {
 }
 
 fn tuple(p: &mut Parser) -> ExprId {
-    p.advance();
-    let start = p.prev_span;
-    if p.eat(CloseParen) {
-        return p.ast.exprs.alloc(Expr::Unit, start.to(p.prev_span));
-    }
-
-    let expr = expression(p);
-    if p.eat(Comma) {
-        let mut exprs = vec![expr];
-        loop {
-            exprs.push(expression(p));
-            if !p.eat(Comma) {
-                break;
-            }
+    p.without_restriction(Restrictions::DisallowStruct, |p| {
+        p.advance();
+        let start = p.prev_span;
+        if p.eat(CloseParen) {
+            return p.ast.exprs.alloc(Expr::Unit, start.to(p.prev_span));
         }
-        p.consume(CloseParen, "Expect ')' after tuple values.");
-        return p.ast.exprs.alloc(Expr::Tuple(exprs), start.to(p.prev_span));
-    }
 
-    p.consume(CloseParen, "Expect ')' after grouping.");
-    expr
+        let expr = expression(p);
+        if p.eat(Comma) {
+            let mut exprs = vec![expr];
+            loop {
+                exprs.push(expression(p));
+                if !p.eat(Comma) {
+                    break;
+                }
+            }
+            p.consume(CloseParen, "Expect ')' after tuple values.");
+            return p.ast.exprs.alloc(Expr::Tuple(exprs), start.to(p.prev_span));
+        }
+
+        p.consume(CloseParen, "Expect ')' after grouping.");
+        expr
+    })
 }
 
 fn binary(p: &mut Parser, lhs: ExprId) -> ExprId {
@@ -483,7 +521,8 @@ fn variable(p: &mut Parser) -> ExprId {
     let name = p.scanner.token_text().to_string();
     p.advance();
 
-    if p.token == OpenBrace
+    if !p.restrictions.contains(Restrictions::DisallowStruct)
+        && p.token == OpenBrace
         && p.lookahead(|p| {
             p.advance();
             p.eat(CloseBrace) || p.eat(Identifier) && p.eat(Colon)
@@ -520,7 +559,7 @@ fn variable(p: &mut Parser) -> ExprId {
 fn if_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
-    let cond = expression(p);
+    let cond = p.with_restriction(Restrictions::DisallowStruct, expression);
     p.consume(OpenBrace, "Expect '{' after 'if' condition.");
     let then_clause = block_expr(p);
     let else_clause = if p.eat(Else) {
@@ -547,7 +586,7 @@ fn if_expr(p: &mut Parser) -> ExprId {
 fn while_expr(p: &mut Parser) -> ExprId {
     p.advance();
     let start = p.prev_span;
-    let cond = expression(p);
+    let cond = p.with_restriction(Restrictions::DisallowStruct, expression);
     p.consume(OpenBrace, "Expect '{' after 'while' condition.");
     let body = block_expr(p);
     p.ast

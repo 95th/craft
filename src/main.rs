@@ -289,4 +289,36 @@ mod tests {
         "#;
         check_err(source, Error::Bind);
     }
+
+    #[test]
+    fn test_identifier_in_condition() {
+        let source = r#"
+            let i = 1 > 2;
+            if i {
+            }
+            while i {
+            }
+        "#;
+        check_ok(source);
+    }
+
+    #[test]
+    fn test_struct_in_condition() {
+        let source = r#"
+            struct Foo {}
+            if Foo {}
+            while Foo {}
+        "#;
+        check_err(source, Error::Bind);
+    }
+
+    #[test]
+    fn test_struct_in_condition_parenthesized() {
+        let source = r#"
+            struct Foo {}
+            if (Foo {}) {}
+            while (Foo {}) {}
+        "#;
+        check_err(source, Error::TypeCheck);
+    }
 }
