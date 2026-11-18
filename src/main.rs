@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
-    interner::StrInterner, parser::Parser, typechecker::TypeChecker, vm::VM,
+    interner::StrInterner, ir::Lowering, parser::Parser, typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -16,6 +16,7 @@ mod codegen;
 mod diagnostics;
 mod heap;
 mod interner;
+mod ir;
 mod parser;
 mod scanner;
 mod typechecker;
@@ -53,6 +54,24 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     Ok(code)
 }
 
+fn lower(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
+    let ast = &mut AstNodes::new();
+    let interner = &mut StrInterner::new();
+    let mut parser = Parser::new(source, ast, interner, diagnostics);
+    let nodes = parser.parse()?;
+
+    let binder = Binder::new(ast, interner, diagnostics);
+    let bind_ctx = binder.bind(&nodes)?;
+
+    let checker = TypeChecker::new(ast, interner, diagnostics, bind_ctx);
+    let ty_ctx = checker.check(&nodes)?;
+
+    let lowering = Lowering::new(ast, ty_ctx);
+    lowering.lower(&nodes);
+
+    Ok(())
+}
+
 fn main() {
     let source = r#"
         fn fib(n: u64) -> u64 {
@@ -64,6 +83,8 @@ fn main() {
 
         print(fib(35));
     "#;
+
+    lower(source, &mut Diagnostics::new()).unwrap();
 
     let start = Instant::now();
     let mut diagnostics = Diagnostics::new();
@@ -90,6 +111,12 @@ mod tests {
         let code = result.expect("ok");
         let mut vm = VM::new(code);
         vm.run();
+    }
+
+    fn lower_ok(source: &str) {
+        let mut diagnostics = Diagnostics::new();
+        lower(source, &mut diagnostics).expect("OK");
+        diagnostics.print(source);
     }
 
     fn check_err(source: &str, error: Error) {
@@ -935,5 +962,17 @@ mod tests {
             print(foo());
         "#;
         run_ok(source);
+    }
+
+    #[test]
+    fn test_lower_basic() {
+        let source = r#"
+            let a = 1 + 2 - 3;
+            if a > 1 {
+                a = 20;
+            }
+            print(a + 10);
+        "#;
+        lower_ok(source);
     }
 }
