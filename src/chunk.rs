@@ -9,6 +9,8 @@ pub enum Opcode {
     Negate,
     GetLocal,
     GetLocalLong,
+    SetLocal,
+    SetLocalLong,
     PrintNumber,
     Call,
 
@@ -40,8 +42,12 @@ impl Code {
         self.code.push(op as u8);
     }
 
-    pub fn write_u8(&mut self, b: u8) {
-        self.code.push(b);
+    pub fn write_u8(&mut self, n: u8) {
+        self.code.push(n);
+    }
+
+    pub fn write_u16(&mut self, n: u16) {
+        self.code.extend(n.to_be_bytes());
     }
 
     pub fn write_u64(&mut self, n: u64) {

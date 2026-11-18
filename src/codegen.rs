@@ -61,7 +61,19 @@ impl<'a> Codegen<'a> {
                     self.code.write_u8(index as u8);
                 } else {
                     self.code.write(Opcode::GetLocalLong);
-                    self.code.write_u64(index as u64);
+                    self.code.write_u16(index as u16);
+                }
+            }
+            Expr::Assign(lhs, rhs) => {
+                let symbol = self.ast.exprs.binding(lhs);
+                let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
+                self.process_expr(rhs);
+                if index <= u8::MAX as u32 {
+                    self.code.write(Opcode::SetLocal);
+                    self.code.write_u8(index as u8);
+                } else {
+                    self.code.write(Opcode::SetLocalLong);
+                    self.code.write_u16(index as u16);
                 }
             }
             Expr::Binary(lhs, op, rhs) => match op {

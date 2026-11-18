@@ -115,10 +115,23 @@ impl VM {
                     self.stack.push(self.stack[index]);
                 }
                 Opcode::GetLocalLong => {
-                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 8]) };
-                    self.ip += 8;
-                    let index = u64::from_be_bytes(bytes) as usize;
+                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
+                    let index = u16::from_be_bytes(bytes) as usize;
+                    self.ip += 2;
                     self.stack.push(self.stack[index]);
+                }
+                Opcode::SetLocal => {
+                    let index = self.code[self.ip] as usize;
+                    self.ip += 1;
+                    let value = self.stack.pop().unwrap();
+                    self.stack[index] = value;
+                }
+                Opcode::SetLocalLong => {
+                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
+                    let index = u16::from_be_bytes(bytes) as usize;
+                    self.ip += 2;
+                    let value = self.stack.pop().unwrap();
+                    self.stack[index] = value;
                 }
                 Opcode::Call => {
                     let arg_count = self.code[self.ip] as usize;

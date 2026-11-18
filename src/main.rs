@@ -47,8 +47,8 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
 fn main() {
     let source = r#"
         let a = 10;
-        let b = a + 1 - 4 / 2 * 1.2;
-        print_number(b);
+        a = a + 1 - 4 / 2 * 1.2;
+        print_number(a);
     "#;
 
     let mut diagnostics = Diagnostics::new();
