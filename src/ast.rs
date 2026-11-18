@@ -3,6 +3,7 @@ use core::fmt;
 #[derive(Debug)]
 pub enum Node {
     Error,
+    Bool(bool),
     Number(f64),
     String(String),
     Not(NodeId),
@@ -57,6 +58,7 @@ impl fmt::Display for NodeDisplay<'_> {
         let Self(node, arena) = *self;
         match node.get(arena) {
             Node::Error => unreachable!(),
+            Node::Bool(x) => x.fmt(f),
             Node::Number(x) => x.fmt(f),
             Node::String(x) => x.fmt(f),
             Node::Not(x) => write!(f, "!{}", x.display(arena)),

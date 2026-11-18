@@ -119,6 +119,12 @@ fn string(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::String(text))
 }
 
+fn boolean(p: &mut Parser) -> NodeId {
+    let value = p.token == Token::True;
+    p.advance();
+    p.nodes.alloc(Node::Bool(value))
+}
+
 fn parse_precedence(p: &mut Parser, precedence: Precedence) -> NodeId {
     let Some(mut expr) = parse_prefix(p) else {
         p.error("Expect expression.");
@@ -138,6 +144,7 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         Minus | Bang => unary(p),
         NumberLiteral => number(p),
         StringLiteral => string(p),
+        True | False => boolean(p),
         _ => return None,
     })
 }
