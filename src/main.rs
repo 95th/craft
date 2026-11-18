@@ -884,4 +884,19 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_long_locals() {
+        let mut source = String::new();
+        for i in 0..1000 {
+            source.push_str(&format!("let a{i} = {i};"))
+        }
+        for i in 0..1000 {
+            source.push_str(&format!("a{i} = a{i} + 1;"))
+        }
+        for i in 0..1000 {
+            source.push_str(&format!("print(a{i});"))
+        }
+        run_ok(&source);
+    }
 }
