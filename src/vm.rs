@@ -175,6 +175,9 @@ impl VM {
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
+                        let value = self.stack.pop().unwrap();
+                        self.stack.truncate(self.frame.sp);
+                        self.stack.push(value);
                         self.frame = frame;
                     } else {
                         return;

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
     parser::Parser, typechecker::TypeChecker, vm::VM,
@@ -46,14 +48,17 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
 
 fn main() {
     let source = r#"
-        let a = 10;
-        while a > 0 {
-            print_number(a);
-            a = a - 1;
+        fn fib(n: number) -> number {
+            if n < 2 {
+                return n;
+            }
+            fib(n - 1) + fib(n - 2)
         }
-        print_number(100);
+
+        print_number(fib(35));
     "#;
 
+    let start = Instant::now();
     let mut diagnostics = Diagnostics::new();
     match compile(source, &mut diagnostics) {
         Ok(code) => {
@@ -64,6 +69,7 @@ fn main() {
             diagnostics.print(source);
         }
     }
+    println!("Took {:?}", start.elapsed());
 }
 
 #[cfg(test)]
@@ -466,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_unit() {
+    fn test_run_functions() {
         let source = r#"
             fn foo(n: number) {
                 print_number(n);
@@ -475,6 +481,21 @@ mod tests {
             foo(10);
             foo(20);
             foo(30);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_recursion() {
+        let source = r#"
+            fn fib(n: number) -> number {
+                if n < 2 {
+                    return n;
+                }
+                fib(n - 1) + fib(n - 2)
+            }
+
+            print_number(fib(35));
         "#;
         run_ok(source);
     }

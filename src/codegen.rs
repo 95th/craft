@@ -237,7 +237,16 @@ impl<'a> Codegen<'a> {
                 self.code.pop();
             }
             Expr::Unit => self.code.write(Opcode::Unit),
-            _ => {}
+            Expr::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.process_expr(expr);
+                    self.code.write(Opcode::Return);
+                } else {
+                    self.code.write(Opcode::Unit);
+                    self.code.write(Opcode::Return);
+                }
+            }
+            _ => todo!(),
         }
     }
 
