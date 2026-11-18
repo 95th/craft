@@ -5,6 +5,8 @@ use crate::{
 mod arena;
 mod ast;
 mod bind;
+mod chunk;
+mod codegen;
 mod diagnostics;
 mod interner;
 mod parser;
