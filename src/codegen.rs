@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
+
 use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::{AstNodes, AstVisitor, BinaryOp, Expr, ExprId, Stmt, StmtId},
+    ast::{AstNodes, BinaryOp, Expr, ExprId, Stmt, StmtId},
     bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
     heap::{Heap, ObjKind},
@@ -30,6 +32,7 @@ pub struct Codegen<'a> {
     loop_ctxts: Vec<LoopCtx>,
     functions: FxHashMap<SymbolId, usize>,
     heap: &'a mut Heap,
+    function_worklist: VecDeque<(SymbolId, usize)>,
 }
 
 impl<'a> Codegen<'a> {
@@ -41,29 +44,32 @@ impl<'a> Codegen<'a> {
             loop_ctxts: Vec::new(),
             functions: FxHashMap::default(),
             heap,
+            function_worklist: VecDeque::new(),
         }
     }
 
     pub fn generate(mut self, stmts: &[StmtId]) -> Code {
-        let collector = NodeCollector::new(stmts, self.ast);
-
-        // Collector runs in pre-order traversal. Iterate in
-        // reverse order to process innermost functions first.
-        for &function in collector.functions.iter().rev() {
-            self.process_function(function);
-        }
-
-        self.code.start_main();
         for &stmt in stmts {
             self.process_stmt(stmt);
         }
         self.code.write(Opcode::Return);
+
+        while let Some((symbol, patch_offset)) = self.function_worklist.pop_front() {
+            if let Some(&function_offset) = self.functions.get(&symbol) {
+                self.code.write_u64_at(patch_offset, function_offset as u64);
+            } else {
+                let function_offset = self.code.len();
+                self.code.write_u64_at(patch_offset, function_offset as u64);
+                self.functions.insert(symbol, function_offset);
+                let function = self.ty_ctx.bind_ctx.symbols[symbol].declaration;
+                self.process_function(function);
+            }
+        }
+
         self.code
     }
 
     fn process_function(&mut self, function: StmtId) {
-        let symbol = self.ast.stmts.value_binding(function);
-        self.functions.insert(symbol, self.code.len());
         match self.ast.stmts[function] {
             Stmt::Fn(.., body) => {
                 self.process_expr(body);
@@ -146,9 +152,14 @@ impl<'a> Codegen<'a> {
                         }
                     }
                     SymbolKind::Fn => {
-                        let offset = self.functions[&symbol_id];
                         self.code.write(Opcode::Const);
-                        self.code.write_u64(offset as u64);
+                        if let Some(&function_offset) = self.functions.get(&symbol_id) {
+                            self.code.write_u64(function_offset as u64);
+                        } else {
+                            let patch_offset = self.code.len();
+                            self.code.write_u64(0);
+                            self.function_worklist.push_back((symbol_id, patch_offset));
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -451,32 +462,6 @@ impl<'a> Codegen<'a> {
         let ctx = self.loop_ctxts.pop().unwrap();
         for offset in ctx.break_offsets {
             self.code.patch_jump(offset);
-        }
-    }
-}
-
-struct NodeCollector {
-    structs: Vec<StmtId>,
-    functions: Vec<StmtId>,
-}
-
-impl NodeCollector {
-    fn new(stmts: &[StmtId], ast: &AstNodes) -> Self {
-        let mut collector = Self {
-            structs: Vec::new(),
-            functions: Vec::new(),
-        };
-        ast.visit(stmts, &mut collector);
-        collector
-    }
-}
-
-impl AstVisitor for NodeCollector {
-    fn visit_stmt(&mut self, stmt: StmtId, ast: &AstNodes) {
-        match ast.stmts[stmt] {
-            Stmt::Struct(..) => self.structs.push(stmt),
-            Stmt::Fn(..) | Stmt::TupleStruct(..) => self.functions.push(stmt),
-            _ => {}
         }
     }
 }

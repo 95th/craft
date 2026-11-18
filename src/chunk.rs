@@ -73,23 +73,11 @@ pub enum Opcode {
 #[derive(Debug)]
 pub struct Code {
     code: Vec<u8>,
-    main_offset: usize,
 }
 
 impl Code {
     pub fn new() -> Self {
-        Self {
-            code: Vec::new(),
-            main_offset: 0,
-        }
-    }
-
-    pub fn start_main(&mut self) {
-        self.main_offset = self.code.len();
-    }
-
-    pub fn main(&self) -> usize {
-        self.main_offset
+        Self { code: Vec::new() }
     }
 
     pub fn write(&mut self, op: Opcode) {
@@ -125,9 +113,11 @@ impl Code {
     }
 
     pub fn write_u16_at(&mut self, i: usize, n: u16) {
-        let [a, b] = n.to_ne_bytes();
-        self.code[i] = a;
-        self.code[i + 1] = b;
+        self.code[i..i + 2].copy_from_slice(&n.to_ne_bytes());
+    }
+
+    pub fn write_u64_at(&mut self, i: usize, n: u64) {
+        self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
     }
 
     pub fn write_jump(&mut self, op: Opcode) -> usize {

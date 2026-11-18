@@ -78,11 +78,10 @@ pub struct VM {
 
 impl VM {
     pub fn new(code: Code, heap: Heap) -> Self {
-        let main = code.main();
         let code = code.into_inner();
         Self {
             stack: Vec::new(),
-            frame: CallFrame::new(&code, main, 0),
+            frame: CallFrame::new(&code, 0, 0),
             frames: Vec::new(),
             code,
             heap,

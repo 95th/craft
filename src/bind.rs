@@ -23,6 +23,7 @@ pub struct Symbol {
     pub name: StrId,
     pub local_index: u32,
     pub kind: SymbolKind,
+    pub declaration: StmtId,
 }
 
 pub type SymbolId = Id<Symbol>;
@@ -143,7 +144,7 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        let symbol = self.declare_symbol(self.type_scope, name, kind);
+        let symbol = self.declare_symbol(self.type_scope, name, kind, declaration);
         if declaration != StmtId::MAX {
             self.ast.stmts.bind_type(declaration, symbol);
         }
@@ -159,7 +160,7 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        let symbol = self.declare_symbol(self.value_scope, name, kind);
+        let symbol = self.declare_symbol(self.value_scope, name, kind, declaration);
         self.local_count += 1;
         if declaration != StmtId::MAX {
             self.ast.stmts.bind_value(declaration, symbol);
@@ -176,18 +177,25 @@ impl<'a> Binder<'a> {
             self.has_error = true;
             return *s;
         }
-        let symbol = self.declare_symbol(self.fn_scope, name, SymbolKind::Fn);
+        let symbol = self.declare_symbol(self.fn_scope, name, SymbolKind::Fn, declaration);
         if declaration != StmtId::MAX {
             self.ast.stmts.bind_value(declaration, symbol);
         }
         symbol
     }
 
-    fn declare_symbol(&mut self, scope: ScopeId, name: StrId, kind: SymbolKind) -> SymbolId {
+    fn declare_symbol(
+        &mut self,
+        scope: ScopeId,
+        name: StrId,
+        kind: SymbolKind,
+        declaration: StmtId,
+    ) -> SymbolId {
         let symbol = self.symbols.alloc(Symbol {
             name,
             kind,
             local_index: self.local_count,
+            declaration,
         });
         self.scopes[scope].symbols.insert(name, symbol);
         symbol
