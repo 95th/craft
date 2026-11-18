@@ -18,26 +18,28 @@ impl<'a> Codegen<'a> {
     }
 
     pub fn generate(&mut self, stmts: &[StmtId]) {
-        let nodes = self.collect_nodes(stmts);
+        let nodes = NodeCollector::new(stmts, self.ast);
         println!(
             "{} structs, {} functions",
             nodes.structs.len(),
             nodes.functions.len()
         );
     }
-
-    fn collect_nodes(&mut self, stmts: &[StmtId]) -> NodeCollector {
-        let mut nodes = NodeCollector {
-            structs: Vec::new(),
-            functions: Vec::new(),
-        };
-        self.ast.visit(stmts, &mut nodes);
-        nodes
-    }
 }
 struct NodeCollector {
     structs: Vec<SymbolId>,
     functions: Vec<SymbolId>,
+}
+
+impl NodeCollector {
+    fn new(stmts: &[StmtId], ast: &AstNodes) -> Self {
+        let mut collector = Self {
+            structs: Vec::new(),
+            functions: Vec::new(),
+        };
+        ast.visit(stmts, &mut collector);
+        collector
+    }
 }
 
 impl AstVisitor for NodeCollector {
