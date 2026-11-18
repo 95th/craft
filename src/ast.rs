@@ -17,6 +17,7 @@ pub enum Node {
     Continue,
     Call(NodeId, Vec<NodeId>),
     Return(Option<NodeId>),
+    TupleField(NodeId, u16),
 
     // Statements
     Let(String, Option<NodeId>, NodeId),
@@ -219,6 +220,7 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, ")")
             }
+            Node::TupleField(target, name) => write!(f, "{}.{}", target.display(arena), name),
         }
     }
 }

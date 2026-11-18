@@ -184,11 +184,18 @@ fn tuple_ty(p: &mut Parser) -> NodeId {
         return p.nodes.alloc(Node::Unit, start.to(p.prev_span));
     }
 
-    let mut types = Vec::new();
-    loop {
-        types.push(ty(p));
-        if !p.eat(Comma) {
-            break;
+    let t = ty(p);
+    if p.eat(CloseParen) {
+        return t;
+    }
+
+    let mut types = vec![t];
+    if p.eat(Comma) {
+        loop {
+            types.push(ty(p));
+            if !p.eat(Comma) {
+                break;
+            }
         }
     }
     p.consume(CloseParen, "Expect ')' after tuple types.");
@@ -276,6 +283,23 @@ fn call(p: &mut Parser, lhs: NodeId) -> NodeId {
     p.consume(CloseParen, "Expect ')' after arguments.");
     p.nodes
         .alloc(Node::Call(lhs, args), lhs.span(p.nodes).to(p.prev_span))
+}
+
+fn dot(p: &mut Parser, lhs: NodeId) -> NodeId {
+    p.advance();
+    let name = p.scanner.token_text().to_string();
+    p.consume(NumberLiteral, "Expect field name.");
+    let index = match name.parse() {
+        Ok(n) => n,
+        _ => {
+            p.error_at("Expect an integer tuple field", p.prev_span);
+            0
+        }
+    };
+    p.nodes.alloc(
+        Node::TupleField(lhs, index),
+        lhs.span(p.nodes).to(p.prev_span),
+    )
 }
 
 fn unary(p: &mut Parser) -> NodeId {
@@ -437,6 +461,7 @@ fn parse_infix(p: &mut Parser, lhs: NodeId) -> NodeId {
         | BangEqual | Bar | BarBar | Ampersand | AmpersandAmpersand => binary(p, lhs),
         Equal => assignment(p, lhs),
         OpenParen => call(p, lhs),
+        Dot => dot(p, lhs),
         _ => lhs,
     }
 }
@@ -453,7 +478,7 @@ impl Token {
             BarBar => Precedence::Or,
             Ampersand => Precedence::BitAnd,
             AmpersandAmpersand => Precedence::And,
-            OpenParen => Precedence::Call,
+            OpenParen | Dot => Precedence::Call,
             _ => Precedence::None,
         }
     }

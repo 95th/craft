@@ -30,7 +30,8 @@ fn main() {
     let source = r#"
         fn foo(a: number, b: number) -> number { 1 }
         let f: fn(number, number) -> number = foo;
-        let a: (number, number) = (1, 2);
+        let a: (number, (number)) = (1, (2, 3));
+        foo(a.0, (a.1).0);
     "#;
 
     let mut arena = NodeArena::new();

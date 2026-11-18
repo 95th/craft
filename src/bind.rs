@@ -330,6 +330,9 @@ fn bind_expr(b: &mut Binder, node: NodeId) {
                 bind_expr(b, *node);
             }
         }
+        Node::TupleField(target, _) => {
+            bind_expr(b, target);
+        }
         ref node => unreachable!("{node:?}"),
     }
 }

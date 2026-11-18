@@ -15,7 +15,6 @@ pub struct TypeChecker<'a> {
     types: Arena<Type>,
     common_types: CommonTypes,
     has_error: bool,
-    pending_unifications: Vec<(TypeId, TypeId, Span)>,
     containing_return_ty: Option<TypeId>,
     binding_types: HashMap<SymbolId, TypeId>,
 }
@@ -31,7 +30,6 @@ impl<'a> TypeChecker<'a> {
             types,
             common_types,
             has_error: false,
-            pending_unifications: Vec::new(),
             containing_return_ty: None,
             binding_types: HashMap::new(),
         }
@@ -46,54 +44,63 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn unify(&mut self, lhs: TypeId, rhs: TypeId, span: Span) {
+        if !self.try_unify(lhs, rhs) {
+            self.error(
+                format!(
+                    "Type mismatch: Expected '{}' but got '{}'",
+                    lhs.display(self),
+                    rhs.display(self)
+                ),
+                span,
+            );
+        }
+    }
+
+    fn try_unify(&mut self, lhs: TypeId, rhs: TypeId) -> bool {
         if lhs == rhs || self.types[lhs] == self.types[rhs] {
-            return;
+            return true;
         }
         match (&self.types[lhs], &self.types[rhs]) {
-            (Type::Named(a), Type::Named(b)) => {
-                let a_name = self.bind_ctx.symbols[*a].name;
-                let b_name = self.bind_ctx.symbols[*b].name;
-                if a_name == b_name {
-                    self.error(
-                        "Type mismatch. Both types have the same name but they're not the same.",
-                        span,
-                    );
-                } else {
-                    self.error(
-                        format!(
-                            "Type mismatch: Expected '{}' but got '{}'",
-                            self.bind_ctx.interner.lookup(a_name),
-                            self.bind_ctx.interner.lookup(b_name),
-                        ),
-                        span,
-                    );
+            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+                let mut result = true;
+                for (a, b) in a.clone().iter().zip(b.clone().iter()) {
+                    if !self.try_unify(*a, *b) {
+                        result = false;
+                    }
                 }
+                result
             }
-            (Type::Var, Type::Var) => {
-                self.pending_unifications.push((lhs, rhs, span));
+            (&Type::Fn(ref a_params, a_ret), &Type::Fn(ref b_params, b_ret)) => {
+                if a_params.len() != b_params.len() {
+                    return false;
+                }
+                let mut result = true;
+                for (a, b) in a_params.clone().iter().zip(b_params.clone().iter()) {
+                    if !self.try_unify(*a, *b) {
+                        result = false;
+                    }
+                }
+                if !self.try_unify(a_ret, b_ret) {
+                    result = false;
+                }
+                result
             }
-            (Type::Var, other) => self.types[lhs] = other.clone(),
-            (other, Type::Var) => self.types[rhs] = other.clone(),
-            _ => {
-                self.error(
-                    format!(
-                        "Type mismatch: Expected '{}' but got '{}'",
-                        lhs.display(self),
-                        rhs.display(self)
-                    ),
-                    span,
-                );
+            (Type::Var, Type::Var) => false,
+            (Type::Var, other) => {
+                self.types[lhs] = other.clone();
+                true
             }
+            (other, Type::Var) => {
+                self.types[rhs] = other.clone();
+                true
+            }
+            _ => false,
         }
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.has_error = true;
-        println!(
-            "Type mismatch at '{}': {}",
-            span.text(self.source),
-            message.into()
-        );
+        println!("Error at '{}': {}", span.text(self.source), message.into());
     }
 }
 
@@ -243,25 +250,10 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
         }
         Node::Call(callee, ref args) => {
             let callee_ty = check_node(c, callee);
-            let Type::Fn(params, ret_ty) = c.types[callee_ty].clone() else {
-                c.error("Expect callee to be a function", node.span(c.nodes));
-                return c.types.alloc(Type::Var);
-            };
-            if params.len() == args.len() {
-                for (arg, param) in args.iter().zip(params.iter()) {
-                    let arg_ty = check_node(c, *arg);
-                    c.unify(*param, arg_ty, arg.span(c.nodes));
-                }
-            } else {
-                c.error(
-                    format!(
-                        "Type mismatch: Expect {} arguments, got {}",
-                        params.len(),
-                        args.len()
-                    ),
-                    node.span(c.nodes),
-                );
-            }
+            let arg_tys = args.iter().map(|a| check_node(c, *a)).collect();
+            let ret_ty = c.types.alloc(Type::Var);
+            let expect_ty = c.types.alloc(Type::Fn(arg_tys, ret_ty));
+            c.unify(callee_ty, expect_ty, node.span(c.nodes));
             ret_ty
         }
         Node::Return(value) => {
@@ -286,6 +278,18 @@ fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
         Node::Tuple(ref types) => {
             let types = types.iter().map(|t| check_node(c, *t)).collect();
             c.types.alloc(Type::Tuple(types))
+        }
+        Node::TupleField(expr, index) => {
+            let expr_ty = check_node(c, expr);
+            let Type::Tuple(ref types) = c.types[expr_ty] else {
+                c.error("Expect expr to be a tuple", expr.span(c.nodes));
+                return c.types.alloc(Type::Var);
+            };
+            if index as usize >= types.len() {
+                c.error(format!("Field {index} not found"), node.span(c.nodes));
+                return c.types.alloc(Type::Var);
+            }
+            types[index as usize]
         }
     }
 }
