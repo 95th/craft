@@ -15,6 +15,8 @@ pub enum Opcode {
     PrintNumber,
     Call,
     Pop,
+    JumpIfFalse,
+    Jump,
 
     Add,
     Sub,
@@ -58,5 +60,22 @@ impl Code {
 
     pub fn into_inner(self) -> Vec<u8> {
         self.code
+    }
+
+    pub fn write_u16_at(&mut self, i: usize, n: u16) {
+        let [a, b] = n.to_be_bytes();
+        self.code[i] = a;
+        self.code[i + 1] = b;
+    }
+
+    pub fn write_jump(&mut self, op: Opcode) -> usize {
+        self.write(op);
+        self.write_u16(0);
+        self.code.len() - 2
+    }
+
+    pub fn patch_jump(&mut self, start: usize) {
+        let offset = self.code.len() - start - 2;
+        self.write_u16_at(start, offset as u16);
     }
 }

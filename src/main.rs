@@ -47,13 +47,12 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
 fn main() {
     let source = r#"
         let a = 10;
-        a = a + 1 - 4 / 2 * 1.2;
-        print_number(a);
-        a = {
-            let b = 20;
-            b + 1
-        };
-        print_number(a);
+        if a > 10 {
+            print_number(a);
+        } else {
+            print_number(5);
+        }
+        print_number(4);
     "#;
 
     let mut diagnostics = Diagnostics::new();
@@ -348,6 +347,20 @@ mod tests {
                 b + 1
             };
             print_number(a);
+        "#;
+        check_ok(source);
+    }
+
+    #[test]
+    fn test_if() {
+        let source = r#"
+            let a = 10;
+            if a > 10 {
+                print_number(a);
+            } else {
+                print_number(5);
+            }
+            print_number(4);
         "#;
         check_ok(source);
     }

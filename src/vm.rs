@@ -32,9 +32,7 @@ impl VM {
                     self.stack.push(value.to_bits());
                 }
                 Opcode::Const => {
-                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 8]) };
-                    self.ip += 8;
-                    let value = u64::from_be_bytes(bytes);
+                    let value = self.read_u64();
                     self.stack.push(value);
                 }
                 Opcode::Add => {
@@ -127,9 +125,7 @@ impl VM {
                     self.stack[index] = value;
                 }
                 Opcode::SetLocalLong => {
-                    let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
-                    let index = u16::from_be_bytes(bytes) as usize;
-                    self.ip += 2;
+                    let index = self.read_u16() as usize;
                     let value = self.stack.pop().unwrap();
                     self.stack[index] = value;
                 }
@@ -149,8 +145,33 @@ impl VM {
                 Opcode::Pop => {
                     self.stack.pop().unwrap();
                 }
+                Opcode::Jump => {
+                    let offset = self.read_u16() as usize;
+                    self.ip += offset;
+                }
+                Opcode::JumpIfFalse => {
+                    let value = self.stack.pop().unwrap();
+                    let offset = self.read_u16() as usize;
+                    if value == 0 {
+                        self.ip += offset;
+                    }
+                }
                 Opcode::Return => return,
             }
         }
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 2]) };
+        let value = u16::from_be_bytes(bytes);
+        self.ip += 2;
+        value
+    }
+
+    fn read_u64(&mut self) -> u64 {
+        let bytes = unsafe { *(self.code.as_ptr().add(self.ip) as *const [u8; 8]) };
+        let value = u64::from_be_bytes(bytes);
+        self.ip += 8;
+        value
     }
 }

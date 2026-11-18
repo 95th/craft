@@ -126,6 +126,19 @@ impl<'a> Codegen<'a> {
                     self.code.write(Opcode::Unit);
                 }
             }
+            Expr::If(cond, then_clause, else_clause) => {
+                self.process_expr(cond);
+                let then_offset = self.code.write_jump(Opcode::JumpIfFalse);
+                self.process_expr(then_clause);
+                if let Some(else_clause) = else_clause {
+                    let else_offset = self.code.write_jump(Opcode::Jump);
+                    self.code.patch_jump(then_offset);
+                    self.process_expr(else_clause);
+                    self.code.patch_jump(else_offset);
+                } else {
+                    self.code.patch_jump(then_offset);
+                }
+            }
             _ => {}
         }
     }
