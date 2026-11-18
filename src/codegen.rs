@@ -52,7 +52,7 @@ impl<'a> Codegen<'a> {
         for &stmt in stmts {
             self.process_stmt(stmt);
         }
-        self.code.write(Opcode::Return);
+        self.code.op(Opcode::Return);
 
         while let Some((symbol, patch_offset)) = self.function_worklist.pop_front() {
             if let Some(&function) = self.functions.get(&symbol) {
@@ -73,12 +73,11 @@ impl<'a> Codegen<'a> {
         match self.ast.stmts[function] {
             Stmt::Fn(.., body) => {
                 self.process_expr(body);
-                self.code.write(Opcode::Return);
+                self.code.op_return();
             }
             Stmt::TupleStruct(.., ref args) => {
-                self.code.write(Opcode::Struct);
-                self.code.write_u16(args.len() as u16);
-                self.code.write(Opcode::Return);
+                self.code.op_struct(args.len() as u16);
+                self.code.op_return();
             }
             _ => unreachable!(),
         };
@@ -97,43 +96,33 @@ impl<'a> Codegen<'a> {
 
     fn process_expr(&mut self, expr: ExprId) {
         match self.ast.exprs[expr] {
-            Expr::Bool(b) => self
-                .code
-                .write(if b { Opcode::True } else { Opcode::False }),
+            Expr::Bool(b) => self.code.op(if b { Opcode::True } else { Opcode::False }),
             Expr::Int(n) => {
                 let ty = self.ty_ctx.expr_types[&expr];
-                match self.ty_ctx.types.probe_value(ty) {
-                    Ty::I64 => {
-                        self.code.write(Opcode::Const);
-                        self.code
-                            .write_u64(u64::from_ne_bytes((n as i64).to_ne_bytes()));
-                    }
-                    Ty::U64 => {
-                        self.code.write(Opcode::Const);
-                        self.code.write_u64(n as u64);
-                    }
+                let value = match self.ty_ctx.types.probe_value(ty) {
+                    Ty::I64 => u64::from_ne_bytes((n as i64).to_ne_bytes()),
+                    Ty::U64 => n as u64,
                     t => unreachable!("{t:?}"),
-                }
+                };
+                self.code.op_const(value);
             }
             Expr::Number(n) => {
-                self.code.write(Opcode::Const);
-                self.code.write_u64(n.to_bits());
+                self.code.op_const(n.to_bits());
             }
             Expr::String(ref s) => {
                 let obj = self.heap.alloc(ObjKind::String, s.as_bytes());
-                self.code.write(Opcode::Const);
-                self.code.write_u64(obj as u64);
+                self.code.op_const(obj as u64);
             }
             Expr::Not(expr) => {
                 self.process_expr(expr);
-                self.code.write(Opcode::Not)
+                self.code.op(Opcode::Not);
             }
             Expr::Negate(expr) => {
                 self.process_expr(expr);
                 let ty = self.ty_ctx.expr_types[&expr];
                 match self.ty_ctx.types.probe_value(ty) {
-                    Ty::I64 => self.code.write(Opcode::I64Neg),
-                    Ty::F64 => self.code.write(Opcode::F64Neg),
+                    Ty::I64 => self.code.op(Opcode::I64Neg),
+                    Ty::F64 => self.code.op(Opcode::F64Neg),
                     t => unreachable!("{t:?}"),
                 }
             }
@@ -142,22 +131,14 @@ impl<'a> Codegen<'a> {
                 let symbol = &self.ty_ctx.bind_ctx.symbols[symbol_id];
                 match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
-                        let index = symbol.local_index;
-                        if index <= u8::MAX as u32 {
-                            self.code.write(Opcode::GetLocal);
-                            self.code.write_u8(index as u8);
-                        } else {
-                            self.code.write(Opcode::GetLocalLong);
-                            self.code.write_u16(index as u16);
-                        }
+                        self.code.op_get_local(symbol.local_index);
                     }
                     SymbolKind::Fn => {
-                        self.code.write(Opcode::Const);
                         if let Some(&function) = self.functions.get(&symbol_id) {
-                            self.code.write_u64(function as u64);
+                            self.code.op_const(function as u64);
                         } else {
-                            let patch_offset = self.code.len();
-                            self.code.write_u64(0);
+                            let patch_offset = self.code.len() + 1;
+                            self.code.op_const(0);
                             self.function_worklist.push_back((symbol_id, patch_offset));
                         }
                     }
@@ -169,21 +150,14 @@ impl<'a> Codegen<'a> {
                     let symbol = self.ast.exprs.value_binding(lhs);
                     let index = self.ty_ctx.bind_ctx.symbols[symbol].local_index;
                     self.process_expr(rhs);
-                    if index <= u8::MAX as u32 {
-                        self.code.write(Opcode::SetLocal);
-                        self.code.write_u8(index as u8);
-                    } else {
-                        self.code.write(Opcode::SetLocalLong);
-                        self.code.write_u16(index as u16);
-                    }
-                    self.code.write(Opcode::Unit);
+                    self.code.op_set_local(index);
+                    self.code.op_unit();
                 }
                 Expr::TupleField(expr, index) => {
                     self.process_expr(expr);
                     self.process_expr(rhs);
-                    self.code.write(Opcode::SetStructProperty);
-                    self.code.write_u16(index);
-                    self.code.write(Opcode::Unit);
+                    self.code.op_set_struct_property(index);
+                    self.code.op_unit();
                 }
                 Expr::StructField(expr, ref name) => {
                     let ty = self.ty_ctx.expr_types[&expr];
@@ -195,16 +169,15 @@ impl<'a> Codegen<'a> {
                     let index = properties.get_index_of(&name).unwrap();
                     self.process_expr(expr);
                     self.process_expr(rhs);
-                    self.code.write(Opcode::SetStructProperty);
-                    self.code.write_u16(index as u16);
-                    self.code.write(Opcode::Unit);
+                    self.code.op_set_struct_property(index as u16);
+                    self.code.op_unit();
                 }
                 Expr::ArrayIndex(expr, index) => {
                     self.process_expr(expr);
                     self.process_expr(index);
                     self.process_expr(rhs);
-                    self.code.write(Opcode::SetStructIndex);
-                    self.code.write(Opcode::Unit);
+                    self.code.op_set_struct_index();
+                    self.code.op_unit();
                 }
                 _ => unreachable!(),
             },
@@ -214,7 +187,7 @@ impl<'a> Codegen<'a> {
                 self.process_expr(rhs);
                 let jump_end = self.code.write_jump(Opcode::Jump);
                 self.code.patch_jump(jump_false);
-                self.code.write(Opcode::False);
+                self.code.op(Opcode::False);
                 self.code.patch_jump(jump_end);
             }
             Expr::Binary(lhs, BinaryOp::Or, rhs) => {
@@ -225,7 +198,7 @@ impl<'a> Codegen<'a> {
                 self.process_expr(rhs);
                 let jump_end = self.code.write_jump(Opcode::Jump);
                 self.code.patch_jump(jump_true);
-                self.code.write(Opcode::True);
+                self.code.op(Opcode::True);
                 self.code.patch_jump(jump_end);
             }
             Expr::Binary(lhs, op, rhs) => {
@@ -234,51 +207,51 @@ impl<'a> Codegen<'a> {
                 let ty = self.ty_ctx.expr_types[&lhs];
                 match self.ty_ctx.types.probe_value(ty) {
                     Ty::F64 => match op {
-                        BinaryOp::Add => self.code.write(Opcode::F64Add),
-                        BinaryOp::Sub => self.code.write(Opcode::F64Sub),
-                        BinaryOp::Mul => self.code.write(Opcode::F64Mul),
-                        BinaryOp::Div => self.code.write(Opcode::F64Div),
-                        BinaryOp::Greater => self.code.write(Opcode::F64Greater),
-                        BinaryOp::GreaterEqual => self.code.write(Opcode::F64GreaterEqual),
-                        BinaryOp::Less => self.code.write(Opcode::F64Less),
-                        BinaryOp::LessEqual => self.code.write(Opcode::F64LessEqual),
-                        BinaryOp::Equal => self.code.write(Opcode::F64Equal),
-                        BinaryOp::NotEqual => self.code.write(Opcode::F64NotEqual),
+                        BinaryOp::Add => self.code.op(Opcode::F64Add),
+                        BinaryOp::Sub => self.code.op(Opcode::F64Sub),
+                        BinaryOp::Mul => self.code.op(Opcode::F64Mul),
+                        BinaryOp::Div => self.code.op(Opcode::F64Div),
+                        BinaryOp::Greater => self.code.op(Opcode::F64Greater),
+                        BinaryOp::GreaterEqual => self.code.op(Opcode::F64GreaterEqual),
+                        BinaryOp::Less => self.code.op(Opcode::F64Less),
+                        BinaryOp::LessEqual => self.code.op(Opcode::F64LessEqual),
+                        BinaryOp::Equal => self.code.op(Opcode::F64Equal),
+                        BinaryOp::NotEqual => self.code.op(Opcode::F64NotEqual),
                         _ => {}
                     },
                     Ty::I64 => match op {
-                        BinaryOp::Add => self.code.write(Opcode::I64Add),
-                        BinaryOp::Sub => self.code.write(Opcode::I64Sub),
-                        BinaryOp::Mul => self.code.write(Opcode::I64Mul),
-                        BinaryOp::Div => self.code.write(Opcode::I64Div),
-                        BinaryOp::Greater => self.code.write(Opcode::I64Greater),
-                        BinaryOp::GreaterEqual => self.code.write(Opcode::I64GreaterEqual),
-                        BinaryOp::Less => self.code.write(Opcode::I64Less),
-                        BinaryOp::LessEqual => self.code.write(Opcode::I64LessEqual),
-                        BinaryOp::Equal => self.code.write(Opcode::Equal),
-                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
-                        BinaryOp::BitOr => self.code.write(Opcode::I64Or),
-                        BinaryOp::BitAnd => self.code.write(Opcode::I64And),
+                        BinaryOp::Add => self.code.op(Opcode::I64Add),
+                        BinaryOp::Sub => self.code.op(Opcode::I64Sub),
+                        BinaryOp::Mul => self.code.op(Opcode::I64Mul),
+                        BinaryOp::Div => self.code.op(Opcode::I64Div),
+                        BinaryOp::Greater => self.code.op(Opcode::I64Greater),
+                        BinaryOp::GreaterEqual => self.code.op(Opcode::I64GreaterEqual),
+                        BinaryOp::Less => self.code.op(Opcode::I64Less),
+                        BinaryOp::LessEqual => self.code.op(Opcode::I64LessEqual),
+                        BinaryOp::Equal => self.code.op(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.op(Opcode::NotEqual),
+                        BinaryOp::BitOr => self.code.op(Opcode::I64Or),
+                        BinaryOp::BitAnd => self.code.op(Opcode::I64And),
                         _ => {}
                     },
                     Ty::U64 => match op {
-                        BinaryOp::Add => self.code.write(Opcode::U64Add),
-                        BinaryOp::Sub => self.code.write(Opcode::U64Sub),
-                        BinaryOp::Mul => self.code.write(Opcode::U64Mul),
-                        BinaryOp::Div => self.code.write(Opcode::U64Div),
-                        BinaryOp::Greater => self.code.write(Opcode::U64Greater),
-                        BinaryOp::GreaterEqual => self.code.write(Opcode::U64GreaterEqual),
-                        BinaryOp::Less => self.code.write(Opcode::U64Less),
-                        BinaryOp::LessEqual => self.code.write(Opcode::U64LessEqual),
-                        BinaryOp::Equal => self.code.write(Opcode::Equal),
-                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
-                        BinaryOp::BitOr => self.code.write(Opcode::U64Or),
-                        BinaryOp::BitAnd => self.code.write(Opcode::U64And),
+                        BinaryOp::Add => self.code.op(Opcode::U64Add),
+                        BinaryOp::Sub => self.code.op(Opcode::U64Sub),
+                        BinaryOp::Mul => self.code.op(Opcode::U64Mul),
+                        BinaryOp::Div => self.code.op(Opcode::U64Div),
+                        BinaryOp::Greater => self.code.op(Opcode::U64Greater),
+                        BinaryOp::GreaterEqual => self.code.op(Opcode::U64GreaterEqual),
+                        BinaryOp::Less => self.code.op(Opcode::U64Less),
+                        BinaryOp::LessEqual => self.code.op(Opcode::U64LessEqual),
+                        BinaryOp::Equal => self.code.op(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.op(Opcode::NotEqual),
+                        BinaryOp::BitOr => self.code.op(Opcode::U64Or),
+                        BinaryOp::BitAnd => self.code.op(Opcode::U64And),
                         _ => {}
                     },
                     _ => match op {
-                        BinaryOp::Equal => self.code.write(Opcode::Equal),
-                        BinaryOp::NotEqual => self.code.write(Opcode::NotEqual),
+                        BinaryOp::Equal => self.code.op(Opcode::Equal),
+                        BinaryOp::NotEqual => self.code.op(Opcode::NotEqual),
                         _ => {}
                     },
                 }
@@ -291,18 +264,17 @@ impl<'a> Codegen<'a> {
                 if symbol == self.ty_ctx.bind_ctx.print_function {
                     let ty = self.ty_ctx.expr_types[&args[0]];
                     match self.ty_ctx.types.probe_value(ty) {
-                        Ty::F64 => self.code.write(Opcode::PrintF64),
-                        Ty::I64 => self.code.write(Opcode::PrintI64),
-                        Ty::U64 => self.code.write(Opcode::PrintU64),
-                        Ty::String => self.code.write(Opcode::PrintString),
-                        Ty::Bool => self.code.write(Opcode::PrintBool),
-                        _ => self.code.write(Opcode::PrintObj),
+                        Ty::F64 => self.code.op(Opcode::PrintF64),
+                        Ty::I64 => self.code.op(Opcode::PrintI64),
+                        Ty::U64 => self.code.op(Opcode::PrintU64),
+                        Ty::String => self.code.op(Opcode::PrintString),
+                        Ty::Bool => self.code.op(Opcode::PrintBool),
+                        _ => self.code.op(Opcode::PrintObj),
                     }
-                    self.code.write(Opcode::Unit);
+                    self.code.op_unit();
                 } else {
                     self.process_expr(callee);
-                    self.code.write(Opcode::Call);
-                    self.code.write_u8(args.len() as u8);
+                    self.code.op_call(args.len() as u8);
                 }
             }
             Expr::Block(ref stmts, expr) => {
@@ -312,7 +284,7 @@ impl<'a> Codegen<'a> {
                 if let Some(expr) = expr {
                     self.process_expr(expr);
                 } else {
-                    self.code.write(Opcode::Unit);
+                    self.code.op_unit();
                 }
             }
             Expr::If(cond, then_clause, else_clause) => {
@@ -326,7 +298,7 @@ impl<'a> Codegen<'a> {
                     self.code.patch_jump(else_offset);
                 } else {
                     self.code.patch_jump(then_offset);
-                    self.code.write(Opcode::Unit);
+                    self.code.op_unit();
                 }
             }
             Expr::While(cond, body) => {
@@ -378,27 +350,24 @@ impl<'a> Codegen<'a> {
                     .write_loop(self.loop_ctxts.last_mut().unwrap().offset);
                 self.code.pop();
             }
-            Expr::Unit => self.code.write(Opcode::Unit),
+            Expr::Unit => self.code.op_unit(),
             Expr::Return(expr) => {
                 if let Some(expr) = expr {
                     self.process_expr(expr);
-                    self.code.write(Opcode::Return);
                 } else {
-                    self.code.write(Opcode::Unit);
-                    self.code.write(Opcode::Return);
+                    self.code.op_unit();
                 }
+                self.code.op_return();
             }
             Expr::Tuple(ref args) => {
                 for &arg in args {
                     self.process_expr(arg);
                 }
-                self.code.write(Opcode::Struct);
-                self.code.write_u16(args.len() as u16);
+                self.code.op_struct(args.len() as u16);
             }
             Expr::TupleField(expr, index) => {
                 self.process_expr(expr);
-                self.code.write(Opcode::StructProperty);
-                self.code.write_u16(index);
+                self.code.op_get_struct_property(index);
             }
             Expr::Struct(.., ref fields) => {
                 let symbol = self.ast.exprs.value_binding(expr);
@@ -411,8 +380,7 @@ impl<'a> Codegen<'a> {
                 for &expr in exprs.iter() {
                     self.process_expr(expr);
                 }
-                self.code.write(Opcode::Struct);
-                self.code.write_u16(exprs.len() as u16);
+                self.code.op_struct(exprs.len() as u16);
             }
             Expr::StructField(expr, ref name) => {
                 let ty = self.ty_ctx.expr_types[&expr];
@@ -423,25 +391,23 @@ impl<'a> Codegen<'a> {
                 let name = self.ty_ctx.bind_ctx.interner.intern(name);
                 let index = properties.get_index_of(&name).unwrap();
                 self.process_expr(expr);
-                self.code.write(Opcode::StructProperty);
-                self.code.write_u16(index as u16);
+                self.code.op_get_struct_property(index as u16);
             }
             Expr::Array(ref args) => {
                 for &arg in args {
                     self.process_expr(arg);
                 }
-                self.code.write(Opcode::Struct);
-                self.code.write_u16(args.len() as u16);
+                self.code.op_struct(args.len() as u16);
             }
             Expr::ArrayRepeat(expr, count) => {
                 self.process_expr(expr);
                 self.process_expr(count);
-                self.code.write(Opcode::RepeatStruct);
+                self.code.op_repeat_struct();
             }
             Expr::ArrayIndex(expr, index) => {
                 self.process_expr(expr);
                 self.process_expr(index);
-                self.code.write(Opcode::StructIndex)
+                self.code.op_get_struct_index();
             }
         }
     }

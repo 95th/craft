@@ -26,9 +26,9 @@ pub enum Opcode {
     Loop,
     Struct,
     RepeatStruct,
-    StructProperty,
+    GetStructProperty,
     SetStructProperty,
-    StructIndex,
+    GetStructIndex,
     SetStructIndex,
 
     Equal,
@@ -80,8 +80,69 @@ impl Code {
         Self { code: Vec::new() }
     }
 
-    pub fn write(&mut self, op: Opcode) {
-        self.code.push(op as u8);
+    pub fn op_const(&mut self, value: u64) {
+        self.op(Opcode::Const);
+        self.write_u64(value);
+    }
+
+    pub fn op_return(&mut self) {
+        self.op(Opcode::Return);
+    }
+
+    pub fn op_struct(&mut self, args: u16) {
+        self.op(Opcode::Struct);
+        self.write_u16(args);
+    }
+
+    pub fn op_repeat_struct(&mut self) {
+        self.op(Opcode::RepeatStruct);
+    }
+
+    pub fn op_get_struct_property(&mut self, index: u16) {
+        self.op(Opcode::GetStructProperty);
+        self.write_u16(index);
+    }
+
+    pub fn op_set_struct_property(&mut self, index: u16) {
+        self.op(Opcode::SetStructProperty);
+        self.write_u16(index);
+    }
+
+    pub fn op_get_struct_index(&mut self) {
+        self.op(Opcode::GetStructIndex);
+    }
+
+    pub fn op_set_struct_index(&mut self) {
+        self.op(Opcode::SetStructIndex);
+    }
+
+    pub fn op_unit(&mut self) {
+        self.op(Opcode::Unit);
+    }
+
+    pub fn op_call(&mut self, args: u8) {
+        self.op(Opcode::Call);
+        self.write_u8(args);
+    }
+
+    pub fn op_get_local(&mut self, index: u32) {
+        if index <= u8::MAX as u32 {
+            self.op(Opcode::GetLocal);
+            self.write_u8(index as u8);
+        } else {
+            self.op(Opcode::GetLocalLong);
+            self.write_u16(index as u16);
+        }
+    }
+
+    pub fn op_set_local(&mut self, index: u32) {
+        if index <= u8::MAX as u32 {
+            self.op(Opcode::SetLocal);
+            self.write_u8(index as u8);
+        } else {
+            self.op(Opcode::SetLocalLong);
+            self.write_u16(index as u16);
+        }
     }
 
     pub fn pop(&mut self) {
@@ -92,36 +153,8 @@ impl Code {
         }
     }
 
-    pub fn write_u8(&mut self, n: u8) {
-        self.code.push(n);
-    }
-
-    pub fn write_u16(&mut self, n: u16) {
-        self.code.extend(n.to_ne_bytes());
-    }
-
-    pub fn write_u64(&mut self, n: u64) {
-        self.code.extend(n.to_ne_bytes());
-    }
-
-    pub fn into_inner(self) -> Vec<u8> {
-        self.code
-    }
-
-    pub fn len(&self) -> usize {
-        self.code.len()
-    }
-
-    pub fn write_u16_at(&mut self, i: usize, n: u16) {
-        self.code[i..i + 2].copy_from_slice(&n.to_ne_bytes());
-    }
-
-    pub fn write_u64_at(&mut self, i: usize, n: u64) {
-        self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
-    }
-
     pub fn write_jump(&mut self, op: Opcode) -> usize {
-        self.write(op);
+        self.op(op);
         self.write_u16(0);
         self.code.len() - 2
     }
@@ -133,7 +166,39 @@ impl Code {
 
     pub fn write_loop(&mut self, start: usize) {
         let offset = self.code.len() - start + 3;
-        self.write(Opcode::Loop);
+        self.op(Opcode::Loop);
         self.write_u16(offset as u16);
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.code
+    }
+
+    pub fn len(&self) -> usize {
+        self.code.len()
+    }
+
+    pub fn op(&mut self, op: Opcode) {
+        self.write_u8(op as u8);
+    }
+
+    pub fn write_u64_at(&mut self, i: usize, n: u64) {
+        self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.code.push(n);
+    }
+
+    fn write_u16(&mut self, n: u16) {
+        self.code.extend(n.to_ne_bytes());
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.code.extend(n.to_ne_bytes());
+    }
+
+    fn write_u16_at(&mut self, i: usize, n: u16) {
+        self.code[i..i + 2].copy_from_slice(&n.to_ne_bytes());
     }
 }

@@ -401,7 +401,7 @@ impl VM {
                     let obj = self.heap.alloc(ObjKind::Struct, data);
                     self.stack.push(obj as u64);
                 }
-                Opcode::StructProperty => {
+                Opcode::GetStructProperty => {
                     let index = self.frame.read_u16() as usize;
                     let obj = self.stack.pop().unwrap() as usize;
                     let value = self.heap.get_field(obj, index);
@@ -413,7 +413,7 @@ impl VM {
                     let obj = self.stack.pop().unwrap() as usize;
                     self.heap.set_field(obj, index, value);
                 }
-                Opcode::StructIndex => {
+                Opcode::GetStructIndex => {
                     let index = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap() as usize;
                     let value = self.heap.get_field(obj, index as usize);
