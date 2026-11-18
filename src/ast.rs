@@ -17,7 +17,8 @@ pub enum Node {
     While(NodeId, NodeId),
     Break,
     Continue,
-    Fn(String, Vec<(String, NodeId)>, Option<NodeId>, NodeId),
+    Fn(String, Vec<NodeId>, Option<NodeId>, NodeId),
+    Param(String, NodeId),
     Call(NodeId, Vec<NodeId>),
     Return(Option<NodeId>),
 }
@@ -70,6 +71,10 @@ impl NodeArena {
             )
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -82,12 +87,16 @@ impl NodeId {
         Self(index as u32)
     }
 
+    pub fn idx(self) -> usize {
+        self.0 as usize
+    }
+
     pub fn get(self, arena: &NodeArena) -> &Node {
-        &arena.nodes[self.0 as usize]
+        &arena.nodes[self.idx()]
     }
 
     pub fn span(self, arena: &NodeArena) -> Span {
-        arena.spans[self.0 as usize]
+        arena.spans[self.idx()]
     }
 
     pub fn display(self, arena: &NodeArena) -> impl fmt::Display {
@@ -148,8 +157,8 @@ impl fmt::Display for NodeDisplay<'_> {
             Node::Fn(name, params, return_ty, body) => {
                 write!(f, "fn {name}(")?;
                 let mut sep = "";
-                for (name, ty) in params {
-                    write!(f, "{sep}{name}: {}", ty.display(arena))?;
+                for param in params {
+                    write!(f, "{sep}{}", param.display(arena))?;
                     sep = ", ";
                 }
                 write!(f, ")")?;
@@ -158,6 +167,7 @@ impl fmt::Display for NodeDisplay<'_> {
                 }
                 write!(f, " {}", body.display(arena))
             }
+            Node::Param(name, ty) => write!(f, "{name}: {}", ty.display(arena)),
             Node::Call(target, args) => {
                 write!(f, "{}(", target.display(arena))?;
                 let mut sep = "";

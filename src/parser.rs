@@ -117,9 +117,13 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
         loop {
             let name = p.scanner.token_text().to_string();
             p.consume(Identifier, "Expect parameter name.");
+            let param_span = p.prev_span;
             p.consume(Colon, "Expect ':' after parameter name.");
             let ty = ty(p);
-            params.push((name, ty));
+            params.push(
+                p.nodes
+                    .alloc(Node::Param(name, ty), param_span.to(p.prev_span)),
+            );
             if !p.eat(Comma) {
                 break;
             }
@@ -127,7 +131,7 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
     }
     p.consume(CloseParen, "Expect ')' after function parameters.");
     let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
-    p.consume(OpenBrace, "Expect '{' before funciton body");
+    p.consume(OpenBrace, "Expect '{' before function body");
     let body = block_expr(p);
     p.nodes.alloc(
         Node::Fn(name, params, return_ty, body),
@@ -138,7 +142,6 @@ fn fn_declaration(p: &mut Parser) -> NodeId {
 fn statement(p: &mut Parser) -> NodeId {
     match p.token {
         While => while_statement(p),
-        Return => return_statement(p),
         _ => expression_statement(p),
     }
 }
@@ -151,19 +154,6 @@ fn while_statement(p: &mut Parser) -> NodeId {
     let body = block_expr(p);
     p.nodes
         .alloc(Node::While(cond, body), start.to(p.prev_span))
-}
-
-fn return_statement(p: &mut Parser) -> NodeId {
-    p.advance();
-    let start = p.prev_span;
-    let value = if !p.eat(Semicolon) {
-        let value = expression(p);
-        p.consume(Semicolon, "Expect ';' after return value");
-        Some(value)
-    } else {
-        None
-    };
-    p.nodes.alloc(Node::Return(value), start.to(p.prev_span))
 }
 
 fn expression_statement(p: &mut Parser) -> NodeId {
@@ -292,6 +282,17 @@ fn continue_expr(p: &mut Parser) -> NodeId {
     p.nodes.alloc(Node::Continue, p.prev_span)
 }
 
+fn return_expr(p: &mut Parser) -> NodeId {
+    p.advance();
+    let start = p.prev_span;
+    let value = if p.token != Semicolon {
+        Some(expression(p))
+    } else {
+        None
+    };
+    p.nodes.alloc(Node::Return(value), start.to(p.prev_span))
+}
+
 fn variable(p: &mut Parser) -> NodeId {
     let name = p.scanner.token_text().to_string();
     p.advance();
@@ -355,9 +356,13 @@ fn parse_prefix(p: &mut Parser) -> Option<NodeId> {
         True | False => boolean(p),
         Break => break_expr(p),
         Continue => continue_expr(p),
+        Return => return_expr(p),
         Identifier => variable(p),
         If => if_expr(p),
-        OpenBrace => block_expr(p),
+        OpenBrace => {
+            p.advance();
+            block_expr(p)
+        }
         _ => return None,
     })
 }
