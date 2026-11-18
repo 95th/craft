@@ -372,4 +372,50 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_while() {
+        let source = r#"
+            let a = 10;
+            while a > 0 {
+                print_number(a);
+                a = a - 1;
+            }
+            print_number(100);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_for() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                print_number(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_for_without_init() {
+        let source = r#"
+            let i = 0;
+            for (; i < 10; i = i + 1) {
+                print_number(i);
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_for_without_init_and_incr() {
+        let source = r#"
+            let i = 0;
+            for (; i < 10;) {
+                print_number(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
 }
