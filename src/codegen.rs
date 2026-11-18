@@ -5,10 +5,25 @@ use crate::{
     typechecker::TyContext,
 };
 
+struct LoopCtx {
+    offset: usize,
+    break_offsets: Vec<usize>,
+}
+
+impl LoopCtx {
+    fn new(offset: usize) -> Self {
+        Self {
+            offset,
+            break_offsets: Vec::new(),
+        }
+    }
+}
+
 pub struct Codegen<'a> {
     ast: &'a AstNodes,
     ty_ctx: TyContext,
     code: Code,
+    loop_ctxts: Vec<LoopCtx>,
 }
 
 impl<'a> Codegen<'a> {
@@ -17,6 +32,7 @@ impl<'a> Codegen<'a> {
             ast,
             ty_ctx,
             code: Code::new(),
+            loop_ctxts: Vec::new(),
         }
     }
 
@@ -137,9 +153,11 @@ impl<'a> Codegen<'a> {
                     self.code.patch_jump(else_offset);
                 } else {
                     self.code.patch_jump(then_offset);
+                    self.code.write(Opcode::Unit);
                 }
             }
             Expr::While(cond, body) => {
+                self.enter_loop();
                 let start = self.code.len();
                 self.process_expr(cond);
                 let jump_offset = self.code.write_jump(Opcode::JumpIfFalse);
@@ -147,11 +165,13 @@ impl<'a> Codegen<'a> {
                 self.code.pop();
                 self.code.write_loop(start);
                 self.code.patch_jump(jump_offset);
+                self.exit_loop();
             }
             Expr::For(init, cond, incr, body) => {
                 if let Some(init) = init {
                     self.process_stmt(init);
                 }
+                self.enter_loop();
                 let start = self.code.len();
                 if let Some(cond) = cond {
                     self.process_expr(cond);
@@ -173,9 +193,39 @@ impl<'a> Codegen<'a> {
                     }
                     self.code.write_loop(start);
                 }
+                self.exit_loop();
+            }
+            Expr::Break => {
+                let offset = self.code.write_jump(Opcode::Jump);
+                self.push_loop_break(offset);
+                self.code.pop();
+            }
+            Expr::Continue => {
+                self.code
+                    .write_loop(self.loop_ctxts.last_mut().unwrap().offset);
+                self.code.pop();
             }
             Expr::Unit => self.code.write(Opcode::Unit),
             _ => {}
+        }
+    }
+
+    fn enter_loop(&mut self) {
+        self.loop_ctxts.push(LoopCtx::new(self.code.len()));
+    }
+
+    fn push_loop_break(&mut self, offset: usize) {
+        self.loop_ctxts
+            .last_mut()
+            .unwrap()
+            .break_offsets
+            .push(offset);
+    }
+
+    fn exit_loop(&mut self) {
+        let ctx = self.loop_ctxts.pop().unwrap();
+        for offset in ctx.break_offsets {
+            self.code.patch_jump(offset);
         }
     }
 }

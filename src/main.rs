@@ -420,17 +420,48 @@ mod tests {
     }
 
     #[test]
-    fn test_for_no_clauses() {
+    fn test_run_for_no_clauses() {
         let source = r#"
             let i = 0;
             for (;;) {
                 print_number(i);
                 i = i + 1;
-                if !(i < 10) {
+                if i >= 10 {
                     break;
                 }
             }
         "#;
-        check_ok(source);
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_while_break() {
+        let source = r#"
+            let i = 0;
+            while true {
+                print_number(i);
+                i = i + 1;
+                if i == 10 {
+                    break;
+                }
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_run_while_continue() {
+        let source = r#"
+            let i = 0;
+            while true {
+                print_number(i);
+                i = i + 1;
+                if i < 10 {
+                    continue;
+                }
+                break;
+            }
+        "#;
+        run_ok(source);
     }
 }
