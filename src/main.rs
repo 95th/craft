@@ -261,4 +261,13 @@ mod tests {
         "#;
         check_err(source, Error::Bind);
     }
+
+    #[test]
+    fn test_for_missing_first_semicolon() {
+        let source = r#"
+            for (i = 0 i < 10; i = i + 1) {
+            }
+        "#;
+        check_err(source, Error::Parse);
+    }
 }

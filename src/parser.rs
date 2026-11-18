@@ -553,7 +553,13 @@ fn for_expr(p: &mut Parser) -> ExprId {
     } else if p.token == Let {
         Some(let_declaration(p))
     } else {
-        Some(expression_statement(p))
+        let expr = expression(p);
+        p.consume(Semicolon, "Expect ';' after init expresssion.");
+        let stmt = p.ast.stmts.alloc(
+            Stmt::Expr(expr, true),
+            p.ast.exprs.span(expr).to(p.prev_span),
+        );
+        Some(stmt)
     };
     let cond = if p.eat(Semicolon) {
         None
