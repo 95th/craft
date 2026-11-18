@@ -1,5 +1,6 @@
 use crate::{
-    ast::AstNodes, bind::Binder, diagnostics::Diagnostics, parser::Parser, typechecker::TypeChecker,
+    ast::AstNodes, bind::Binder, codegen::Codegen, diagnostics::Diagnostics, parser::Parser,
+    typechecker::TypeChecker,
 };
 
 mod arena;
@@ -36,6 +37,9 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<(), Error> {
 
     let mut checker = TypeChecker::new(&ast, diagnostics, bind_ctx);
     checker.check(&nodes)?;
+
+    let mut codegen = Codegen::new(&ast);
+    codegen.generate(&nodes);
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNodes, Stmt, StmtId},
+    ast::{AstNodes, AstVisitor, Stmt, StmtId},
     bind::SymbolId,
     chunk::Code,
 };
@@ -7,8 +7,6 @@ use crate::{
 pub struct Codegen<'a> {
     ast: &'a AstNodes,
     code: Code,
-    structs: Vec<SymbolId>,
-    functions: Vec<SymbolId>,
 }
 
 impl<'a> Codegen<'a> {
@@ -16,24 +14,38 @@ impl<'a> Codegen<'a> {
         Self {
             ast,
             code: Code::new(),
-            structs: Vec::new(),
-            functions: Vec::new(),
         }
     }
 
     pub fn generate(&mut self, stmts: &[StmtId]) {
-        self.collect_structs(stmts);
+        let nodes = self.collect_structs_in_stmts(stmts);
+        println!(
+            "{} structs, {} functions",
+            nodes.structs.len(),
+            nodes.functions.len()
+        );
     }
 
-    fn collect_structs(&mut self, stmts: &[StmtId]) {
-        for &stmt in stmts {
-            match self.ast.stmts[stmt] {
-                Stmt::Struct(..) => {
-                    let symbol = self.ast.stmts.binding(stmt);
-                    self.structs.push(symbol);
-                }
-                _ => (),
-            }
+    fn collect_structs_in_stmts(&mut self, stmts: &[StmtId]) -> NodeCollector {
+        let mut nodes = NodeCollector {
+            structs: Vec::new(),
+            functions: Vec::new(),
+        };
+        self.ast.visit(stmts, &mut nodes);
+        nodes
+    }
+}
+struct NodeCollector {
+    structs: Vec<SymbolId>,
+    functions: Vec<SymbolId>,
+}
+
+impl AstVisitor for NodeCollector {
+    fn visit_stmt(&mut self, stmt: StmtId, ast: &AstNodes) {
+        match ast.stmts[stmt] {
+            Stmt::Struct(..) => self.structs.push(ast.stmts.binding(stmt)),
+            Stmt::Fn(..) => self.functions.push(ast.stmts.binding(stmt)),
+            _ => {}
         }
     }
 }
