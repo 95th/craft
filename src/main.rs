@@ -1108,4 +1108,16 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_while_loop() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                print(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
 }

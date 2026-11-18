@@ -14,9 +14,8 @@ use crate::{
 #[derive(Clone, Copy)]
 struct LoopContext {
     continue_target: BasicBlockId,
-    continue_locals: usize,
     break_target: BasicBlockId,
-    break_locals: usize,
+    locals: usize,
 }
 
 pub struct Lowering<'a> {
@@ -334,21 +333,16 @@ impl<'a> Lowering<'a> {
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::While { cond, body } => {
-                let locals = self.local_stack.len();
                 let cond_block = self.create_block();
                 let body_block = self.create_block();
                 let merge_block = self.create_block();
 
-                self.loop_contexts.push(LoopContext {
-                    continue_target: cond_block,
-                    break_target: merge_block,
-                    continue_locals: locals,
-                    break_locals: locals,
-                });
+                let cond_ty = self.tcx.expr_types[&cond];
+                let cond_local = self.create_local(cond_ty);
 
                 self.add_edge(self.current_block, cond_block);
                 self.current_block = cond_block;
-                let cond = self.lower_expr(cond, None);
+                let cond = self.lower_expr(cond, Some(Place::local(cond_local)));
 
                 self.set_terminator(Terminator::Branch {
                     cond,
@@ -357,14 +351,16 @@ impl<'a> Lowering<'a> {
                 });
                 self.add_edge(self.current_block, body_block);
                 self.add_edge(self.current_block, merge_block);
-
                 self.current_block = body_block;
+
+                self.enter_loop(cond_block, merge_block);
                 self.lower_expr(body, None);
+                self.loop_contexts.pop();
+
                 self.set_terminator(Terminator::Jump { target: cond_block });
                 self.add_edge(self.current_block, cond_block);
 
                 self.current_block = merge_block;
-                self.loop_contexts.pop();
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::For {
@@ -377,6 +373,10 @@ impl<'a> Lowering<'a> {
                 if let Some(init) = init {
                     self.lower_stmt(init);
                 }
+                let cond_local = cond.map(|cond| {
+                    let ty = self.tcx.expr_types[&cond];
+                    self.create_local(ty)
+                });
                 let cond_block = cond.map(|_| self.create_block());
                 let body_block = self.create_block();
                 let incr_block = incr.map(|_| self.create_block());
@@ -384,10 +384,11 @@ impl<'a> Lowering<'a> {
 
                 if let Some(cond) = cond
                     && let Some(cond_block) = cond_block
+                    && let Some(cond_local) = cond_local
                 {
                     self.add_edge(self.current_block, cond_block);
                     self.current_block = cond_block;
-                    let cond = self.lower_expr(cond, None);
+                    let cond = self.lower_expr(cond, Some(Place::local(cond_local)));
                     self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
@@ -402,13 +403,7 @@ impl<'a> Lowering<'a> {
                 self.current_block = body_block;
                 let continue_target = incr_block.or(cond_block).unwrap_or(body_block);
 
-                self.loop_contexts.push(LoopContext {
-                    continue_target,
-                    continue_locals: self.local_stack.len(),
-                    break_target: merge_block,
-                    break_locals: self.local_stack.len(),
-                });
-
+                self.enter_loop(continue_target, merge_block);
                 self.lower_expr(body, None);
                 self.set_terminator(Terminator::Jump {
                     target: continue_target,
@@ -434,7 +429,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
-                self.pop_locals(context.break_locals, false);
+                self.pop_locals(context.locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.break_target,
                 });
@@ -445,7 +440,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Continue => {
                 let context = *self.loop_contexts.last().unwrap();
-                self.pop_locals(context.continue_locals, false);
+                self.pop_locals(context.locals, false);
                 self.set_terminator(Terminator::Jump {
                     target: context.continue_target,
                 });
@@ -531,6 +526,14 @@ impl<'a> Lowering<'a> {
         if drop {
             self.local_stack.truncate(keep_len);
         }
+    }
+
+    fn enter_loop(&mut self, continue_target: BasicBlockId, break_target: BasicBlockId) {
+        self.loop_contexts.push(LoopContext {
+            continue_target,
+            break_target,
+            locals: self.local_stack.len(),
+        })
     }
 }
 
