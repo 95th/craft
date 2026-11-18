@@ -116,7 +116,7 @@ mod tests {
             fn foo(a: number, b: number) -> number { 1 }
             let f: fn(number, number) -> number = foo;
             let a: (number, (number, number)) = (1, (2, 3));
-            foo(a.0, (a.1).0);
+            foo(a.0, a.1.0);
         "#;
         check_ok(source)
     }

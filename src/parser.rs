@@ -390,22 +390,33 @@ fn call(p: &mut Parser, lhs: ExprId) -> ExprId {
 
 fn dot(p: &mut Parser, lhs: ExprId) -> ExprId {
     p.advance();
-    let name = p.scanner.token_text().to_string();
+    let name = p.scanner.token_text();
     if p.eat(NumberLiteral) {
-        let index = match name.parse() {
-            Ok(n) => n,
-            _ => {
-                p.error_at("Expect an integer tuple field", p.prev_span);
-                0
-            }
-        };
-        p.ast.exprs.alloc(
-            Expr::TupleField(lhs, index),
-            p.ast.exprs.span(lhs).to(p.prev_span),
-        )
+        let start = p.ast.exprs.span(lhs);
+        if let Some((a, b)) = name.split_once('.') {
+            let a_index = a.parse().unwrap();
+            let a_span = Span::new(
+                p.prev_span.start as usize,
+                p.prev_span.start as usize + a.len(),
+            );
+            let a_expr = p
+                .ast
+                .exprs
+                .alloc(Expr::TupleField(lhs, a_index), start.to(a_span));
+
+            let b_index = b.parse().unwrap();
+            p.ast
+                .exprs
+                .alloc(Expr::TupleField(a_expr, b_index), start.to(p.prev_span))
+        } else {
+            let index = name.parse().unwrap();
+            p.ast
+                .exprs
+                .alloc(Expr::TupleField(lhs, index), start.to(p.prev_span))
+        }
     } else if p.eat(Identifier) {
         p.ast.exprs.alloc(
-            Expr::StructField(lhs, name),
+            Expr::StructField(lhs, name.to_string()),
             p.ast.exprs.span(lhs).to(p.prev_span),
         )
     } else {
