@@ -55,12 +55,12 @@ impl<'a> Codegen<'a> {
         self.code.write(Opcode::Return);
 
         while let Some((symbol, patch_offset)) = self.function_worklist.pop_front() {
-            if let Some(&function_offset) = self.functions.get(&symbol) {
-                self.code.write_u64_at(patch_offset, function_offset as u64);
+            if let Some(&function) = self.functions.get(&symbol) {
+                self.code.write_u64_at(patch_offset, function as u64);
             } else {
-                let function_offset = self.code.len();
-                self.code.write_u64_at(patch_offset, function_offset as u64);
-                self.functions.insert(symbol, function_offset);
+                let function = self.code.len();
+                self.code.write_u64_at(patch_offset, function as u64);
+                self.functions.insert(symbol, function);
                 let function = self.ty_ctx.bind_ctx.symbols[symbol].declaration;
                 self.process_function(function);
             }
@@ -153,8 +153,8 @@ impl<'a> Codegen<'a> {
                     }
                     SymbolKind::Fn => {
                         self.code.write(Opcode::Const);
-                        if let Some(&function_offset) = self.functions.get(&symbol_id) {
-                            self.code.write_u64(function_offset as u64);
+                        if let Some(&function) = self.functions.get(&symbol_id) {
+                            self.code.write_u64(function as u64);
                         } else {
                             let patch_offset = self.code.len();
                             self.code.write_u64(0);
