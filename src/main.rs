@@ -49,7 +49,10 @@ fn main() {
         let a = 10;
         a = a + 1 - 4 / 2 * 1.2;
         print_number(a);
-        a = 1;
+        a = {
+            let b = 20;
+            b + 1
+        };
         print_number(a);
     "#;
 
