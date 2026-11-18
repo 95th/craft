@@ -486,17 +486,19 @@ fn block_expr(p: &mut Parser) -> NodeId {
 }
 
 fn parse_precedence(p: &mut Parser, precedence: u8) -> NodeId {
-    let Some(mut expr) = parse_prefix(p) else {
-        let node = p.error("Expect expression.");
-        p.advance();
-        return node;
-    };
+    crate::stack_safe(|| {
+        let Some(mut expr) = parse_prefix(p) else {
+            let node = p.error("Expect expression.");
+            p.advance();
+            return node;
+        };
 
-    while precedence <= p.token.precedence() as u8 {
-        expr = parse_infix(p, expr);
-    }
+        while precedence <= p.token.precedence() as u8 {
+            expr = parse_infix(p, expr);
+        }
 
-    expr
+        expr
+    })
 }
 
 fn parse_prefix(p: &mut Parser) -> Option<NodeId> {

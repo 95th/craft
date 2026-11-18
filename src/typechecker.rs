@@ -148,6 +148,10 @@ fn declare_item(c: &mut TypeChecker, node: NodeId) {
 }
 
 fn check_node(c: &mut TypeChecker, node: NodeId) -> TypeId {
+    crate::stack_safe(|| check_node_inner(c, node))
+}
+
+fn check_node_inner(c: &mut TypeChecker, node: NodeId) -> TypeId {
     match *node.get(c.nodes) {
         Node::Bool(_) => c.common_types.boolean,
         Node::Number(_) => c.common_types.number,

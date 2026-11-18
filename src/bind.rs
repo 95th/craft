@@ -266,6 +266,10 @@ fn bind_statement(b: &mut Binder, node: NodeId) {
 }
 
 fn bind_expr(b: &mut Binder, node: NodeId) {
+    crate::stack_safe(|| bind_expr_inner(b, node))
+}
+
+fn bind_expr_inner(b: &mut Binder, node: NodeId) {
     match *node.get(b.nodes) {
         Node::Variable(ref name) => {
             let name_id = b.interner.intern(name);

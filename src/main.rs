@@ -9,6 +9,11 @@ mod scanner;
 mod typechecker;
 mod types;
 
+#[inline(always)]
+fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
+}
+
 fn main() {
     let source = r#"
         struct Foo {
@@ -211,5 +216,18 @@ mod tests {
             let x: () = ();
         "#;
         check_ok(source);
+    }
+
+    #[test]
+    fn huge_nesting() {
+        let mut s = String::new();
+        for _ in 0..1_000_000 {
+            s.push('{');
+        }
+        s.push_str("1 + 1;");
+        for _ in 0..1_000_000 {
+            s.push('}');
+        }
+        check_ok(&s);
     }
 }
