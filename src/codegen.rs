@@ -34,6 +34,7 @@ pub struct Codegen<'a> {
     function_table: FxHashMap<SymbolId, usize>,
     function_worklist: VecDeque<(SymbolId, usize)>,
     string_worklist: Vec<(usize, StrId)>,
+    locals: usize,
 }
 
 impl<'a> Codegen<'a> {
@@ -47,6 +48,7 @@ impl<'a> Codegen<'a> {
             function_table: FxHashMap::default(),
             function_worklist: VecDeque::new(),
             string_worklist: Vec::new(),
+            locals: 0,
         }
     }
 
@@ -83,11 +85,13 @@ impl<'a> Codegen<'a> {
 
     fn process_function(&mut self, function: StmtId) {
         match self.ast.stmts[function] {
-            Stmt::Fn(.., body) => {
+            Stmt::Fn(.., ref params, _, body) => {
+                self.locals = params.len();
                 self.process_expr(body);
                 self.code.op_return();
             }
             Stmt::TupleStruct(.., ref args) => {
+                self.locals = args.len();
                 self.code.op_struct(args.len() as u16);
                 self.code.op_return();
             }
@@ -97,7 +101,10 @@ impl<'a> Codegen<'a> {
 
     fn process_stmt(&mut self, stmt: StmtId) {
         match self.ast.stmts[stmt] {
-            Stmt::Let(_, _, init) => self.process_expr(init),
+            Stmt::Let(_, _, init) => {
+                self.process_expr(init);
+                self.locals += 1;
+            }
             Stmt::Expr(expr, _) => {
                 self.process_expr(expr);
                 self.code.pop();
@@ -291,14 +298,18 @@ impl<'a> Codegen<'a> {
                 }
             }
             Expr::Block(ref stmts, expr) => {
+                let prev_locals = std::mem::replace(&mut self.locals, 0);
                 for &stmt in stmts {
                     self.process_stmt(stmt);
                 }
                 if let Some(expr) = expr {
                     self.process_expr(expr);
+                    self.code.op_pop_scope(self.locals);
                 } else {
+                    self.code.op_pop_n(self.locals);
                     self.code.op_unit();
                 }
+                self.locals = prev_locals;
             }
             Expr::If(cond, then_clause, else_clause) => {
                 self.process_expr(cond);
@@ -326,6 +337,7 @@ impl<'a> Codegen<'a> {
                 self.exit_loop();
             }
             Expr::For(init, cond, incr, body) => {
+                let prev_locals = std::mem::replace(&mut self.locals, 0);
                 if let Some(init) = init {
                     self.process_stmt(init);
                 }
@@ -352,6 +364,9 @@ impl<'a> Codegen<'a> {
                     self.code.write_loop(start);
                 }
                 self.exit_loop();
+                self.code.op_pop_n(self.locals);
+                self.code.op_unit();
+                self.locals = prev_locals;
             }
             Expr::Break => {
                 let offset = self.code.write_jump(Opcode::Jump);

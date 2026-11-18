@@ -22,6 +22,8 @@ pub enum Opcode {
 
     Call,
     Pop,
+    PopN,
+    PopScope,
     JumpIfFalse,
     Jump,
     Loop,
@@ -151,6 +153,29 @@ impl Code {
             self.code.pop();
         } else {
             self.code.push(Opcode::Pop as u8);
+        }
+    }
+
+    pub fn op_pop_scope(&mut self, locals: usize) {
+        if locals == 0 {
+            return;
+        }
+        self.op(Opcode::PopScope);
+        self.write_u16(locals as u16);
+    }
+
+    pub fn op_pop_n(&mut self, n: usize) {
+        match n {
+            0 => {}
+            1 => self.pop(),
+            2 => {
+                self.pop();
+                self.pop();
+            }
+            _ => {
+                self.op(Opcode::PopN);
+                self.write_u16(n as u16);
+            }
         }
     }
 

@@ -375,6 +375,20 @@ impl VM {
                 Opcode::Pop => {
                     self.stack.pop().unwrap();
                 }
+                Opcode::PopN => {
+                    let count = self.frame.read_u16();
+                    for _ in 0..count {
+                        self.stack.pop().unwrap();
+                    }
+                }
+                Opcode::PopScope => {
+                    let value = self.stack.pop().unwrap();
+                    let count = self.frame.read_u16();
+                    for _ in 0..count {
+                        self.stack.pop().unwrap();
+                    }
+                    self.stack.push(value);
+                }
                 Opcode::Jump => {
                     let offset = self.frame.read_u16() as usize;
                     self.frame.jump(offset);

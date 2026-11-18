@@ -899,4 +899,41 @@ mod tests {
         }
         run_ok(&source);
     }
+
+    #[test]
+    fn test_locals_in_block() {
+        let source = r#"
+            let a = 1;
+            {
+                let b = 2;
+                let c = 3;
+            }
+            let d = 4;
+            print(d);
+
+            let x = {
+                let y = {
+                    let z = 10;
+                    z * 2
+                };
+                y + 5
+            };
+            print(x);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_function_implicit_return() {
+        let source = r#"
+            fn foo() -> u64 {
+                let a = 10;
+                let b = 20;
+                a + b
+            }
+
+            print(foo());
+        "#;
+        run_ok(source);
+    }
 }

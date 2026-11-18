@@ -237,6 +237,7 @@ impl<'a> Binder<'a> {
 
     fn with_value_scope<R>(&mut self, inherit: bool, f: impl FnOnce(&mut Self) -> R) -> R {
         let prev_value_scope = self.value_scope;
+        let prev_local_count = self.local_count;
         self.value_scope = self.create_scope(if inherit {
             Some(prev_value_scope)
         } else {
@@ -244,6 +245,7 @@ impl<'a> Binder<'a> {
         });
         let result = f(self);
         self.value_scope = prev_value_scope;
+        self.local_count = prev_local_count;
         result
     }
 
