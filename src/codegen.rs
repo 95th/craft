@@ -6,7 +6,7 @@ use crate::{
     ast::{AstNodes, BinaryOp, Expr, ExprId, Stmt, StmtId},
     bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
-    heap::{Heap, ObjKind},
+    heap::Heap,
     typechecker::TyContext,
     types::Ty,
 };
@@ -110,7 +110,7 @@ impl<'a> Codegen<'a> {
                 self.code.op_const(n.to_bits());
             }
             Expr::String(ref s) => {
-                let obj = self.heap.alloc(ObjKind::String, s.as_bytes());
+                let obj = self.heap.alloc_string(s.as_bytes());
                 self.code.op_const(obj as u64);
             }
             Expr::Not(expr) => {

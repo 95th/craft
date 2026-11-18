@@ -1,6 +1,6 @@
 use crate::{
     chunk::{Code, Opcode},
-    heap::{Heap, ObjKind},
+    heap::Heap,
 };
 
 const TRUE: u64 = 1;
@@ -386,8 +386,9 @@ impl VM {
                 }
                 Opcode::Struct => {
                     let count = self.frame.read_u16() as usize;
-                    let data = bits_to_bytes(&self.stack[self.stack.len() - count..]);
-                    let obj = self.heap.alloc(ObjKind::Struct, data);
+                    let obj = self
+                        .heap
+                        .alloc_struct(&self.stack[self.stack.len() - count..]);
                     for _ in 0..count {
                         self.stack.pop().unwrap();
                     }
@@ -397,8 +398,7 @@ impl VM {
                     let count = self.stack.pop().unwrap();
                     let value = self.stack.pop().unwrap();
                     let data = vec![value; count as usize];
-                    let data = bits_to_bytes(&data[..]);
-                    let obj = self.heap.alloc(ObjKind::Struct, data);
+                    let obj = self.heap.alloc_struct(&data);
                     self.stack.push(obj as u64);
                 }
                 Opcode::GetStructProperty => {
@@ -435,10 +435,4 @@ impl VM {
             CallFrame::new(&self.code, function as usize, self.stack.len() - arg_count),
         ))
     }
-}
-
-fn bits_to_bytes(data: &[u64]) -> &[u8] {
-    let ptr = data.as_ptr() as *const u8;
-    let len = data.len() * 8;
-    unsafe { std::slice::from_raw_parts(ptr, len) }
 }
