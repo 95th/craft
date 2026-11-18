@@ -35,6 +35,7 @@ pub struct BindCtx {
     pub bindings: Vec<Option<SymbolId>>,
     pub number_type: SymbolId,
     pub str_type: SymbolId,
+    pub bool_type: SymbolId,
 }
 
 pub struct Binder<'a> {
@@ -49,6 +50,7 @@ pub struct Binder<'a> {
     has_error: bool,
     number_type: SymbolId,
     str_type: SymbolId,
+    bool_type: SymbolId,
     loop_depth: u16,
     fn_depth: u16,
 }
@@ -67,6 +69,7 @@ impl<'a> Binder<'a> {
             has_error: false,
             number_type: SymbolId::MAX,
             str_type: SymbolId::MAX,
+            bool_type: SymbolId::MAX,
             loop_depth: 0,
             fn_depth: 0,
         }
@@ -90,12 +93,14 @@ impl<'a> Binder<'a> {
             bindings: self.bindings,
             number_type: self.number_type,
             str_type: self.str_type,
+            bool_type: self.bool_type,
         })
     }
 
     fn declare_default_types(&mut self) {
         self.number_type = self.declare_default_type("number");
         self.str_type = self.declare_default_type("str");
+        self.bool_type = self.declare_default_type("bool");
     }
 
     fn declare_default_type(&mut self, name: &str) -> SymbolId {

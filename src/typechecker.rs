@@ -40,6 +40,8 @@ impl<'a> TypeChecker<'a> {
             .insert(self.bind_ctx.number_type, self.common_types.number);
         self.binding_types
             .insert(self.bind_ctx.str_type, self.common_types.string);
+        self.binding_types
+            .insert(self.bind_ctx.bool_type, self.common_types.boolean);
         check_scope(self, nodes);
     }
 
