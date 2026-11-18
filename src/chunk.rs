@@ -3,6 +3,7 @@
 pub enum Opcode {
     Return,
     Const,
+    String,
     True,
     False,
     Unit,
@@ -184,6 +185,12 @@ impl Code {
 
     pub fn write_u64_at(&mut self, i: usize, n: u64) {
         self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
+    }
+
+    pub fn write_string(&mut self, s: &str) {
+        let len = s.len() as u32;
+        self.code.extend_from_slice(&len.to_ne_bytes());
+        self.code.extend_from_slice(s.as_bytes());
     }
 
     fn write_u8(&mut self, n: u8) {

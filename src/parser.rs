@@ -616,7 +616,7 @@ fn number(p: &mut Parser) -> ExprId {
 
 fn string(p: &mut Parser) -> ExprId {
     let text = p.scanner.token_text();
-    let text = text[1..text.len() - 1].to_string();
+    let text = p.interner.intern(&text[1..text.len() - 1]);
     p.advance();
     p.ast.exprs.alloc(Expr::String(text), p.prev_span)
 }

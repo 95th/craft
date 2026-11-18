@@ -17,26 +17,26 @@ impl Heap {
         self.alloc(ObjKind::String, data)
     }
 
-    pub fn data(&self, offset: usize) -> &[u8] {
+    pub fn data(&self, obj: usize) -> &[u8] {
         let ptr = self.data.as_ptr();
-        let len = unsafe { *(ptr.add(1) as *const [u8; 4]) };
+        let len = unsafe { *(ptr.add(obj + 1) as *const [u8; 4]) };
         let len = u32::from_ne_bytes(len) as usize;
-        let index = offset + 5;
+        let index = obj + 5;
         &self.data[index..index + len]
     }
 
-    pub fn get_field(&self, offset: usize, field: usize) -> u64 {
+    pub fn get_field(&self, obj: usize, field: usize) -> u64 {
         let ptr = self.data.as_ptr();
-        debug_assert_eq!(unsafe { *ptr.add(offset) }, ObjKind::Struct as u8);
-        let field = unsafe { *(ptr.add(offset + 5).add(field * 8) as *const [u8; 8]) };
+        debug_assert_eq!(unsafe { *ptr.add(obj) }, ObjKind::Struct as u8);
+        let field = unsafe { *(ptr.add(obj + 5).add(field * 8) as *const [u8; 8]) };
         u64::from_ne_bytes(field)
     }
 
-    pub fn set_field(&mut self, offset: usize, field: usize, value: u64) {
+    pub fn set_field(&mut self, obj: usize, field: usize, value: u64) {
         let ptr = self.data.as_mut_ptr();
-        debug_assert_eq!(unsafe { *ptr.add(offset) }, ObjKind::Struct as u8);
+        debug_assert_eq!(unsafe { *ptr.add(obj) }, ObjKind::Struct as u8);
         unsafe {
-            let field = ptr.add(offset + 5).add(field * 8) as *mut [u8; 8];
+            let field = ptr.add(obj + 5).add(field * 8) as *mut [u8; 8];
             *field = value.to_ne_bytes();
         };
     }

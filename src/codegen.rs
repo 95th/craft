@@ -6,7 +6,7 @@ use crate::{
     ast::{AstNodes, BinaryOp, Expr, ExprId, Stmt, StmtId},
     bind::{SymbolId, SymbolKind},
     chunk::{Code, Opcode},
-    heap::Heap,
+    interner::{StrId, StrInterner},
     typechecker::TyContext,
     types::Ty,
 };
@@ -27,24 +27,28 @@ impl LoopCtx {
 
 pub struct Codegen<'a> {
     ast: &'a AstNodes,
+    interner: &'a StrInterner,
     ty_ctx: TyContext,
     code: Code,
     loop_ctxts: Vec<LoopCtx>,
-    functions: FxHashMap<SymbolId, usize>,
-    heap: &'a mut Heap,
+    function_table: FxHashMap<SymbolId, usize>,
     function_worklist: VecDeque<(SymbolId, usize)>,
+    string_table: FxHashMap<StrId, usize>,
+    string_worklist: Vec<(usize, StrId)>,
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ast: &'a AstNodes, heap: &'a mut Heap, ty_ctx: TyContext) -> Self {
+    pub fn new(ast: &'a AstNodes, interner: &'a StrInterner, ty_ctx: TyContext) -> Self {
         Self {
             ast,
+            interner,
             ty_ctx,
             code: Code::new(),
             loop_ctxts: Vec::new(),
-            functions: FxHashMap::default(),
-            heap,
+            function_table: FxHashMap::default(),
             function_worklist: VecDeque::new(),
+            string_table: FxHashMap::default(),
+            string_worklist: Vec::new(),
         }
     }
 
@@ -55,14 +59,24 @@ impl<'a> Codegen<'a> {
         self.code.op(Opcode::Return);
 
         while let Some((symbol, patch_offset)) = self.function_worklist.pop_front() {
-            if let Some(&function) = self.functions.get(&symbol) {
+            if let Some(&function) = self.function_table.get(&symbol) {
                 self.code.write_u64_at(patch_offset, function as u64);
             } else {
                 let function = self.code.len();
                 self.code.write_u64_at(patch_offset, function as u64);
-                self.functions.insert(symbol, function);
+                self.function_table.insert(symbol, function);
                 let function = self.ty_ctx.bind_ctx.symbols[symbol].declaration;
                 self.process_function(function);
+            }
+        }
+
+        for (patch_offset, string) in self.string_worklist {
+            if let Some(&string_offset) = self.string_table.get(&string) {
+                self.code.write_u64_at(patch_offset, string_offset as u64);
+            } else {
+                let string_offset = self.code.len();
+                self.code.write_string(self.interner.lookup(string));
+                self.code.write_u64_at(patch_offset, string_offset as u64);
             }
         }
 
@@ -109,9 +123,11 @@ impl<'a> Codegen<'a> {
             Expr::Number(n) => {
                 self.code.op_const(n.to_bits());
             }
-            Expr::String(ref s) => {
-                let obj = self.heap.alloc_string(s.as_bytes());
-                self.code.op_const(obj as u64);
+            Expr::String(s) => {
+                let offset = self.code.len() + 1;
+                self.code.op_const(0);
+                self.code.op(Opcode::String);
+                self.string_worklist.push((offset, s));
             }
             Expr::Not(expr) => {
                 self.process_expr(expr);
@@ -134,7 +150,7 @@ impl<'a> Codegen<'a> {
                         self.code.op_get_local(symbol.local_index);
                     }
                     SymbolKind::Fn => {
-                        if let Some(&function) = self.functions.get(&symbol_id) {
+                        if let Some(&function) = self.function_table.get(&symbol_id) {
                             self.code.op_const(function as u64);
                         } else {
                             let patch_offset = self.code.len() + 1;

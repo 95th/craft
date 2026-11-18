@@ -5,7 +5,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::{
     ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, diagnostics::Diagnostics,
-    heap::Heap, interner::StrInterner, parser::Parser, typechecker::TypeChecker, vm::VM,
+    interner::StrInterner, parser::Parser, typechecker::TypeChecker, vm::VM,
 };
 
 mod arena;
@@ -36,7 +36,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
+fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
     let mut parser = Parser::new(source, ast, interner, diagnostics);
@@ -48,7 +48,7 @@ fn compile(source: &str, heap: &mut Heap, diagnostics: &mut Diagnostics) -> Resu
     let checker = TypeChecker::new(ast, interner, diagnostics, bind_ctx);
     let ty_ctx = checker.check(&nodes)?;
 
-    let codegen = Codegen::new(ast, heap, ty_ctx);
+    let codegen = Codegen::new(ast, interner, ty_ctx);
     let code = codegen.generate(&nodes);
     Ok(code)
 }
@@ -66,11 +66,10 @@ fn main() {
     "#;
 
     let start = Instant::now();
-    let mut heap = Heap::new();
     let mut diagnostics = Diagnostics::new();
-    match compile(source, &mut heap, &mut diagnostics) {
+    match compile(source, &mut diagnostics) {
         Ok(code) => {
-            let mut vm = VM::new(code, heap);
+            let mut vm = VM::new(code);
             vm.run();
         }
         Err(_) => {
@@ -85,19 +84,17 @@ mod tests {
     use super::*;
 
     fn run_ok(source: &str) {
-        let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut heap, &mut diagnostics);
+        let result = compile(source, &mut diagnostics);
         diagnostics.print(source);
         let code = result.expect("ok");
-        let mut vm = VM::new(code, heap);
+        let mut vm = VM::new(code);
         vm.run();
     }
 
     fn check_err(source: &str, error: Error) {
-        let mut heap = Heap::new();
         let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut heap, &mut diagnostics);
+        let result = compile(source, &mut diagnostics);
         diagnostics.print(source);
         assert_eq!(result.unwrap_err(), error);
     }

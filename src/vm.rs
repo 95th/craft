@@ -77,14 +77,14 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(code: Code, heap: Heap) -> Self {
+    pub fn new(code: Code) -> Self {
         let code = code.into_inner();
         Self {
             stack: Vec::new(),
             frame: CallFrame::new(&code, 0, 0),
             frames: Vec::new(),
             code,
-            heap,
+            heap: Heap::new(),
         }
     }
 
@@ -94,6 +94,15 @@ impl VM {
             match instr {
                 Opcode::True => self.stack.push(TRUE),
                 Opcode::False => self.stack.push(FALSE),
+                Opcode::String => {
+                    let index = self.stack.pop().unwrap() as usize;
+                    let len = unsafe { *(self.code.as_ptr().add(index) as *const [u8; 4]) };
+                    let len = u32::from_ne_bytes(len) as usize;
+                    let index = index + 4;
+                    let data = &self.code[index..index + len];
+                    let obj = self.heap.alloc_string(data);
+                    self.stack.push(obj as u64);
+                }
                 Opcode::Not => {
                     let value = self.stack.pop().unwrap();
                     self.stack.push((value == FALSE) as u64)

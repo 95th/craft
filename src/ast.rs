@@ -31,7 +31,7 @@ pub enum Expr {
     Bool(bool),
     Number(f64),
     Int(i128),
-    String(String),
+    String(StrId),
     Not(ExprId),
     Negate(ExprId),
     Binary(ExprId, BinaryOp, ExprId),
