@@ -774,4 +774,41 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_fn_equality() {
+        let source = r#"
+            fn foo() {}
+            fn bar() {}
+
+            print(foo == foo);
+            print(foo == bar);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_obj_equality() {
+        let source = r#"
+            struct Foo {}
+            let a = Foo {};
+            let b = Foo {};
+
+            print(a == a);
+            print(a == b);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_tuple_equality() {
+        let source = r#"
+            let a = (1, 2, 3);
+            let b = (1, 2, 3);
+
+            print(a == a);
+            print(a == b);
+        "#;
+        run_ok(source);
+    }
 }
