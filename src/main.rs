@@ -37,7 +37,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-const LOWER: bool = true;
+const LOWER: bool = false;
 
 fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     let ast = &mut AstNodes::new();

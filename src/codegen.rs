@@ -359,25 +359,25 @@ impl<'a> Codegen<'a> {
                     self.process_stmt(init);
                 }
                 self.enter_loop();
-                let start = self.code.len();
+                let mut start = self.code.len();
+                if let Some(incr) = incr {
+                    let jump_offset = self.code.write_jump(Opcode::Jump);
+                    start = self.code.len();
+                    self.loop_ctxts.last_mut().unwrap().offset = start;
+                    self.process_expr(incr);
+                    self.code.pop();
+                    self.code.patch_jump(jump_offset);
+                }
                 if let Some(cond) = cond {
                     self.process_expr(cond);
                     let jump_offset = self.code.write_jump(Opcode::JumpIfFalse);
                     self.process_expr(body);
                     self.code.pop();
-                    if let Some(incr) = incr {
-                        self.process_expr(incr);
-                        self.code.pop();
-                    }
                     self.code.write_loop(start);
                     self.code.patch_jump(jump_offset);
                 } else {
                     self.process_expr(body);
                     self.code.pop();
-                    if let Some(incr) = incr {
-                        self.process_expr(incr);
-                        self.code.pop();
-                    }
                     self.code.write_loop(start);
                 }
                 self.exit_loop();
