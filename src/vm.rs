@@ -4,8 +4,59 @@ const TRUE: u64 = 1;
 const FALSE: u64 = 0;
 
 struct CallFrame {
-    ip: usize,
+    ip: *const u8,
     sp: usize,
+}
+
+impl CallFrame {
+    fn new(code: &[u8], function: usize, sp: usize) -> Self {
+        Self {
+            ip: unsafe { code.as_ptr().add(function) },
+            sp,
+        }
+    }
+
+    fn read_instr(&mut self) -> Opcode {
+        unsafe { std::mem::transmute(self.read_u8()) }
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        unsafe {
+            let x = *self.ip;
+            self.ip = self.ip.add(1);
+            x
+        }
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        unsafe {
+            let bytes = *(self.ip as *const [u8; 2]);
+            let value = u16::from_be_bytes(bytes);
+            self.ip = self.ip.add(2);
+            value
+        }
+    }
+
+    fn read_u64(&mut self) -> u64 {
+        unsafe {
+            let bytes = *(self.ip as *const [u8; 8]);
+            let value = u64::from_be_bytes(bytes);
+            self.ip = self.ip.add(8);
+            value
+        }
+    }
+
+    fn jump(&mut self, offset: usize) {
+        unsafe {
+            self.ip = self.ip.add(offset);
+        }
+    }
+
+    fn jump_back(&mut self, offset: usize) {
+        unsafe {
+            self.ip = self.ip.sub(offset);
+        }
+    }
 }
 
 pub struct VM {
@@ -17,21 +68,19 @@ pub struct VM {
 
 impl VM {
     pub fn new(code: Code) -> Self {
+        let main = code.main();
+        let code = code.into_inner();
         Self {
             stack: Vec::new(),
-            frame: CallFrame {
-                ip: code.main(),
-                sp: 0,
-            },
+            frame: CallFrame::new(&code, main, 0),
             frames: Vec::new(),
-            code: code.into_inner(),
+            code,
         }
     }
 
     pub fn run(&mut self) {
         loop {
-            let instr: Opcode = unsafe { std::mem::transmute(self.code[self.frame.ip]) };
-            self.frame.ip += 1;
+            let instr = self.frame.read_instr();
             match instr {
                 Opcode::True => self.stack.push(TRUE),
                 Opcode::False => self.stack.push(FALSE),
@@ -45,7 +94,7 @@ impl VM {
                     self.stack.push(value.to_bits());
                 }
                 Opcode::Const => {
-                    let value = self.read_u64();
+                    let value = self.frame.read_u64();
                     self.stack.push(value);
                 }
                 Opcode::Add => {
@@ -121,31 +170,25 @@ impl VM {
                     self.stack.push((value as f64).to_bits());
                 }
                 Opcode::GetLocal => {
-                    let index = self.code[self.frame.ip] as usize;
-                    self.frame.ip += 1;
+                    let index = self.frame.read_u8() as usize;
                     self.stack.push(self.stack[self.frame.sp + index]);
                 }
                 Opcode::GetLocalLong => {
-                    let bytes =
-                        unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 2]) };
-                    let index = u16::from_be_bytes(bytes) as usize;
-                    self.frame.ip += 2;
+                    let index = self.frame.read_u16() as usize;
                     self.stack.push(self.stack[self.frame.sp + index]);
                 }
                 Opcode::SetLocal => {
-                    let index = self.code[self.frame.ip] as usize;
-                    self.frame.ip += 1;
+                    let index = self.frame.read_u8() as usize;
                     let value = self.stack.pop().unwrap();
                     self.stack[self.frame.sp + index] = value;
                 }
                 Opcode::SetLocalLong => {
-                    let index = self.read_u16() as usize;
+                    let index = self.frame.read_u16() as usize;
                     let value = self.stack.pop().unwrap();
                     self.stack[self.frame.sp + index] = value;
                 }
                 Opcode::Call => {
-                    let arg_count = self.code[self.frame.ip] as usize;
-                    self.frame.ip += 1;
+                    let arg_count = self.frame.read_u8() as usize;
                     let callee = self.stack.pop().unwrap();
                     self.call(callee, arg_count);
                 }
@@ -159,19 +202,19 @@ impl VM {
                     self.stack.pop().unwrap();
                 }
                 Opcode::Jump => {
-                    let offset = self.read_u16() as usize;
-                    self.frame.ip += offset;
+                    let offset = self.frame.read_u16() as usize;
+                    self.frame.jump(offset);
                 }
                 Opcode::JumpIfFalse => {
                     let value = self.stack.pop().unwrap();
-                    let offset = self.read_u16() as usize;
+                    let offset = self.frame.read_u16() as usize;
                     if value == FALSE {
-                        self.frame.ip += offset;
+                        self.frame.jump(offset);
                     }
                 }
                 Opcode::Loop => {
-                    let offset = self.read_u16() as usize;
-                    self.frame.ip -= offset;
+                    let offset = self.frame.read_u16() as usize;
+                    self.frame.jump_back(offset);
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
@@ -190,24 +233,7 @@ impl VM {
     fn call(&mut self, function: u64, arg_count: usize) {
         self.frames.push(std::mem::replace(
             &mut self.frame,
-            CallFrame {
-                ip: function as usize,
-                sp: self.stack.len() - arg_count,
-            },
+            CallFrame::new(&self.code, function as usize, self.stack.len() - arg_count),
         ))
-    }
-
-    fn read_u16(&mut self) -> u16 {
-        let bytes = unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 2]) };
-        let value = u16::from_be_bytes(bytes);
-        self.frame.ip += 2;
-        value
-    }
-
-    fn read_u64(&mut self) -> u64 {
-        let bytes = unsafe { *(self.code.as_ptr().add(self.frame.ip) as *const [u8; 8]) };
-        let value = u64::from_be_bytes(bytes);
-        self.frame.ip += 8;
-        value
     }
 }
