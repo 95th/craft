@@ -134,7 +134,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
                 .map(|t| check_type(c, t))
                 .unwrap_or(c.common_types.unit);
             let fn_ty = c.types.alloc(Ty::Fn(param_tys, return_ty));
-            let fn_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let fn_symbol = c.ast.stmts.binding(node);
             c.binding_types.insert(fn_symbol, fn_ty);
         }
         Stmt::Struct(_, ref fields) => {
@@ -144,7 +144,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
                 let ty = check_type(c, *ty);
                 properties.insert(name, ty);
             }
-            let struct_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let struct_symbol = c.ast.stmts.binding(node);
             let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
             c.binding_types.insert(struct_symbol, struct_ty);
             c.struct_properties.insert(struct_symbol, properties);
@@ -161,12 +161,12 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 let ty = check_type(c, ty);
                 c.unify(ty, init_ty, c.ast.exprs.span(init));
             }
-            let symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let symbol = c.ast.stmts.binding(node);
             c.binding_types.insert(symbol, init_ty);
             c.common_types.unit
         }
         Stmt::Fn(_, _, _, body) => {
-            let fn_symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let fn_symbol = c.ast.stmts.binding(node);
             let fn_ty = c.binding_types[&fn_symbol];
             let Ty::Fn(_, return_ty) = c.types[fn_ty] else {
                 unreachable!();
@@ -180,7 +180,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         }
         Stmt::Param(_, ty) => {
             let ty = check_type(c, ty);
-            let symbol = c.bind_ctx.stmt_bindings[node].unwrap();
+            let symbol = c.ast.stmts.binding(node);
             c.binding_types.insert(symbol, ty);
             ty
         }
@@ -247,7 +247,7 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
             c.common_types.number
         }
         Expr::Variable(..) => {
-            let symbol = c.bind_ctx.expr_bindings[node].unwrap();
+            let symbol = c.ast.exprs.binding(node);
             c.binding_types[&symbol]
         }
         Expr::If(cond, then_clause, else_clause) => {
@@ -337,7 +337,7 @@ fn check_expr(c: &mut TypeChecker, node: ExprId) -> TyId {
             types[index as usize]
         }
         Expr::Struct(_, ref fields) => {
-            let symbol = c.bind_ctx.expr_bindings[node].unwrap();
+            let symbol = c.ast.exprs.binding(node);
             let declared = c.struct_properties[&symbol].clone();
             for (name, &value) in fields {
                 let name = c.bind_ctx.interner.intern(name);
@@ -409,7 +409,7 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         }
         Type::Unit => c.common_types.unit,
         Type::Named(..) => {
-            let symbol = c.bind_ctx.type_bindings[node].unwrap();
+            let symbol = c.ast.types.binding(node);
             c.binding_types[&symbol]
         }
         Type::Tuple(ref items) => {

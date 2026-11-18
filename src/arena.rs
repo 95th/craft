@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    cell::Cell,
     hash::Hash,
     marker::PhantomData,
     ops::{Index, IndexMut},
@@ -98,22 +99,25 @@ impl<T> IndexMut<Id<T>> for Arena<T> {
 pub type AstId<T> = Id<(T, Span)>;
 
 pub struct AstArena<T> {
-    buf: Vec<T>,
+    nodes: Vec<T>,
     spans: Vec<Span>,
+    bindings: Vec<Cell<SymbolId>>,
 }
 
 impl<T> AstArena<T> {
     pub fn new() -> Self {
         Self {
-            buf: Vec::new(),
+            nodes: Vec::new(),
             spans: Vec::new(),
+            bindings: Vec::new(),
         }
     }
 
     pub fn alloc(&mut self, value: T, span: Span) -> AstId<T> {
-        let idx = AstId::new(self.buf.len());
-        self.buf.push(value);
+        let idx = AstId::new(self.nodes.len());
+        self.nodes.push(value);
         self.spans.push(span);
+        self.bindings.push(Cell::new(SymbolId::MAX));
         idx
     }
 
@@ -121,20 +125,23 @@ impl<T> AstArena<T> {
         self.spans[index.idx as usize]
     }
 
-    pub fn new_bindings(&self) -> Bindings<T> {
-        Bindings {
-            bindings: vec![None; self.len()],
-            ph: PhantomData,
-        }
+    pub fn bind(&self, index: AstId<T>, symbol: SymbolId) {
+        let prev = self.bindings[index.idx as usize].replace(symbol);
+        debug_assert_eq!(prev, SymbolId::MAX);
+    }
+
+    pub fn binding(&self, index: AstId<T>) -> SymbolId {
+        self.bindings[index.idx as usize].get()
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.nodes.len()
     }
 
     pub fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len);
+        self.nodes.truncate(len);
         self.spans.truncate(len);
+        self.bindings.truncate(len);
     }
 }
 
@@ -142,32 +149,12 @@ impl<T> Index<AstId<T>> for AstArena<T> {
     type Output = T;
 
     fn index(&self, index: AstId<T>) -> &Self::Output {
-        &self.buf[index.idx as usize]
+        &self.nodes[index.idx as usize]
     }
 }
 
 impl<T> IndexMut<AstId<T>> for AstArena<T> {
     fn index_mut(&mut self, index: AstId<T>) -> &mut Self::Output {
-        &mut self.buf[index.idx as usize]
-    }
-}
-
-pub struct Bindings<T> {
-    bindings: Vec<Option<SymbolId>>,
-    ph: PhantomData<T>,
-}
-
-impl<T> Bindings<T> {
-    pub fn bind(&mut self, index: AstId<T>, symbol: SymbolId) {
-        let prev = self.bindings[index.idx as usize].replace(symbol);
-        debug_assert!(prev.is_none());
-    }
-}
-
-impl<T> Index<AstId<T>> for Bindings<T> {
-    type Output = Option<SymbolId>;
-
-    fn index(&self, index: AstId<T>) -> &Self::Output {
-        &self.bindings[index.idx as usize]
+        &mut self.nodes[index.idx as usize]
     }
 }

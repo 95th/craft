@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     Error,
-    arena::{Arena, Bindings, Id},
+    arena::{Arena, Id},
     ast::{AstNodes, Expr, ExprId, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
@@ -25,9 +25,6 @@ pub struct BindCtx {
     pub scopes: Arena<Scope>,
     pub symbols: Arena<Symbol>,
     pub interner: StrInterner,
-    pub expr_bindings: Bindings<Expr>,
-    pub stmt_bindings: Bindings<Stmt>,
-    pub type_bindings: Bindings<Type>,
     pub number_type: SymbolId,
     pub str_type: SymbolId,
     pub bool_type: SymbolId,
@@ -42,9 +39,6 @@ pub struct Binder<'a> {
     value_scope: ScopeId,
     symbols: Arena<Symbol>,
     interner: StrInterner,
-    expr_bindings: Bindings<Expr>,
-    stmt_bindings: Bindings<Stmt>,
-    type_bindings: Bindings<Type>,
     has_error: bool,
     number_type: SymbolId,
     str_type: SymbolId,
@@ -64,9 +58,6 @@ impl<'a> Binder<'a> {
             value_scope: ScopeId::MAX,
             symbols: Arena::new(),
             interner: StrInterner::new(),
-            expr_bindings: ast.exprs.new_bindings(),
-            stmt_bindings: ast.stmts.new_bindings(),
-            type_bindings: ast.types.new_bindings(),
             has_error: false,
             number_type: SymbolId::MAX,
             str_type: SymbolId::MAX,
@@ -91,9 +82,6 @@ impl<'a> Binder<'a> {
             scopes: self.scopes,
             symbols: self.symbols,
             interner: self.interner,
-            expr_bindings: self.expr_bindings,
-            stmt_bindings: self.stmt_bindings,
-            type_bindings: self.type_bindings,
             number_type: self.number_type,
             str_type: self.str_type,
             bool_type: self.bool_type,
@@ -151,7 +139,7 @@ impl<'a> Binder<'a> {
         let symbol = self.symbols.alloc(Symbol { name });
         self.scopes[scope].symbols.insert(name, symbol);
         if declaration != StmtId::MAX {
-            self.stmt_bindings.bind(declaration, symbol);
+            self.ast.stmts.bind(declaration, symbol);
         }
         symbol
     }
@@ -282,7 +270,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::Variable(ref name) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_value(name_id) {
-                b.expr_bindings.bind(node, symbol);
+                b.ast.exprs.bind(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.exprs.span(node));
@@ -348,7 +336,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
         Expr::Struct(ref name, ref fields) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_type(name_id) {
-                b.expr_bindings.bind(node, symbol);
+                b.ast.exprs.bind(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.exprs.span(node));
@@ -384,7 +372,7 @@ fn bind_ty(b: &mut Binder, node: TypeId) {
         Type::Named(ref name) => {
             let name_id = b.interner.intern(name);
             if let Some(symbol) = b.lookup_type(name_id) {
-                b.type_bindings.bind(node, symbol);
+                b.ast.types.bind(node, symbol);
             } else {
                 b.diagnostics
                     .push("not found in this scope.", b.ast.types.span(node));
