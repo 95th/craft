@@ -102,7 +102,7 @@ fn main() {
 mod tests {
     use super::*;
 
-    const LOWER: bool = true;
+    const LOWER: bool = false;
 
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
@@ -253,6 +253,28 @@ mod tests {
             };
 
             print(foo.b);
+            print(foo.a);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_struct_multiple_fields_assign_in_different_order() {
+        let source = r#"
+            struct Foo {
+                a: u64,
+                b: string,
+                c: bool
+            }
+
+            let foo = Foo {
+                c: true,
+                a: 10,
+                b: "hello world"
+            };
+
+            print(foo.b);
+            print(foo.c);
             print(foo.a);
         "#;
         run_ok(source);

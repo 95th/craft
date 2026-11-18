@@ -415,8 +415,10 @@ impl<'a> Codegen<'a> {
                 self.code.op_get_struct_property(index);
             }
             Expr::Struct(ref s) => {
-                for &expr in s.fields.values() {
-                    self.process_expr(expr);
+                let symbol = self.ast.exprs.value_binding(expr);
+                let declared = self.tcx.struct_properties[&symbol].clone();
+                for name in declared.keys() {
+                    self.process_expr(s.fields[name]);
                 }
                 self.code.op_struct(s.fields.len() as u16);
             }
