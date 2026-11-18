@@ -1,10 +1,8 @@
-use core::fmt;
-
+use ena::unify::InPlaceUnificationTable;
 use rustc_hash::FxHashMap;
 
 use crate::{
     Error, FxIndexMap,
-    arena::Arena,
     ast::{AstNodes, BinaryOp, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     bind::{BindCtx, SymbolId},
     diagnostics::Diagnostics,
@@ -14,7 +12,7 @@ use crate::{
 
 pub struct TyContext {
     pub bind_ctx: BindCtx,
-    pub types: Arena<Ty>,
+    pub types: InPlaceUnificationTable<TyId>,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
 }
@@ -23,7 +21,7 @@ pub struct TypeChecker<'a> {
     ast: &'a AstNodes,
     diagnostics: &'a mut Diagnostics,
     bind_ctx: BindCtx,
-    types: Arena<Ty>,
+    types: InPlaceUnificationTable<TyId>,
     common_types: CommonTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
@@ -37,7 +35,7 @@ pub struct TypeChecker<'a> {
 
 impl<'a> TypeChecker<'a> {
     pub fn new(ast: &'a AstNodes, diagnostics: &'a mut Diagnostics, bind_ctx: BindCtx) -> Self {
-        let mut types = Arena::new();
+        let mut types = InPlaceUnificationTable::new();
         let common_types = CommonTypes::new(&mut types);
         Self {
             ast,
@@ -66,10 +64,10 @@ impl<'a> TypeChecker<'a> {
 
         let print_arg_ty = self
             .types
-            .alloc(Ty::TypeParam(self.bind_ctx.print_function));
+            .new_key(Ty::TypeParam(self.bind_ctx.print_function));
         let print_fn_ty = self
             .types
-            .alloc(Ty::Fn(vec![print_arg_ty], self.common_types.unit));
+            .new_key(Ty::Fn(vec![print_arg_ty], self.common_types.unit));
         self.value_bindings
             .insert(self.bind_ctx.print_function, print_fn_ty);
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
@@ -88,57 +86,46 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
-        if !self.try_unify(lhs, rhs) {
-            self.error(
-                format!(
-                    "expected `{}`, found `{}`",
-                    lhs.display(self),
-                    rhs.display(self)
-                ),
-                span,
-            );
+        if self.can_unify(lhs, rhs) {
+            self.types.union(lhs, rhs);
+        } else {
+            let lhs = lhs.display(self);
+            let rhs = rhs.display(self);
+            self.error(format!("expected `{lhs}`, found `{rhs}`"), span);
         }
     }
 
-    fn try_unify(&mut self, lhs: TyId, rhs: TyId) -> bool {
-        if lhs == rhs || self.types[lhs] == self.types[rhs] {
+    fn can_unify(&mut self, lhs: TyId, rhs: TyId) -> bool {
+        if self.types.unioned(lhs, rhs) {
             return true;
         }
-        match (&self.types[lhs], &self.types[rhs]) {
+        match (self.types.probe_value(lhs), self.types.probe_value(rhs)) {
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
                 let mut result = true;
-                for (a, b) in a.clone().iter().zip(b.clone().iter()) {
-                    if !self.try_unify(*a, *b) {
+                for (a, b) in a.into_iter().zip(b) {
+                    if !self.can_unify(a, b) {
                         result = false;
                     }
                 }
                 result
             }
-            (&Ty::Fn(.., ref a_params, a_ret), &Ty::Fn(.., ref b_params, b_ret)) => {
+            (Ty::Fn(.., a_params, a_ret), Ty::Fn(.., b_params, b_ret)) => {
                 if a_params.len() != b_params.len() {
                     return false;
                 }
                 let mut result = true;
-                for (a, b) in a_params.clone().iter().zip(b_params.clone().iter()) {
-                    if !self.try_unify(*a, *b) {
+                for (a, b) in a_params.into_iter().zip(b_params) {
+                    if !self.can_unify(a, b) {
                         result = false;
                     }
                 }
-                if !self.try_unify(a_ret, b_ret) {
+                if !self.can_unify(a_ret, b_ret) {
                     result = false;
                 }
                 result
             }
-            (&Ty::Array(a), &Ty::Array(b)) => self.try_unify(a, b),
-            (Ty::Var, Ty::Var) => false,
-            (Ty::Var, other) => {
-                self.types[lhs] = other.clone();
-                true
-            }
-            (other, Ty::Var) => {
-                self.types[rhs] = other.clone();
-                true
-            }
+            (Ty::Array(a), Ty::Array(b)) => self.can_unify(a, b),
+            (Ty::Unknown, _) | (_, Ty::Unknown) => true,
             _ => false,
         }
     }
@@ -165,7 +152,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
             let type_params: Vec<TyId> = type_params.iter().map(|p| check_stmt(c, *p)).collect();
             let params = params.iter().map(|p| check_stmt(c, *p)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
-            let fn_ty = c.types.alloc(Ty::Fn(params, ret));
+            let fn_ty = c.types.new_key(Ty::Fn(params, ret));
             let fn_symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(fn_symbol, fn_ty);
             if !type_params.is_empty() {
@@ -174,12 +161,12 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
         }
         Stmt::Struct(..) => {
             let struct_symbol = c.ast.stmts.type_binding(node);
-            let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
+            let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
             c.type_bindings.insert(struct_symbol, struct_ty);
         }
         Stmt::TupleStruct(..) => {
             let struct_symbol = c.ast.stmts.type_binding(node);
-            let struct_ty = c.types.alloc(Ty::Named(struct_symbol));
+            let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
             c.type_bindings.insert(struct_symbol, struct_ty);
         }
         _ => {}
@@ -201,7 +188,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         Stmt::Fn(.., body) => {
             let fn_symbol = c.ast.stmts.value_binding(node);
             let fn_ty = c.value_bindings[&fn_symbol];
-            let Ty::Fn(.., return_ty) = c.types[fn_ty] else {
+            let Ty::Fn(.., return_ty) = c.types.probe_value(fn_ty) else {
                 unreachable!();
             };
 
@@ -243,14 +230,14 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 .insert(type_symbol, arg_tys.clone());
 
             let struct_ty = c.type_bindings[&type_symbol];
-            let fn_ty = c.types.alloc(Ty::Fn(arg_tys, struct_ty));
+            let fn_ty = c.types.new_key(Ty::Fn(arg_tys, struct_ty));
             let value_symbol = c.ast.stmts.value_binding(node);
             c.value_bindings.insert(value_symbol, fn_ty);
             c.common_types.unit
         }
         Stmt::TypeParam(..) => {
             let symbol = c.ast.stmts.type_binding(node);
-            let ty = c.types.alloc(Ty::TypeParam(symbol));
+            let ty = c.types.new_key(Ty::TypeParam(symbol));
             c.type_bindings.insert(symbol, ty);
             ty
         }
@@ -357,20 +344,20 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             check_expr(c, body);
             c.common_types.unit
         }
-        Expr::Break => c.types.alloc(Ty::Var),
-        Expr::Continue => c.types.alloc(Ty::Var),
+        Expr::Break => c.types.new_key(Ty::Unknown),
+        Expr::Continue => c.types.new_key(Ty::Unknown),
         Expr::Call(callee, ref args) => {
             let callee_ty = check_expr(c, callee);
-            let Ty::Fn(params, ret) = c.types[callee_ty].clone() else {
+            let Ty::Fn(params, ret) = c.types.probe_value(callee_ty) else {
                 c.error("call expression requires function", c.ast.exprs.span(node));
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             };
             if args.len() != params.len() {
                 c.error(
                     format!("expected {} arguments, found {}", params.len(), args.len()),
                     c.ast.exprs.span(node),
                 );
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             }
             for (&arg, param) in args.iter().zip(params) {
                 let arg_ty = check_expr(c, arg);
@@ -389,33 +376,33 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 c.containing_return_ty.unwrap(),
                 c.ast.exprs.span(node),
             );
-            c.types.alloc(Ty::Var)
+            c.types.new_key(Ty::Unknown)
         }
         Expr::Unit => c.common_types.unit,
         Expr::Tuple(ref types) => {
             let types = types.iter().map(|t| check_expr(c, *t)).collect();
-            c.types.alloc(Ty::Tuple(types))
+            c.types.new_key(Ty::Tuple(types))
         }
         Expr::TupleField(expr, index) => {
             let expr_ty = check_expr(c, expr);
-            let types = match c.types[expr_ty] {
-                Ty::Tuple(ref types) => types,
+            let types = match c.types.probe_value(expr_ty) {
+                Ty::Tuple(types) => types,
                 Ty::Named(symbol) => {
                     if let Some(fields) = c.tuple_struct_properties.get(&symbol) {
-                        fields
+                        fields.clone()
                     } else {
                         c.error("expected a tuple", c.ast.exprs.span(expr));
-                        return c.types.alloc(Ty::Var);
+                        return c.types.new_key(Ty::Unknown);
                     }
                 }
                 _ => {
                     c.error("expected a tuple", c.ast.exprs.span(expr));
-                    return c.types.alloc(Ty::Var);
+                    return c.types.new_key(Ty::Unknown);
                 }
             };
             if index as usize >= types.len() {
                 c.error("unknown field", c.ast.exprs.span(node));
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             }
             types[index as usize]
         }
@@ -451,19 +438,19 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::StructField(expr, ref name) => {
             let expr_ty = check_expr(c, expr);
-            let Ty::Named(symbol) = c.types[expr_ty] else {
+            let Ty::Named(symbol) = c.types.probe_value(expr_ty) else {
                 c.error("expected a struct instance", c.ast.exprs.span(expr));
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             };
             let Some(properties) = c.struct_properties.get(&symbol) else {
                 c.error("expected a struct instance", c.ast.exprs.span(expr));
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             };
 
             let name_id = c.bind_ctx.interner.intern(name);
             let Some(&ty) = properties.get(&name_id) else {
                 c.error("unknown field", c.ast.exprs.span(expr));
-                return c.types.alloc(Ty::Var);
+                return c.types.new_key(Ty::Unknown);
             };
             ty
         }
@@ -481,29 +468,29 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             c.common_types.unit
         }
         Expr::Array(ref elements) => {
-            let element_ty = c.types.alloc(Ty::Var);
+            let element_ty = c.types.new_key(Ty::Unknown);
             for &expr in elements {
                 let ty = check_expr(c, expr);
                 c.unify(element_ty, ty, c.ast.exprs.span(expr));
             }
-            c.types.alloc(Ty::Array(element_ty))
+            c.types.new_key(Ty::Array(element_ty))
         }
         Expr::ArrayRepeat(expr, count) => {
             let element_ty = check_expr(c, expr);
             let count_ty = check_expr(c, count);
             c.unify(c.common_types.number, count_ty, c.ast.exprs.span(expr));
-            c.types.alloc(Ty::Array(element_ty))
+            c.types.new_key(Ty::Array(element_ty))
         }
         Expr::ArrayIndex(expr, index) => {
             let array_ty = check_expr(c, expr);
             let index_ty = check_expr(c, index);
             c.unify(c.common_types.number, index_ty, c.ast.exprs.span(expr));
 
-            match c.types[array_ty] {
+            match c.types.probe_value(array_ty) {
                 Ty::Array(element_ty) => element_ty,
                 _ => {
                     c.error("expect array", c.ast.exprs.span(expr));
-                    c.types.alloc(Ty::Var)
+                    c.types.new_key(Ty::Unknown)
                 }
             }
         }
@@ -515,7 +502,7 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         Type::FnType(ref params, ret) => {
             let params = params.iter().map(|t| check_type(c, *t)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.common_types.unit);
-            c.types.alloc(Ty::Fn(params, ret))
+            c.types.new_key(Ty::Fn(params, ret))
         }
         Type::Unit => c.common_types.unit,
         Type::Named(..) => {
@@ -524,11 +511,11 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         }
         Type::Tuple(ref items) => {
             let types = items.iter().map(|t| check_type(c, *t)).collect();
-            c.types.alloc(Ty::Tuple(types))
+            c.types.new_key(Ty::Tuple(types))
         }
         Type::Array(element) => {
             let ty = check_type(c, element);
-            c.types.alloc(Ty::Array(ty))
+            c.types.new_key(Ty::Array(ty))
         }
     }
 }
@@ -537,7 +524,7 @@ fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
     if let Some(type_params) = c.type_params.get(&ty) {
         let mut subst = FxHashMap::default();
         for t in type_params {
-            subst.insert(*t, c.types.alloc(Ty::Var));
+            subst.insert(*t, c.types.new_key(Ty::Unknown));
         }
         substitute(c, ty, &subst)
     } else {
@@ -546,21 +533,21 @@ fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
 }
 
 fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> TyId {
-    match c.types[ty].clone() {
+    match c.types.probe_value(ty) {
         Ty::Fn(params, ret) => {
             let params = params
                 .into_iter()
                 .map(|p| substitute(c, p, subst))
                 .collect();
             let ret = substitute(c, ret, subst);
-            c.types.alloc(Ty::Fn(params, ret))
+            c.types.new_key(Ty::Fn(params, ret))
         }
         Ty::Tuple(params) => {
             let params = params
                 .into_iter()
                 .map(|p| substitute(c, p, subst))
                 .collect();
-            c.types.alloc(Ty::Tuple(params))
+            c.types.new_key(Ty::Tuple(params))
         }
         Ty::TypeParam(_) => subst.get(&ty).copied().unwrap_or(ty),
         _ => ty,
@@ -568,55 +555,58 @@ fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> T
 }
 
 impl TyId {
-    pub fn display<'a>(self, c: &'a TypeChecker) -> impl fmt::Display {
-        DisplayType(self, c)
+    pub fn display<'a>(self, c: &'a mut TypeChecker) -> String {
+        let mut buf = String::new();
+        print_type(self, c, &mut buf);
+        buf
     }
 }
 
-struct DisplayType<'a>(TyId, &'a TypeChecker<'a>);
-
-impl fmt::Display for DisplayType<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self(ty, c) = *self;
-        match c.types[ty] {
-            Ty::Named(symbol) | Ty::TypeParam(symbol) => write!(
-                f,
-                "{}",
-                c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name)
-            ),
-            Ty::Fn(ref params, ret) => {
-                write!(f, "fn(")?;
-                if let Some(type_params) = c.type_params.get(&ty) {
-                    write!(f, "<")?;
-                    let mut sep = "";
-                    for p in type_params {
-                        write!(f, "{sep}{}", p.display(c))?;
-                        sep = ", ";
-                    }
-                    write!(f, ">")?;
-                }
+fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
+    match c.types.probe_value(ty) {
+        Ty::Named(symbol) | Ty::TypeParam(symbol) => {
+            buf.push_str(c.bind_ctx.interner.lookup(c.bind_ctx.symbols[symbol].name))
+        }
+        Ty::Fn(params, ret) => {
+            buf.push_str("fn(");
+            if let Some(type_params) = c.type_params.get(&ty).cloned() {
+                buf.push_str("<");
                 let mut sep = "";
-                for p in params {
-                    write!(f, "{sep}{}", p.display(c))?;
+                for p in type_params {
+                    buf.push_str(sep);
+                    print_type(p, c, buf);
                     sep = ", ";
                 }
-                write!(f, ") -> {}", ret.display(c))
+                buf.push_str(">");
             }
-            Ty::Unit => write!(f, "()"),
-            Ty::Bool => write!(f, "bool"),
-            Ty::Number => write!(f, "number"),
-            Ty::String => write!(f, "string"),
-            Ty::Var => write!(f, "<cannot infer>"),
-            Ty::Tuple(ref types) => {
-                write!(f, "(")?;
-                let mut sep = "";
-                for t in types {
-                    write!(f, "{sep}{}", t.display(c))?;
-                    sep = ", ";
-                }
-                write!(f, ")")
+            let mut sep = "";
+            for p in params {
+                buf.push_str(sep);
+                print_type(p, c, buf);
+                sep = ", ";
             }
-            Ty::Array(element) => write!(f, "[{}]", element.display(c)),
+            buf.push_str(") -> ");
+            print_type(ret, c, buf);
+        }
+        Ty::Unit => buf.push_str("()"),
+        Ty::Bool => buf.push_str("bool"),
+        Ty::Number => buf.push_str("number"),
+        Ty::String => buf.push_str("string"),
+        Ty::Unknown => buf.push_str("<cannot infer>"),
+        Ty::Tuple(types) => {
+            buf.push_str("(");
+            let mut sep = "";
+            for t in types {
+                buf.push_str(sep);
+                print_type(t, c, buf);
+                sep = ", ";
+            }
+            buf.push_str(")")
+        }
+        Ty::Array(element) => {
+            buf.push_str("[");
+            print_type(element, c, buf);
+            buf.push_str("]");
         }
     }
 }

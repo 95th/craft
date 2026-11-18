@@ -156,7 +156,7 @@ impl<'a> Codegen<'a> {
                 }
                 Expr::StructField(expr, ref name) => {
                     let ty = self.ty_ctx.expr_types[&expr];
-                    let Ty::Named(symbol) = self.ty_ctx.types[ty] else {
+                    let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                         unreachable!();
                     };
                     let properties = &self.ty_ctx.struct_properties[&symbol];
@@ -223,7 +223,7 @@ impl<'a> Codegen<'a> {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.ty_ctx.bind_ctx.print_function {
                     let ty = self.ty_ctx.expr_types[&args[0]];
-                    match self.ty_ctx.types[ty] {
+                    match self.ty_ctx.types.probe_value(ty) {
                         Ty::Number => self.code.write(Opcode::PrintNumber),
                         Ty::String => self.code.write(Opcode::PrintString),
                         Ty::Bool => self.code.write(Opcode::PrintBool),
@@ -347,7 +347,7 @@ impl<'a> Codegen<'a> {
             }
             Expr::StructField(expr, ref name) => {
                 let ty = self.ty_ctx.expr_types[&expr];
-                let Ty::Named(symbol) = self.ty_ctx.types[ty] else {
+                let Ty::Named(symbol) = self.ty_ctx.types.probe_value(ty) else {
                     unreachable!();
                 };
                 let properties = &self.ty_ctx.struct_properties[&symbol];
