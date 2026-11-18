@@ -28,28 +28,23 @@ fn main() {
     //     1 + foo(x);
     // "#;
     let source = r#"
-        fn fib(n: number) -> number {
-            if n < 2 {
-                return n;
-            }
-            fib(n - 1) + fib(n - 2)
+        fn foo(x: number) {
+            x
         }
-
-        fib(10);
     "#;
 
     let mut arena = NodeArena::new();
     let mut parser = Parser::new(source, &mut arena);
     let nodes = parser.parse().unwrap();
 
-    for node in nodes.iter() {
-        println!("{}", node.display(&arena));
-    }
-    arena.dump(source);
+    // for node in nodes.iter() {
+    //     println!("{}", node.display(&arena));
+    // }
+    // arena.dump(source);
 
     let binder = Binder::new(&arena);
     let bind_ctx = binder.bind(&nodes).unwrap();
 
-    let mut checker = TypeChecker::new(&arena, bind_ctx);
+    let mut checker = TypeChecker::new(source, &arena, bind_ctx);
     checker.check(&nodes);
 }
