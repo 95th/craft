@@ -20,6 +20,8 @@ mod heap;
 mod interner;
 mod ir;
 mod parser;
+mod register_chunk;
+mod register_vm;
 mod scanner;
 mod typechecker;
 mod types;
