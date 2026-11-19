@@ -146,6 +146,15 @@ mod tests {
     #[test]
     fn test_simple() {
         let source = r#"
+            let x = 1 + 2 / 3;
+            print(x);
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_simple_big() {
+        let source = r#"
             let x = 1 + 2 / 3 - 4 * 5 * (1 - 2);
             x = 12;
             let y = if x == 12 || x == 2 && x > 1 { x + 1 } else if x > 12 { x + 2 } else { x + 3 };

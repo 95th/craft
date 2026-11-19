@@ -129,14 +129,8 @@ impl<'a> Codegen2<'a> {
                     self.code.op_set_struct_index();
                 }
                 ir::Projection::None => {
-                    if let ir::RValue::Call { .. } = value {
-                        self.code.op_unit();
-                        self.gen_rvalue(value);
-                        self.code.op_set_local(place.reg);
-                    } else {
-                        self.gen_rvalue(value);
-                        self.code.op_set_local(place.reg);
-                    }
+                    self.gen_rvalue(value);
+                    self.code.op_set_local(place.reg);
                 }
             },
             ir::Statement::StorageLive {
@@ -189,6 +183,7 @@ impl<'a> Codegen2<'a> {
                 self.code.op_repeat_struct();
             }
             ir::RValue::Call { callee, ref args } => {
+                self.code.op_unit();
                 for arg in args {
                     self.gen_operand(*arg);
                 }
