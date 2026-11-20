@@ -139,16 +139,68 @@ impl<'a> Lowering<'a> {
             ast::Expr::String(s) => {
                 return self.constant_operand(place, Constant::String(s));
             }
+            ast::Expr::Binary {
+                lhs,
+                op: ast::BinaryOp::Or,
+                rhs,
+            } => {
+                let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
+                self.lower_expr(lhs, Some(place));
+
+                let merge_block = self.create_block();
+                let false_block = self.create_block();
+                self.set_terminator(Terminator::Branch {
+                    cond: Operand::Place(place),
+                    then_block: merge_block,
+                    else_block: false_block,
+                });
+                self.add_edge(self.current_block, merge_block);
+                self.add_edge(self.current_block, false_block);
+
+                self.current_block = false_block;
+                self.lower_expr(rhs, Some(place));
+                self.set_terminator(Terminator::Jump {
+                    target: merge_block,
+                });
+                self.add_edge(self.current_block, merge_block);
+
+                self.current_block = merge_block;
+                return Operand::Place(place);
+            }
+            ast::Expr::Binary {
+                lhs,
+                op: ast::BinaryOp::And,
+                rhs,
+            } => {
+                let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
+                self.lower_expr(lhs, Some(place));
+
+                let merge_block = self.create_block();
+                let true_block = self.create_block();
+                self.set_terminator(Terminator::Branch {
+                    cond: Operand::Place(place),
+                    then_block: true_block,
+                    else_block: merge_block,
+                });
+                self.add_edge(self.current_block, true_block);
+                self.add_edge(self.current_block, merge_block);
+
+                self.current_block = true_block;
+                self.lower_expr(rhs, Some(place));
+                self.set_terminator(Terminator::Jump {
+                    target: merge_block,
+                });
+                self.add_edge(self.current_block, merge_block);
+
+                self.current_block = merge_block;
+                return Operand::Place(place);
+            }
             ast::Expr::Binary { lhs, op, rhs } => {
                 let lhs_ty = self.tcx.expr_types[&lhs];
+                let op = BinaryOp::from_ast(op, self.tcx.types.probe_value(lhs_ty));
                 let lhs = self.lower_expr(lhs, None);
                 let rhs = self.lower_expr(rhs, None);
-                RValue::Binary {
-                    op,
-                    lhs,
-                    rhs,
-                    ty: lhs_ty,
-                }
+                RValue::Binary { op, lhs, rhs }
             }
             ast::Expr::Not(e) => {
                 let operand = self.lower_expr(e, None);
@@ -156,7 +208,11 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Negate(e) => {
                 let operand = self.lower_expr(e, None);
-                RValue::Neg(operand, ty)
+                match self.tcx.types.probe_value(ty) {
+                    Ty::F64 => RValue::F64Neg(operand),
+                    Ty::I64 => RValue::I64Neg(operand),
+                    _ => unreachable!(),
+                }
             }
             ast::Expr::Call { callee, ref args } => {
                 let symbol = self.ast.exprs.value_binding(callee);
@@ -575,13 +631,13 @@ pub enum Terminator {
 pub enum RValue {
     Use(Operand),
     Binary {
-        op: ast::BinaryOp,
+        op: BinaryOp,
         lhs: Operand,
         rhs: Operand,
-        ty: TyId,
     },
     Not(Operand),
-    Neg(Operand, TyId),
+    F64Neg(Operand),
+    I64Neg(Operand),
     Struct {
         fields: Vec<Operand>,
     },
@@ -630,6 +686,100 @@ impl Place {
         Self {
             reg,
             projection: Projection::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    F64Add,
+    F64Sub,
+    F64Mul,
+    F64Div,
+    F64Greater,
+    F64GreaterEqual,
+    F64Less,
+    F64LessEqual,
+    F64Equal,
+    F64NotEqual,
+
+    I64Add,
+    I64Sub,
+    I64Mul,
+    I64Div,
+    I64Greater,
+    I64GreaterEqual,
+    I64Less,
+    I64LessEqual,
+    I64Or,
+    I64And,
+
+    U64Add,
+    U64Sub,
+    U64Mul,
+    U64Div,
+    U64Greater,
+    U64GreaterEqual,
+    U64Less,
+    U64LessEqual,
+    U64Or,
+    U64And,
+
+    Equal,
+    NotEqual,
+}
+
+impl BinaryOp {
+    fn from_ast(op: ast::BinaryOp, ty: Ty) -> Self {
+        match ty {
+            Ty::F64 => match op {
+                ast::BinaryOp::Add => Self::F64Add,
+                ast::BinaryOp::Sub => Self::F64Sub,
+                ast::BinaryOp::Mul => Self::F64Mul,
+                ast::BinaryOp::Div => Self::F64Div,
+                ast::BinaryOp::Greater => Self::F64Greater,
+                ast::BinaryOp::GreaterEqual => Self::F64GreaterEqual,
+                ast::BinaryOp::Less => Self::F64Less,
+                ast::BinaryOp::LessEqual => Self::F64LessEqual,
+                ast::BinaryOp::Equal => Self::F64Equal,
+                ast::BinaryOp::NotEqual => Self::F64NotEqual,
+                _ => unreachable!(),
+            },
+            Ty::I64 => match op {
+                ast::BinaryOp::Add => Self::I64Add,
+                ast::BinaryOp::Sub => Self::I64Sub,
+                ast::BinaryOp::Mul => Self::I64Mul,
+                ast::BinaryOp::Div => Self::I64Div,
+                ast::BinaryOp::Greater => Self::I64Greater,
+                ast::BinaryOp::GreaterEqual => Self::I64GreaterEqual,
+                ast::BinaryOp::Less => Self::I64Less,
+                ast::BinaryOp::LessEqual => Self::I64LessEqual,
+                ast::BinaryOp::Equal => Self::Equal,
+                ast::BinaryOp::NotEqual => Self::NotEqual,
+                ast::BinaryOp::BitOr => Self::I64Or,
+                ast::BinaryOp::BitAnd => Self::I64And,
+                _ => unreachable!(),
+            },
+            Ty::U64 => match op {
+                ast::BinaryOp::Add => Self::U64Add,
+                ast::BinaryOp::Sub => Self::U64Sub,
+                ast::BinaryOp::Mul => Self::U64Mul,
+                ast::BinaryOp::Div => Self::U64Div,
+                ast::BinaryOp::Greater => Self::U64Greater,
+                ast::BinaryOp::GreaterEqual => Self::U64GreaterEqual,
+                ast::BinaryOp::Less => Self::U64Less,
+                ast::BinaryOp::LessEqual => Self::U64LessEqual,
+                ast::BinaryOp::Equal => Self::Equal,
+                ast::BinaryOp::NotEqual => Self::NotEqual,
+                ast::BinaryOp::BitOr => Self::U64Or,
+                ast::BinaryOp::BitAnd => Self::U64And,
+                _ => unreachable!(),
+            },
+            _ => match op {
+                ast::BinaryOp::Equal => Self::Equal,
+                ast::BinaryOp::NotEqual => Self::NotEqual,
+                _ => unreachable!(),
+            },
         }
     }
 }

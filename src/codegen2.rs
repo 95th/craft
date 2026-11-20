@@ -1,15 +1,14 @@
 use std::collections::VecDeque;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::BinaryOp,
     bind::SymbolId,
-    chunk::{Code, Opcode::*},
     interner::{StrId, StrInterner},
     ir,
+    register_chunk::{Code, Opcode::*, Reg},
     typechecker::TyCtxt,
-    types::{Ty, TyId},
+    types::Ty,
 };
 
 pub struct Codegen2<'a> {
@@ -17,11 +16,11 @@ pub struct Codegen2<'a> {
     tcx: &'a mut TyCtxt,
     interner: &'a StrInterner,
     code: Code,
-    current_block: ir::BasicBlockId,
-    offsets: FxHashMap<ir::BasicBlockId, usize>,
     jump_worklist: Vec<(ir::BasicBlockId, usize)>,
     function_worklist: Vec<(SymbolId, usize)>,
     string_worklist: Vec<(StrId, usize)>,
+    reg_map: FxHashMap<u32, Reg>,
+    next_reg: Reg,
 }
 
 impl<'a> Codegen2<'a> {
@@ -31,11 +30,11 @@ impl<'a> Codegen2<'a> {
             tcx,
             interner,
             code: Code::new(),
-            current_block: ir::BasicBlockId::MAX,
-            offsets: FxHashMap::default(),
             jump_worklist: Vec::new(),
             function_worklist: Vec::new(),
             string_worklist: Vec::new(),
+            reg_map: FxHashMap::default(),
+            next_reg: 0,
         }
     }
 
@@ -70,26 +69,34 @@ impl<'a> Codegen2<'a> {
     }
 
     fn gen_function(&mut self, function: ir::BasicBlockId) {
-        let blocks = self.collect_blocks(function);
-        for block in blocks {
+        self.reg_map.clear();
+        self.next_reg = 0;
+
+        let mut done = FxHashMap::default();
+        let mut pending = VecDeque::new();
+        pending.push_back(function);
+        while let Some(block) = pending.pop_front() {
+            done.insert(block, self.code.len());
             self.gen_block(block);
+            for &succ in self.ir.basic_blocks[block].successors.iter() {
+                if !done.contains_key(&succ) {
+                    pending.push_back(succ);
+                }
+            }
         }
 
         for (block, patch_offset) in self.jump_worklist.drain(..) {
-            let destination = self.offsets[&block];
-            self.code.patch_jump_with(patch_offset, destination);
+            self.code.patch_jump(patch_offset, done[&block]);
         }
     }
 
     fn gen_block(&mut self, block: ir::BasicBlockId) {
-        self.offsets.insert(block, self.code.len());
-        self.current_block = block;
         for stmt in self.ir.basic_blocks[block].statements.iter() {
             self.gen_stmt(stmt);
         }
         match self.ir.basic_blocks[block].terminator {
             Some(ir::Terminator::Jump { target }) => {
-                let start = self.code.write_jump(Jump);
+                let start = self.code.op_jump();
                 self.jump_worklist.push((target, start));
             }
             Some(ir::Terminator::Branch {
@@ -97,16 +104,16 @@ impl<'a> Codegen2<'a> {
                 then_block,
                 else_block,
             }) => {
-                self.gen_operand(cond);
-                let false_jump = self.code.write_jump(JumpIfFalse);
-                let true_jump = self.code.write_jump(Jump);
+                let cond = self.gen_operand(cond, None);
+                let false_jump = self.code.op_jump_if_false(cond);
+                let true_jump = self.code.op_jump();
                 self.jump_worklist.push((then_block, true_jump));
                 self.jump_worklist.push((else_block, false_jump));
             }
             None => match self.ir.basic_blocks[block].successors[..] {
                 [] => self.code.op_return(),
                 [block] => {
-                    let jump = self.code.write_jump(Jump);
+                    let jump = self.code.op_jump();
                     self.jump_worklist.push((block, jump));
                 }
                 _ => unreachable!("Normal blocks must have zero or one successor."),
@@ -118,197 +125,229 @@ impl<'a> Codegen2<'a> {
         match stmt {
             ir::Statement::Assign { place, value } => match place.projection {
                 ir::Projection::Field(index) => {
-                    self.code.op_get_local(place.reg);
-                    self.gen_rvalue(value);
-                    self.code.op_set_struct_property(index);
+                    let obj = self.gen_reg(place.reg);
+                    let value = self.gen_rvalue(value, None);
+                    self.code.op_set_struct_property(obj, index as u8, value);
                 }
                 ir::Projection::Index(index) => {
-                    self.code.op_get_local(place.reg);
-                    self.code.op_get_local(index);
-                    self.gen_rvalue(value);
-                    self.code.op_set_struct_index();
+                    let obj = self.gen_reg(place.reg);
+                    let value = self.gen_rvalue(value, None);
+                    self.code.op_set_struct_index(obj, index as u8, value);
                 }
                 ir::Projection::None => {
-                    self.gen_rvalue(value);
-                    self.code.op_set_local(place.reg);
+                    let reg = self.gen_reg(place.reg);
+                    self.gen_rvalue(value, Some(reg));
                 }
             },
-            ir::Statement::StorageLive {
-                implicit,
-                reg: _reg,
-            } => {
-                if !implicit {
-                    self.code.op_unit();
+            ir::Statement::StorageLive { implicit, reg } => {
+                if *implicit {
+                    self.gen_reg(*reg);
                 }
             }
             ir::Statement::Print(operand, ty) => {
-                self.gen_operand(*operand);
+                let value = self.gen_operand(*operand, None);
                 match self.tcx.types.probe_value(*ty) {
-                    Ty::F64 => self.code.op(PrintF64),
-                    Ty::I64 => self.code.op(PrintI64),
-                    Ty::U64 => self.code.op(PrintU64),
-                    Ty::String => self.code.op(PrintString),
-                    Ty::Bool => self.code.op(PrintBool),
-                    _ => self.code.op(PrintObj),
+                    Ty::F64 => self.code.op_print_f64(value),
+                    Ty::I64 => self.code.op_print_i64(value),
+                    Ty::U64 => self.code.op_print_u64(value),
+                    Ty::String => self.code.op_print_string(value),
+                    Ty::Bool => self.code.op_print_bool(value),
+                    _ => self.code.op_print_obj(value),
                 }
             }
         }
     }
 
-    fn gen_rvalue(&mut self, value: &ir::RValue) {
+    fn gen_rvalue(&mut self, value: &ir::RValue, dest: Option<Reg>) -> Reg {
         match *value {
-            ir::RValue::Use(operand) => self.gen_operand(operand),
-            ir::RValue::Binary { op, lhs, rhs, ty } => self.gen_binary(op, lhs, rhs, ty),
+            ir::RValue::Use(operand) => return self.gen_operand(operand, dest),
+            ir::RValue::Binary { op, lhs, rhs } => return self.gen_binary(op, lhs, rhs, dest),
             ir::RValue::Not(operand) => {
-                self.gen_operand(operand);
-                self.code.op(Not);
+                let dest = self.gen_operand(operand, dest);
+                self.code.op_not(dest, dest);
+                dest
             }
-            ir::RValue::Neg(operand, ty) => {
-                self.gen_operand(operand);
-                match self.tcx.types.probe_value(ty) {
-                    Ty::F64 => self.code.op(F64Neg),
-                    Ty::I64 => self.code.op(I64Neg),
-                    _ => unreachable!(),
-                }
+            ir::RValue::F64Neg(operand) => {
+                let dest = self.gen_operand(operand, dest);
+                self.code.op_neg_f64(dest, dest);
+                dest
+            }
+            ir::RValue::I64Neg(operand) => {
+                let dest = self.gen_operand(operand, dest);
+                self.code.op_neg_i64(dest, dest);
+                dest
             }
             ir::RValue::Struct { ref fields } => {
-                for f in fields {
-                    self.gen_operand(*f);
+                let regs: Vec<_> = (0..fields.len()).map(|_| self.temp()).collect();
+                for i in 0..fields.len() {
+                    self.gen_operand(fields[i], Some(regs[i]));
                 }
-                self.code.op_struct(fields.len() as u16);
+                if fields.is_empty() {
+                    let dest = self.dest_or_temp(dest);
+                    self.code.op_struct(dest, 0, 0);
+                    return dest;
+                }
+                let dest = dest.unwrap_or(regs[0]);
+                self.code.op_struct(dest, regs[0], fields.len() as u8);
+                self.next_reg = regs[0] + 1;
+                dest
             }
             ir::RValue::StructRepeat { value, count } => {
-                self.gen_operand(value);
-                self.gen_operand(count);
-                self.code.op_repeat_struct();
+                let value = self.gen_operand(value, None);
+                let count = self.gen_operand(count, None);
+                let dest = self.dest_or_temp(dest);
+                self.code.op_repeat_struct(dest, value, count);
+                dest
             }
             ir::RValue::Call { callee, ref args } => {
-                self.code.op_unit();
-                for arg in args {
-                    self.gen_operand(*arg);
+                let first = match dest {
+                    Some(dest) if dest + 1 == self.next_reg => dest,
+                    _ => self.temp(),
+                };
+                for _ in 0..args.len() {
+                    self.temp();
                 }
-                self.gen_operand(callee);
-                self.code.op_call(args.len() as u8);
+                self.gen_operand(callee, Some(first));
+                for i in 0..args.len() {
+                    self.gen_operand(args[i], Some(first + i as u8 + 1));
+                }
+                self.code.op_call(first);
+                self.next_reg = first + 1;
+                match dest {
+                    Some(dest) if dest == first => dest,
+                    Some(dest) => {
+                        self.code.op_copy(dest, first);
+                        dest
+                    }
+                    None => first,
+                }
             }
         }
     }
 
-    fn gen_binary(&mut self, op: BinaryOp, lhs: ir::Operand, rhs: ir::Operand, ty: TyId) {
-        self.gen_operand(lhs);
-        self.gen_operand(rhs);
-        match self.tcx.types.probe_value(ty) {
-            Ty::F64 => match op {
-                BinaryOp::Add => self.code.op(F64Add),
-                BinaryOp::Sub => self.code.op(F64Sub),
-                BinaryOp::Mul => self.code.op(F64Mul),
-                BinaryOp::Div => self.code.op(F64Div),
-                BinaryOp::Greater => self.code.op(F64Greater),
-                BinaryOp::GreaterEqual => self.code.op(F64GreaterEqual),
-                BinaryOp::Less => self.code.op(F64Less),
-                BinaryOp::LessEqual => self.code.op(F64LessEqual),
-                BinaryOp::Equal => self.code.op(F64Equal),
-                BinaryOp::NotEqual => self.code.op(F64NotEqual),
-                _ => {}
-            },
-            Ty::I64 => match op {
-                BinaryOp::Add => self.code.op(I64Add),
-                BinaryOp::Sub => self.code.op(I64Sub),
-                BinaryOp::Mul => self.code.op(I64Mul),
-                BinaryOp::Div => self.code.op(I64Div),
-                BinaryOp::Greater => self.code.op(I64Greater),
-                BinaryOp::GreaterEqual => self.code.op(I64GreaterEqual),
-                BinaryOp::Less => self.code.op(I64Less),
-                BinaryOp::LessEqual => self.code.op(I64LessEqual),
-                BinaryOp::Equal => self.code.op(Equal),
-                BinaryOp::NotEqual => self.code.op(NotEqual),
-                BinaryOp::BitOr => self.code.op(I64Or),
-                BinaryOp::BitAnd => self.code.op(I64And),
-                _ => {}
-            },
-            Ty::U64 => match op {
-                BinaryOp::Add => self.code.op(U64Add),
-                BinaryOp::Sub => self.code.op(U64Sub),
-                BinaryOp::Mul => self.code.op(U64Mul),
-                BinaryOp::Div => self.code.op(U64Div),
-                BinaryOp::Greater => self.code.op(U64Greater),
-                BinaryOp::GreaterEqual => self.code.op(U64GreaterEqual),
-                BinaryOp::Less => self.code.op(U64Less),
-                BinaryOp::LessEqual => self.code.op(U64LessEqual),
-                BinaryOp::Equal => self.code.op(Equal),
-                BinaryOp::NotEqual => self.code.op(NotEqual),
-                BinaryOp::BitOr => self.code.op(U64Or),
-                BinaryOp::BitAnd => self.code.op(U64And),
-                _ => {}
-            },
-            _ => match op {
-                BinaryOp::Equal => self.code.op(Equal),
-                BinaryOp::NotEqual => self.code.op(NotEqual),
-                _ => {}
-            },
+    fn gen_binary(
+        &mut self,
+        op: ir::BinaryOp,
+        lhs: ir::Operand,
+        rhs: ir::Operand,
+        dest: Option<Reg>,
+    ) -> Reg {
+        let dest = self.dest_or_temp(dest);
+        let lhs = self.gen_operand(lhs, None);
+        let rhs = self.gen_operand(rhs, None);
+        match op {
+            ir::BinaryOp::F64Add => self.code.op_binary(F64Add, dest, lhs, rhs),
+            ir::BinaryOp::F64Sub => self.code.op_binary(F64Sub, dest, lhs, rhs),
+            ir::BinaryOp::F64Mul => self.code.op_binary(F64Mul, dest, lhs, rhs),
+            ir::BinaryOp::F64Div => self.code.op_binary(F64Div, dest, lhs, rhs),
+            ir::BinaryOp::F64Greater => self.code.op_binary(F64Greater, dest, lhs, rhs),
+            ir::BinaryOp::F64GreaterEqual => self.code.op_binary(F64GreaterEqual, dest, lhs, rhs),
+            ir::BinaryOp::F64Less => self.code.op_binary(F64Less, dest, lhs, rhs),
+            ir::BinaryOp::F64LessEqual => self.code.op_binary(F64LessEqual, dest, lhs, rhs),
+            ir::BinaryOp::F64Equal => self.code.op_binary(F64Equal, dest, lhs, rhs),
+            ir::BinaryOp::F64NotEqual => self.code.op_binary(F64NotEqual, dest, lhs, rhs),
+            ir::BinaryOp::I64Add => self.code.op_binary(I64Add, dest, lhs, rhs),
+            ir::BinaryOp::I64Sub => self.code.op_binary(I64Sub, dest, lhs, rhs),
+            ir::BinaryOp::I64Mul => self.code.op_binary(I64Mul, dest, lhs, rhs),
+            ir::BinaryOp::I64Div => self.code.op_binary(I64Div, dest, lhs, rhs),
+            ir::BinaryOp::I64Greater => self.code.op_binary(I64Greater, dest, lhs, rhs),
+            ir::BinaryOp::I64GreaterEqual => self.code.op_binary(I64GreaterEqual, dest, lhs, rhs),
+            ir::BinaryOp::I64Less => self.code.op_binary(I64Less, dest, lhs, rhs),
+            ir::BinaryOp::I64LessEqual => self.code.op_binary(I64LessEqual, dest, lhs, rhs),
+            ir::BinaryOp::I64Or => self.code.op_binary(I64Or, dest, lhs, rhs),
+            ir::BinaryOp::I64And => self.code.op_binary(I64And, dest, lhs, rhs),
+            ir::BinaryOp::U64Add => self.code.op_binary(U64Add, dest, lhs, rhs),
+            ir::BinaryOp::U64Sub => self.code.op_binary(U64Sub, dest, lhs, rhs),
+            ir::BinaryOp::U64Mul => self.code.op_binary(U64Mul, dest, lhs, rhs),
+            ir::BinaryOp::U64Div => self.code.op_binary(U64Div, dest, lhs, rhs),
+            ir::BinaryOp::U64Greater => self.code.op_binary(U64Greater, dest, lhs, rhs),
+            ir::BinaryOp::U64GreaterEqual => self.code.op_binary(U64GreaterEqual, dest, lhs, rhs),
+            ir::BinaryOp::U64Less => self.code.op_binary(U64Less, dest, lhs, rhs),
+            ir::BinaryOp::U64LessEqual => self.code.op_binary(U64LessEqual, dest, lhs, rhs),
+            ir::BinaryOp::U64Or => self.code.op_binary(U64Or, dest, lhs, rhs),
+            ir::BinaryOp::U64And => self.code.op_binary(U64And, dest, lhs, rhs),
+            ir::BinaryOp::Equal => self.code.op_binary(Equal, dest, lhs, rhs),
+            ir::BinaryOp::NotEqual => self.code.op_binary(NotEqual, dest, lhs, rhs),
         }
+        dest
     }
 
-    fn gen_operand(&mut self, operand: ir::Operand) {
+    fn gen_operand(&mut self, operand: ir::Operand, dest: Option<Reg>) -> Reg {
         match operand {
-            ir::Operand::Place(place) => {
-                self.code.op_get_local(place.reg);
-                match place.projection {
-                    ir::Projection::Field(index) => {
-                        self.code.op_get_struct_property(index);
-                    }
-                    ir::Projection::Index(index) => {
-                        self.code.op_get_local(index);
-                        self.code.op_get_struct_index();
-                    }
-                    ir::Projection::None => {}
+            ir::Operand::Place(place) => match place.projection {
+                ir::Projection::Field(index) => {
+                    let obj = self.gen_reg(place.reg);
+                    let dest = self.dest_or_temp(dest);
+                    self.code.op_get_struct_property(dest, obj, index as u8);
+                    dest
                 }
-            }
-            ir::Operand::Constant(constant) => self.gen_constant(constant),
+                ir::Projection::Index(index) => {
+                    let obj = self.gen_reg(place.reg);
+                    let index = self.gen_reg(index);
+                    let dest = self.dest_or_temp(dest);
+                    self.code.op_get_struct_index(dest, obj, index);
+                    dest
+                }
+                ir::Projection::None => {
+                    let reg = self.gen_reg(place.reg);
+                    if let Some(dest) = dest
+                        && dest != reg
+                    {
+                        self.code.op_copy(dest, reg);
+                        dest
+                    } else {
+                        reg
+                    }
+                }
+            },
+            ir::Operand::Constant(constant) => self.gen_constant(constant, dest),
         }
     }
 
-    fn gen_constant(&mut self, constant: ir::Constant) {
+    fn gen_constant(&mut self, constant: ir::Constant, dest: Option<Reg>) -> Reg {
+        let dest = self.dest_or_temp(dest);
         match constant {
-            ir::Constant::Unit => self.code.op_unit(),
-            ir::Constant::Bool(x) => self.code.op(if x { True } else { False }),
+            ir::Constant::Unit => self.code.op_const(dest, 0),
+            ir::Constant::Bool(x) => self.code.op_const(dest, if x { 1 } else { 0 }),
             ir::Constant::I64(x) => {
                 let x = u64::from_ne_bytes(x.to_ne_bytes());
-                self.code.op_const(x);
+                self.code.op_const(dest, x);
             }
-            ir::Constant::U64(x) => self.code.op_const(x),
+            ir::Constant::U64(x) => self.code.op_const(dest, x),
             ir::Constant::F64(x) => {
                 let x = x.to_bits();
-                self.code.op_const(x);
+                self.code.op_const(dest, x);
             }
             ir::Constant::String(s) => {
-                let offset = self.code.len() + 1;
-                self.code.op_const(0);
-                self.code.op(String);
+                let offset = self.code.len() + 2;
+                self.code.op_string(dest, 0);
                 self.string_worklist.push((s, offset));
             }
             ir::Constant::Function(id) => {
-                let offset = self.code.len() + 1;
-                self.code.op_const(0);
+                let offset = self.code.len() + 2;
+                self.code.op_const(dest, 0);
                 self.function_worklist.push((id, offset));
             }
         }
+        dest
     }
 
-    fn collect_blocks(&self, entry: ir::BasicBlockId) -> Vec<ir::BasicBlockId> {
-        let mut list = Vec::new();
-        let mut seen = FxHashSet::<ir::BasicBlockId>::default();
-        let mut worklist = VecDeque::new();
-        worklist.push_back(entry);
-
-        while let Some(block) = worklist.pop_back() {
-            list.push(block);
-            for &successor in self.ir.basic_blocks[block].successors.iter() {
-                if seen.insert(successor) {
-                    worklist.push_back(successor);
-                }
-            }
+    fn gen_reg(&mut self, reg_id: ir::RegId) -> Reg {
+        if let Some(reg) = self.reg_map.get(&reg_id) {
+            return *reg;
         }
+        let reg = self.temp();
+        self.reg_map.insert(reg_id, reg);
+        reg
+    }
 
-        list
+    fn dest_or_temp(&mut self, dest: Option<Reg>) -> Reg {
+        dest.unwrap_or_else(|| self.temp())
+    }
+
+    fn temp(&mut self) -> Reg {
+        let reg = self.next_reg;
+        self.next_reg = self.next_reg.checked_add(1).expect("Too many temporaries");
+        reg
     }
 }

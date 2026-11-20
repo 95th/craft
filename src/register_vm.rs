@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -481,6 +479,8 @@ impl VM {
 
 #[test]
 fn test_run() {
+    use std::time::Instant;
+
     let mut code = Code::new();
     code.op_const(0, 0);
     code.op_const(1, 35);

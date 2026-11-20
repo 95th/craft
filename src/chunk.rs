@@ -297,18 +297,6 @@ impl Code {
         self.write_u16_at(start, offset as u16);
     }
 
-    pub fn patch_jump_with(&mut self, from: usize, to: usize) {
-        if to > from {
-            let offset = to - (from + 2);
-            self.write_u16_at(from, offset as u16);
-        } else {
-            debug_assert_eq!(self.code[from - 1], Opcode::Jump as u8);
-            self.code[from - 1] = Opcode::Loop as u8;
-            let offset = (from + 2) - to;
-            self.write_u16_at(from, offset as u16);
-        }
-    }
-
     pub fn write_loop(&mut self, start: usize) {
         let offset = self.code.len() - start + 3;
         self.op(Opcode::Loop);

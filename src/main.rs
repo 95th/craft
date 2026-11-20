@@ -58,7 +58,10 @@ fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
     Ok(code)
 }
 
-fn lower_and_compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
+fn lower_and_compile(
+    source: &str,
+    diagnostics: &mut Diagnostics,
+) -> Result<register_chunk::Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
     let mut parser = Parser::new(source, ast, interner, diagnostics);
@@ -96,7 +99,7 @@ fn main() {
         let mut diagnostics = Diagnostics::new();
         match lower_and_compile(source, &mut diagnostics) {
             Ok(code) => {
-                let mut vm = VM::new(code);
+                let mut vm = register_vm::VM::new(code);
                 vm.run();
             }
             Err(_) => {
@@ -126,16 +129,17 @@ mod tests {
 
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
-
-        let result = if cfg!(feature = "lower") {
-            lower_and_compile(source, &mut diagnostics)
+        if cfg!(feature = "lower") {
+            let code = lower_and_compile(source, &mut diagnostics).expect("OK");
+            diagnostics.print(source);
+            let mut vm = register_vm::VM::new(code);
+            vm.run();
         } else {
-            compile(source, &mut diagnostics)
-        };
-        diagnostics.print(source);
-        let code = result.expect("ok");
-        let mut vm = VM::new(code);
-        vm.run();
+            let code = compile(source, &mut diagnostics).expect("OK");
+            diagnostics.print(source);
+            let mut vm = VM::new(code);
+            vm.run();
+        }
     }
 
     fn check_err(source: &str, error: Error) {
@@ -149,6 +153,26 @@ mod tests {
     fn test_simple() {
         let source = r#"
             let x = 1 + 2 / 3;
+            print(x);
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_neg() {
+        let source = r#"
+            let x = -2;
+            let y = -x;
+            print(x);
+            print(y);
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_simple_logic() {
+        let source = r#"
+            let x = 1 == 2 || 1 == 3;
             print(x);
         "#;
         run_ok(source)

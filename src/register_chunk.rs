@@ -109,6 +109,111 @@ impl Code {
         self.code.len()
     }
 
+    pub fn disassemble(&self, end: usize) {
+        if !cfg!(feature = "trace") {
+            return;
+        }
+
+        println!("-- disassembly --");
+        let mut i = 0;
+        while i < end {
+            let instr: Opcode = unsafe { std::mem::transmute(self.code[i]) };
+            print!("{i:<05} {instr:?}");
+            i += 1;
+            match instr {
+                Opcode::Const => {
+                    let [dest, n @ ..] = self.code[i..].first_chunk::<9>().unwrap();
+                    i += 9;
+                    let n = u64::from_ne_bytes(*n);
+                    println!(" r{dest} = {n}");
+                }
+                Opcode::String => {
+                    let [dest, n @ ..] = self.code[i..].first_chunk::<9>().unwrap();
+                    i += 9;
+                    let n = u64::from_ne_bytes(*n) as usize;
+                    let len = self.code[n..].first_chunk().unwrap();
+                    let len = u32::from_ne_bytes(*len) as usize;
+                    let s = &self.code[n + 4..][..len];
+                    let s = std::str::from_utf8(s).unwrap();
+                    println!(" r{dest} = {n} ({s:?})");
+                }
+                Opcode::Call => {
+                    let callee = self.code[i];
+                    i += 1;
+                    println!(" r{callee}");
+                }
+                Opcode::JumpIfFalse => {
+                    let [cond, offset @ ..] = self.code[i..].first_chunk::<5>().unwrap();
+                    i += 5;
+                    let offset = i32::from_ne_bytes(*offset) as isize;
+                    let target = i as isize + offset;
+                    println!(" r{cond} {offset} (target: {target})");
+                }
+                Opcode::Jump => {
+                    let offset = self.code[i..].first_chunk().unwrap();
+                    i += 4;
+                    let offset = i32::from_ne_bytes(*offset) as isize;
+                    let target = i as isize + offset;
+                    println!(" {offset} (target: {target})");
+                }
+                Opcode::Struct => {
+                    let [dest, start, count] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{start} x {count}");
+                    i += 3;
+                }
+                Opcode::RepeatStruct => {
+                    let [dest, start, count] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{start} x r{count}");
+                    i += 3;
+                }
+                Opcode::GetStructProperty => {
+                    let [dest, obj, index] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{obj} '.' {index}");
+                    i += 3;
+                }
+                Opcode::SetStructProperty => {
+                    let [obj, index, value] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{obj} '.' {index} = r{value}");
+                    i += 3;
+                }
+                Opcode::GetStructIndex => {
+                    let [dest, obj, index] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{obj} [ r{index} ]");
+                    i += 3;
+                }
+                Opcode::SetStructIndex => {
+                    let [obj, index, value] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{obj} [ r{index} ] = r{value}");
+                    i += 3;
+                }
+                Opcode::Return => {
+                    println!();
+                }
+                Opcode::PrintF64
+                | Opcode::PrintI64
+                | Opcode::PrintU64
+                | Opcode::PrintString
+                | Opcode::PrintBool
+                | Opcode::PrintObj => {
+                    let value = self.code[i];
+                    i += 1;
+                    println!(" r{value}");
+                }
+                Opcode::Copy | Opcode::Not | Opcode::F64Neg | Opcode::I64Neg => {
+                    let [dest, src] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{src}");
+                    i += 2;
+                }
+                _ => {
+                    let [dest, lhs, rhs] = self.code[i..].first_chunk().unwrap();
+                    println!(" r{dest} = r{lhs}, r{rhs}");
+                    i += 3;
+                }
+            }
+        }
+        println!("----");
+    }
+
     pub fn op_const(&mut self, dest: Reg, value: u64) {
         self.op(Const);
         self.write_u8(dest);
@@ -251,18 +356,18 @@ impl Code {
         self.write_u8(rhs);
     }
 
-    fn op(&mut self, op: Opcode) {
-        self.write_u8(op as u8);
-    }
-
     pub fn write_u64_at(&mut self, i: usize, n: u64) {
         self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
     }
 
-    fn write_string(&mut self, s: &str) {
+    pub fn write_string(&mut self, s: &str) {
         let len = s.len() as u32;
         self.code.extend_from_slice(&len.to_ne_bytes());
         self.code.extend_from_slice(s.as_bytes());
+    }
+
+    fn op(&mut self, op: Opcode) {
+        self.write_u8(op as u8);
     }
 
     fn write_u8(&mut self, n: u8) {
