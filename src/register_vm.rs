@@ -116,6 +116,14 @@ impl VM {
                     let function = self.load(callee);
                     self.call(function, callee);
                 }
+                Opcode::JumpIfTrue => {
+                    let cond = self.frame.read_u16();
+                    let offset = self.frame.read_i32();
+                    let cond = self.load(cond);
+                    if cond == TRUE {
+                        self.frame.jump(offset);
+                    }
+                }
                 Opcode::JumpIfFalse => {
                     let cond = self.frame.read_u16();
                     let offset = self.frame.read_i32();

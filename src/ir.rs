@@ -50,6 +50,7 @@ impl<'a> Lowering<'a> {
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
+        self.set_terminator(Terminator::Return);
 
         let mut functions = FxHashMap::default();
         while let Some(symbol) = self.function_worklist.pop_front() {
@@ -73,7 +74,6 @@ impl<'a> Lowering<'a> {
 
     fn lower_function(&mut self, function: ast::StmtId) {
         self.return_reg = self.create_register(true);
-
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
@@ -94,6 +94,7 @@ impl<'a> Lowering<'a> {
             }
             _ => unreachable!(),
         }
+        self.set_terminator(Terminator::Return);
     }
 
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
@@ -403,30 +404,37 @@ impl<'a> Lowering<'a> {
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::While { cond, body } => {
-                let cond_block = self.create_block();
                 let body_block = self.create_block();
+                let cond_block = self.create_block();
                 let merge_block = self.create_block();
                 let cond_reg = self.create_register(false);
 
-                self.add_edge(self.current_block, cond_block);
-                self.current_block = cond_block;
-                let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
-
+                let cond_operand = self.lower_expr(cond, Some(Place::reg(cond_reg)));
                 self.set_terminator(Terminator::Branch {
-                    cond,
+                    cond: cond_operand,
+                    then_block: body_block,
+                    else_block: merge_block,
+                });
+
+                self.add_edge(self.current_block, body_block);
+                self.add_edge(self.current_block, merge_block);
+
+                self.current_block = body_block;
+                self.enter_loop(cond_block, merge_block);
+                self.lower_expr(body, None);
+                self.loop_contexts.pop();
+
+                self.add_edge(self.current_block, cond_block);
+
+                self.current_block = cond_block;
+                let cond_operand = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                self.set_terminator(Terminator::Branch {
+                    cond: cond_operand,
                     then_block: body_block,
                     else_block: merge_block,
                 });
                 self.add_edge(self.current_block, body_block);
                 self.add_edge(self.current_block, merge_block);
-                self.current_block = body_block;
-
-                self.enter_loop(cond_block, merge_block);
-                self.lower_expr(body, None);
-                self.loop_contexts.pop();
-
-                self.set_terminator(Terminator::Jump { target: cond_block });
-                self.add_edge(self.current_block, cond_block);
 
                 self.current_block = merge_block;
                 return self.constant_operand(place, Constant::Unit);
@@ -440,18 +448,14 @@ impl<'a> Lowering<'a> {
                 if let Some(init) = init {
                     self.lower_stmt(init);
                 }
-                let cond_reg = cond.map(|_| self.create_register(false));
-                let cond_block = cond.map(|_| self.create_block());
+
                 let body_block = self.create_block();
-                let incr_block = incr.map(|_| self.create_block());
+                let incr_block = self.create_block();
                 let merge_block = self.create_block();
 
-                if let Some(cond) = cond
-                    && let Some(cond_block) = cond_block
-                    && let Some(cond_reg) = cond_reg
-                {
-                    self.add_edge(self.current_block, cond_block);
-                    self.current_block = cond_block;
+                let cond_reg = self.create_register(false);
+
+                if let Some(cond) = cond {
                     let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
                     self.set_terminator(Terminator::Branch {
                         cond,
@@ -465,29 +469,30 @@ impl<'a> Lowering<'a> {
                 }
 
                 self.current_block = body_block;
-                let continue_target = incr_block.or(cond_block).unwrap_or(body_block);
-
-                self.enter_loop(continue_target, merge_block);
+                self.enter_loop(incr_block, merge_block);
                 self.lower_expr(body, None);
-                self.set_terminator(Terminator::Jump {
-                    target: continue_target,
-                });
-                self.add_edge(self.current_block, continue_target);
+                self.loop_contexts.pop();
+                self.add_edge(self.current_block, incr_block);
 
-                if let Some(incr) = incr
-                    && let Some(incr_block) = incr_block
-                {
-                    self.current_block = incr_block;
+                self.current_block = incr_block;
+                if let Some(incr) = incr {
                     self.lower_expr(incr, None);
-                    let incr_target = cond_block.unwrap_or(body_block);
-                    self.set_terminator(Terminator::Jump {
-                        target: incr_target,
+                }
+                if let Some(cond) = cond {
+                    let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                    self.set_terminator(Terminator::Branch {
+                        cond,
+                        then_block: body_block,
+                        else_block: merge_block,
                     });
-                    self.add_edge(self.current_block, incr_target);
+                    self.add_edge(self.current_block, body_block);
+                    self.add_edge(self.current_block, merge_block);
+                } else {
+                    self.set_terminator(Terminator::Jump { target: body_block });
+                    self.add_edge(self.current_block, body_block);
                 }
 
                 self.current_block = merge_block;
-                self.loop_contexts.pop();
                 return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Break => {
@@ -520,6 +525,7 @@ impl<'a> Lowering<'a> {
                     place: Place::reg(self.return_reg),
                     value: RValue::Use(value),
                 });
+                self.set_terminator(Terminator::Return);
                 self.current_block = self.create_block();
                 return self.constant_operand(place, Constant::Unit);
             }
@@ -625,6 +631,7 @@ pub enum Terminator {
         then_block: BasicBlockId,
         else_block: BasicBlockId,
     },
+    Return,
 }
 
 #[derive(Debug)]

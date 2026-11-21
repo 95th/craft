@@ -11,6 +11,7 @@ pub enum Opcode {
     Call,
 
     // Operand_Cond + i32 offset
+    JumpIfTrue,
     JumpIfFalse,
 
     // i32 offset
@@ -132,6 +133,13 @@ impl Code {
     pub fn op_call(&mut self, callee: Reg) {
         self.op(Call);
         self.write_u16(callee);
+    }
+
+    pub fn op_jump_if_true(&mut self, cond: Reg) -> usize {
+        self.op(JumpIfTrue);
+        self.write_u16(cond);
+        self.write_i32(0);
+        self.code.len() - 4
     }
 
     pub fn op_jump_if_false(&mut self, cond: Reg) -> usize {
@@ -328,7 +336,7 @@ impl<'a> Disassembler<'a> {
                     let callee = self.read_u16();
                     println!(" r{callee}");
                 }
-                JumpIfFalse => {
+                JumpIfTrue | JumpIfFalse => {
                     let cond = self.read_u16();
                     let offset = self.read_i32() as isize;
                     let target = self.i as isize + offset;

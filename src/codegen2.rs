@@ -1,6 +1,4 @@
-use std::collections::VecDeque;
-
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     bind::SymbolId,
@@ -72,21 +70,19 @@ impl<'a> Codegen2<'a> {
         self.reg_map.clear();
         self.next_reg = 0;
 
-        let mut done = FxHashMap::default();
-        let mut pending = VecDeque::new();
-        pending.push_back(function);
-        while let Some(block) = pending.pop_front() {
-            done.insert(block, self.code.len());
-            self.gen_block(block);
-            for &succ in self.ir.basic_blocks[block].successors.iter() {
-                if !done.contains_key(&succ) {
-                    pending.push_back(succ);
-                }
-            }
+        let mut offsets = FxHashMap::default();
+        let blocks = self.collect_blocks(function);
+        if cfg!(feature = "trace") {
+            println!("Block order for {function:?}: {blocks:?}");
+        }
+        for i in 0..blocks.len() {
+            offsets.insert(blocks[i], self.code.len());
+            self.gen_block(blocks[i]);
+            self.gen_terminator(blocks[i], blocks.get(i + 1).copied());
         }
 
         for (block, patch_offset) in self.jump_worklist.drain(..) {
-            self.code.patch_jump(patch_offset, done[&block]);
+            self.code.patch_jump(patch_offset, offsets[&block]);
         }
     }
 
@@ -94,10 +90,15 @@ impl<'a> Codegen2<'a> {
         for stmt in self.ir.basic_blocks[block].statements.iter() {
             self.gen_stmt(stmt);
         }
+    }
+
+    fn gen_terminator(&mut self, block: ir::BasicBlockId, next: Option<ir::BasicBlockId>) {
         match self.ir.basic_blocks[block].terminator {
             Some(ir::Terminator::Jump { target }) => {
-                let start = self.code.op_jump();
-                self.jump_worklist.push((target, start));
+                if next.is_none_or(|next| next != target) {
+                    let start = self.code.op_jump();
+                    self.jump_worklist.push((target, start));
+                }
             }
             Some(ir::Terminator::Branch {
                 cond,
@@ -105,19 +106,25 @@ impl<'a> Codegen2<'a> {
                 else_block,
             }) => {
                 let cond = self.gen_operand(cond, None);
+                if let Some(next) = next {
+                    if next == then_block {
+                        let false_jump = self.code.op_jump_if_false(cond);
+                        self.jump_worklist.push((else_block, false_jump));
+                        return;
+                    }
+                    if next == else_block {
+                        let true_jump = self.code.op_jump_if_true(cond);
+                        self.jump_worklist.push((then_block, true_jump));
+                        return;
+                    }
+                }
                 let false_jump = self.code.op_jump_if_false(cond);
                 let true_jump = self.code.op_jump();
                 self.jump_worklist.push((then_block, true_jump));
                 self.jump_worklist.push((else_block, false_jump));
             }
-            None => match self.ir.basic_blocks[block].successors[..] {
-                [] => self.code.op_return(),
-                [block] => {
-                    let jump = self.code.op_jump();
-                    self.jump_worklist.push((block, jump));
-                }
-                _ => unreachable!("Normal blocks must have zero or one successor."),
-            },
+            Some(ir::Terminator::Return) => self.code.op_return(),
+            None => debug_assert_eq!(self.ir.basic_blocks[block].successors.len(), 1),
         }
     }
 
@@ -350,5 +357,28 @@ impl<'a> Codegen2<'a> {
         let reg = self.next_reg;
         self.next_reg = self.next_reg.checked_add(1).expect("Too many temporaries");
         reg
+    }
+
+    fn collect_blocks(&self, entry: ir::BasicBlockId) -> Vec<ir::BasicBlockId> {
+        let mut seen = FxHashSet::default();
+        let mut list = Vec::new();
+        self.dfs(entry, &mut seen, &mut list);
+        list.reverse();
+        list
+    }
+
+    fn dfs(
+        &self,
+        block: ir::BasicBlockId,
+        seen: &mut FxHashSet<ir::BasicBlockId>,
+        list: &mut Vec<ir::BasicBlockId>,
+    ) {
+        seen.insert(block);
+        for succ in self.ir.basic_blocks[block].successors.iter() {
+            if !seen.contains(succ) {
+                self.dfs(*succ, seen, list);
+            }
+        }
+        list.push(block);
     }
 }

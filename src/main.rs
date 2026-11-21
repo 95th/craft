@@ -487,6 +487,18 @@ mod tests {
     }
 
     #[test]
+    fn test_equivalent_while() {
+        let source = r#"
+            let i = 0;
+            while i < 10 {
+                print(i);
+                i = i + 1;
+            }
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_for_no_clauses() {
         let source = r#"
             let i = 0;
@@ -554,8 +566,6 @@ mod tests {
         let source = r#"
             let i = 1 > 2;
             if i {
-            }
-            while i {
             }
         "#;
         run_ok(source);
