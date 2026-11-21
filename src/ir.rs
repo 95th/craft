@@ -50,7 +50,6 @@ impl<'a> Lowering<'a> {
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
-        self.set_terminator(Terminator::Return);
 
         let mut functions = FxHashMap::default();
         while let Some(symbol) = self.function_worklist.pop_front() {
@@ -94,7 +93,6 @@ impl<'a> Lowering<'a> {
             }
             _ => unreachable!(),
         }
-        self.set_terminator(Terminator::Return);
     }
 
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
@@ -155,15 +153,12 @@ impl<'a> Lowering<'a> {
                     then_block: merge_block,
                     else_block: false_block,
                 });
-                self.add_edge(self.current_block, merge_block);
-                self.add_edge(self.current_block, false_block);
 
                 self.current_block = false_block;
                 self.lower_expr(rhs, Some(place));
                 self.set_terminator(Terminator::Jump {
                     target: merge_block,
                 });
-                self.add_edge(self.current_block, merge_block);
 
                 self.current_block = merge_block;
                 return Operand::Place(place);
@@ -183,15 +178,12 @@ impl<'a> Lowering<'a> {
                     then_block: true_block,
                     else_block: merge_block,
                 });
-                self.add_edge(self.current_block, true_block);
-                self.add_edge(self.current_block, merge_block);
 
                 self.current_block = true_block;
                 self.lower_expr(rhs, Some(place));
                 self.set_terminator(Terminator::Jump {
                     target: merge_block,
                 });
-                self.add_edge(self.current_block, merge_block);
 
                 self.current_block = merge_block;
                 return Operand::Place(place);
@@ -342,19 +334,21 @@ impl<'a> Lowering<'a> {
                     then_block,
                     else_block: else_block.unwrap_or(merge_block),
                 });
-                self.add_edge(self.current_block, then_block);
-                self.add_edge(self.current_block, else_block.unwrap_or(merge_block));
 
                 self.current_block = then_block;
                 self.lower_expr(then_clause, place);
-                self.add_edge(self.current_block, merge_block);
+                self.set_terminator(Terminator::Jump {
+                    target: merge_block,
+                });
 
                 if let Some(else_clause) = else_clause
                     && let Some(else_block) = else_block
                 {
                     self.current_block = else_block;
                     self.lower_expr(else_clause, place);
-                    self.add_edge(self.current_block, merge_block);
+                    self.set_terminator(Terminator::Jump {
+                        target: merge_block,
+                    });
                 }
 
                 self.current_block = merge_block;
@@ -416,15 +410,11 @@ impl<'a> Lowering<'a> {
                     else_block: merge_block,
                 });
 
-                self.add_edge(self.current_block, body_block);
-                self.add_edge(self.current_block, merge_block);
-
                 self.current_block = body_block;
                 self.enter_loop(cond_block, merge_block);
                 self.lower_expr(body, None);
                 self.loop_contexts.pop();
-
-                self.add_edge(self.current_block, cond_block);
+                self.set_terminator(Terminator::Jump { target: cond_block });
 
                 self.current_block = cond_block;
                 let cond_operand = self.lower_expr(cond, Some(Place::reg(cond_reg)));
@@ -433,8 +423,6 @@ impl<'a> Lowering<'a> {
                     then_block: body_block,
                     else_block: merge_block,
                 });
-                self.add_edge(self.current_block, body_block);
-                self.add_edge(self.current_block, merge_block);
 
                 self.current_block = merge_block;
                 return self.constant_operand(place, Constant::Unit);
@@ -462,17 +450,15 @@ impl<'a> Lowering<'a> {
                         then_block: body_block,
                         else_block: merge_block,
                     });
-                    self.add_edge(self.current_block, body_block);
-                    self.add_edge(self.current_block, merge_block);
                 } else {
-                    self.add_edge(self.current_block, body_block);
+                    self.set_terminator(Terminator::Jump { target: body_block });
                 }
 
                 self.current_block = body_block;
                 self.enter_loop(incr_block, merge_block);
                 self.lower_expr(body, None);
                 self.loop_contexts.pop();
-                self.add_edge(self.current_block, incr_block);
+                self.set_terminator(Terminator::Jump { target: incr_block });
 
                 self.current_block = incr_block;
                 if let Some(incr) = incr {
@@ -485,11 +471,8 @@ impl<'a> Lowering<'a> {
                         then_block: body_block,
                         else_block: merge_block,
                     });
-                    self.add_edge(self.current_block, body_block);
-                    self.add_edge(self.current_block, merge_block);
                 } else {
                     self.set_terminator(Terminator::Jump { target: body_block });
-                    self.add_edge(self.current_block, body_block);
                 }
 
                 self.current_block = merge_block;
@@ -500,7 +483,6 @@ impl<'a> Lowering<'a> {
                 self.set_terminator(Terminator::Jump {
                     target: context.break_target,
                 });
-                self.add_edge(self.current_block, context.break_target);
 
                 self.current_block = self.create_block();
                 return self.constant_operand(place, Constant::Unit);
@@ -510,7 +492,6 @@ impl<'a> Lowering<'a> {
                 self.set_terminator(Terminator::Jump {
                     target: context.continue_target,
                 });
-                self.add_edge(self.current_block, context.continue_target);
 
                 self.current_block = self.create_block();
                 return self.constant_operand(place, Constant::Unit);
@@ -560,14 +541,13 @@ impl<'a> Lowering<'a> {
         if cfg!(feature = "trace") {
             println!("{:?} => {:?}", self.current_block, terminator);
         }
-        self.basic_blocks[self.current_block].terminator = Some(terminator);
+        self.basic_blocks[self.current_block].terminator = terminator;
     }
 
     fn create_block(&mut self) -> BasicBlockId {
         self.basic_blocks.alloc(BasicBlock {
             statements: Vec::new(),
-            terminator: None,
-            successors: Vec::new(),
+            terminator: Terminator::Return,
         })
     }
 
@@ -576,10 +556,6 @@ impl<'a> Lowering<'a> {
         self.next_register += 1;
         self.push_stmt(Statement::StorageLive { reg, implicit });
         reg
-    }
-
-    fn add_edge(&mut self, from: BasicBlockId, to: BasicBlockId) {
-        self.basic_blocks[from].successors.push(to);
     }
 
     fn push_stmt(&mut self, statement: Statement) {
@@ -610,8 +586,7 @@ pub struct Ir {
 
 pub struct BasicBlock {
     pub statements: Vec<Statement>,
-    pub terminator: Option<Terminator>,
-    pub successors: Vec<BasicBlockId>,
+    pub terminator: Terminator,
 }
 
 #[derive(Debug)]
@@ -686,15 +661,6 @@ pub enum Constant {
     F64(f64),
     String(StrId),
     Function(SymbolId),
-}
-
-impl Place {
-    fn reg(reg: RegId) -> Self {
-        Self {
-            reg,
-            projection: Projection::None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -787,6 +753,32 @@ impl BinaryOp {
                 ast::BinaryOp::NotEqual => Self::NotEqual,
                 _ => unreachable!(),
             },
+        }
+    }
+}
+
+impl Place {
+    fn reg(reg: RegId) -> Self {
+        Self {
+            reg,
+            projection: Projection::None,
+        }
+    }
+}
+
+impl BasicBlock {
+    pub fn for_each_successor(&self, mut f: impl FnMut(BasicBlockId)) {
+        match self.terminator {
+            Terminator::Branch {
+                then_block,
+                else_block,
+                ..
+            } => {
+                f(then_block);
+                f(else_block);
+            }
+            Terminator::Jump { target } => f(target),
+            Terminator::Return => {}
         }
     }
 }

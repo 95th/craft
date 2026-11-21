@@ -94,17 +94,17 @@ impl<'a> Codegen2<'a> {
 
     fn gen_terminator(&mut self, block: ir::BasicBlockId, next: Option<ir::BasicBlockId>) {
         match self.ir.basic_blocks[block].terminator {
-            Some(ir::Terminator::Jump { target }) => {
+            ir::Terminator::Jump { target } => {
                 if next.is_none_or(|next| next != target) {
                     let start = self.code.op_jump();
                     self.jump_worklist.push((target, start));
                 }
             }
-            Some(ir::Terminator::Branch {
+            ir::Terminator::Branch {
                 cond,
                 then_block,
                 else_block,
-            }) => {
+            } => {
                 let cond = self.gen_operand(cond, None);
                 if let Some(next) = next {
                     if next == then_block {
@@ -123,8 +123,7 @@ impl<'a> Codegen2<'a> {
                 self.jump_worklist.push((then_block, true_jump));
                 self.jump_worklist.push((else_block, false_jump));
             }
-            Some(ir::Terminator::Return) => self.code.op_return(),
-            None => debug_assert_eq!(self.ir.basic_blocks[block].successors.len(), 1),
+            ir::Terminator::Return => self.code.op_return(),
         }
     }
 
@@ -373,12 +372,10 @@ impl<'a> Codegen2<'a> {
         seen: &mut FxHashSet<ir::BasicBlockId>,
         list: &mut Vec<ir::BasicBlockId>,
     ) {
-        seen.insert(block);
-        for succ in self.ir.basic_blocks[block].successors.iter() {
-            if !seen.contains(succ) {
-                self.dfs(*succ, seen, list);
-            }
+        if !seen.insert(block) {
+            return;
         }
+        self.ir.basic_blocks[block].for_each_successor(|block| self.dfs(block, seen, list));
         list.push(block);
     }
 }
