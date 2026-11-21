@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     arena::{Arena, Id},
@@ -27,6 +27,7 @@ pub struct Lowering<'a> {
     loop_contexts: Vec<LoopContext>,
     symbol_registers: FxHashMap<SymbolId, RegId>,
     return_reg: RegId,
+    reg_count: FxHashMap<BasicBlockId, RegId>,
 }
 
 impl<'a> Lowering<'a> {
@@ -41,6 +42,7 @@ impl<'a> Lowering<'a> {
             loop_contexts: Vec::new(),
             symbol_registers: FxHashMap::default(),
             return_reg: RegId::MAX,
+            reg_count: FxHashMap::default(),
         }
     }
 
@@ -50,6 +52,7 @@ impl<'a> Lowering<'a> {
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
+        self.reg_count.insert(main, self.next_register);
 
         let mut functions = FxHashMap::default();
         while let Some(symbol) = self.function_worklist.pop_front() {
@@ -62,12 +65,14 @@ impl<'a> Lowering<'a> {
             functions.insert(symbol, entry);
             self.current_block = entry;
             self.lower_function(function);
+            self.reg_count.insert(entry, self.next_register);
         }
 
         Ir {
             main,
             functions,
             basic_blocks: self.basic_blocks,
+            reg_count: self.reg_count,
         }
     }
 
@@ -582,6 +587,7 @@ pub struct Ir {
     pub main: BasicBlockId,
     pub functions: FxHashMap<SymbolId, BasicBlockId>,
     pub basic_blocks: Arena<BasicBlock>,
+    pub reg_count: FxHashMap<BasicBlockId, RegId>,
 }
 
 pub struct BasicBlock {
@@ -766,9 +772,9 @@ impl Place {
     }
 }
 
-impl BasicBlock {
-    pub fn for_each_successor(&self, mut f: impl FnMut(BasicBlockId)) {
-        match self.terminator {
+impl Ir {
+    pub fn for_each_successor(&self, entry: BasicBlockId, mut f: impl FnMut(BasicBlockId)) {
+        match self.basic_blocks[entry].terminator {
             Terminator::Branch {
                 then_block,
                 else_block,
@@ -780,5 +786,25 @@ impl BasicBlock {
             Terminator::Jump { target } => f(target),
             Terminator::Return => {}
         }
+    }
+
+    pub fn reachable_postorder(&self, entry: BasicBlockId) -> Vec<BasicBlockId> {
+        fn dfs(
+            ir: &Ir,
+            block: BasicBlockId,
+            seen: &mut FxHashSet<BasicBlockId>,
+            list: &mut Vec<BasicBlockId>,
+        ) {
+            if !seen.insert(block) {
+                return;
+            }
+            ir.for_each_successor(block, |block| dfs(ir, block, seen, list));
+            list.push(block);
+        }
+
+        let mut list = Vec::new();
+        let mut seen = FxHashSet::default();
+        dfs(self, entry, &mut seen, &mut list);
+        list
     }
 }

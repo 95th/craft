@@ -1,4 +1,4 @@
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::{
     bind::SymbolId,
@@ -71,7 +71,8 @@ impl<'a> Codegen2<'a> {
         self.next_reg = 0;
 
         let mut offsets = FxHashMap::default();
-        let blocks = self.collect_blocks(function);
+        let mut blocks = self.ir.reachable_postorder(function);
+        blocks.reverse();
         if cfg!(feature = "trace") {
             println!("Block order for {function:?}: {blocks:?}");
         }
@@ -356,26 +357,5 @@ impl<'a> Codegen2<'a> {
         let reg = self.next_reg;
         self.next_reg = self.next_reg.checked_add(1).expect("Too many temporaries");
         reg
-    }
-
-    fn collect_blocks(&self, entry: ir::BasicBlockId) -> Vec<ir::BasicBlockId> {
-        let mut seen = FxHashSet::default();
-        let mut list = Vec::new();
-        self.dfs(entry, &mut seen, &mut list);
-        list.reverse();
-        list
-    }
-
-    fn dfs(
-        &self,
-        block: ir::BasicBlockId,
-        seen: &mut FxHashSet<ir::BasicBlockId>,
-        list: &mut Vec<ir::BasicBlockId>,
-    ) {
-        if !seen.insert(block) {
-            return;
-        }
-        self.ir.basic_blocks[block].for_each_successor(|block| self.dfs(block, seen, list));
-        list.push(block);
     }
 }

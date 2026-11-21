@@ -1,14 +1,3 @@
-use std::time::Instant;
-
-use indexmap::IndexMap;
-use rustc_hash::FxBuildHasher;
-
-use crate::{
-    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, codegen2::Codegen2,
-    diagnostics::Diagnostics, interner::StrInterner, ir::Lowering, parser::Parser,
-    typechecker::TypeChecker, vm::VM,
-};
-
 mod arena;
 mod ast;
 mod bind;
@@ -20,6 +9,7 @@ mod heap;
 mod interner;
 mod ir;
 mod ir_opt;
+mod liveness;
 mod parser;
 mod register_chunk;
 mod register_vm;
@@ -27,6 +17,17 @@ mod scanner;
 mod typechecker;
 mod types;
 mod vm;
+
+use std::time::Instant;
+
+use indexmap::IndexMap;
+use rustc_hash::FxBuildHasher;
+
+use crate::{
+    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, codegen2::Codegen2,
+    diagnostics::Diagnostics, interner::StrInterner, ir::Lowering, liveness::LivenessAnalysis,
+    parser::Parser, typechecker::TypeChecker, vm::VM,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Error {
@@ -78,6 +79,9 @@ fn lower_and_compile(
     let mut body = lowering.lower(&nodes);
 
     ir_opt::optimize(&mut body);
+
+    let mut liveness = LivenessAnalysis::new(&body);
+    let _result = liveness.compute();
 
     let codegen = Codegen2::new(&body, &mut ty_ctx, interner);
     let code = codegen.generate();
