@@ -19,6 +19,7 @@ mod diagnostics;
 mod heap;
 mod interner;
 mod ir;
+mod ir_opt;
 mod parser;
 mod register_chunk;
 mod register_vm;
@@ -74,7 +75,9 @@ fn lower_and_compile(
     let mut ty_ctx = checker.check(&nodes)?;
 
     let lowering = Lowering::new(ast, &mut ty_ctx);
-    let body = lowering.lower(&nodes);
+    let mut body = lowering.lower(&nodes);
+
+    ir_opt::optimize(&mut body);
 
     let codegen = Codegen2::new(&body, &mut ty_ctx, interner);
     let code = codegen.generate();
