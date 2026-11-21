@@ -7,7 +7,7 @@ use crate::{
 
 const TRUE: u64 = 1;
 const FALSE: u64 = 0;
-const MAX_REGISTER_PER_FRAME: usize = 256;
+const MAX_REGISTER_PER_FRAME: usize = 16 * 1024;
 
 struct CallFrame {
     ip: *const u8,
@@ -40,6 +40,10 @@ impl CallFrame {
             self.ip = self.ip.add(N);
             bytes
         }
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        u16::from_ne_bytes(self.read_array())
     }
 
     fn read_i32(&mut self) -> i32 {
@@ -90,16 +94,16 @@ impl VM {
             let instr = self.frame.read_instr();
             match instr {
                 Opcode::Const => {
-                    let dest = self.frame.read_u8();
+                    let dest = self.frame.read_u16();
                     let value = self.frame.read_u64();
                     self.store(dest, value);
                 }
                 Opcode::String => {
-                    let dest = self.frame.read_u8();
+                    let dest = self.frame.read_u16();
                     let index = self.frame.read_u64() as usize;
                     let obj = *self.string_pool.entry(index).or_insert_with(|| {
-                        let len = unsafe { *(self.code.as_ptr().add(index) as *const [u8; 4]) };
-                        let len = u32::from_ne_bytes(len) as usize;
+                        let len = self.code[index..].first_chunk().unwrap();
+                        let len = u32::from_ne_bytes(*len) as usize;
                         let index = index + 4;
                         let data = &self.code[index..index + len];
                         let obj = self.heap.alloc_string(data);
@@ -108,12 +112,12 @@ impl VM {
                     self.store(dest, obj);
                 }
                 Opcode::Call => {
-                    let callee = self.frame.read_u8();
+                    let callee = self.frame.read_u16();
                     let function = self.load(callee);
                     self.call(function, callee);
                 }
                 Opcode::JumpIfFalse => {
-                    let cond = self.frame.read_u8();
+                    let cond = self.frame.read_u16();
                     let offset = self.frame.read_i32();
                     let cond = self.load(cond);
                     if cond == FALSE {
@@ -124,16 +128,19 @@ impl VM {
                     let offset = self.frame.read_i32();
                     self.frame.jump(offset);
                 }
-
                 Opcode::Struct => {
-                    let [dest, start, count] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let start = self.frame.read_u16();
+                    let count = self.frame.read_u8();
                     let i = self.frame.sp + (start as usize);
                     let fields = &self.stack[i..i + count as usize];
                     let obj = self.heap.alloc_struct(fields);
                     self.store(dest, obj as u64);
                 }
                 Opcode::RepeatStruct => {
-                    let [dest, value, count] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let value = self.frame.read_u16();
+                    let count = self.frame.read_u16();
                     let value = self.load(value);
                     let count = self.load(count) as usize;
                     let data = vec![value; count];
@@ -141,26 +148,34 @@ impl VM {
                     self.store(dest, obj as u64);
                 }
                 Opcode::GetStructProperty => {
-                    let [dest, obj, index] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let obj = self.frame.read_u16();
+                    let index = self.frame.read_u8();
                     let obj = self.load(obj) as usize;
                     let value = self.heap.get_field(obj, index as usize);
                     self.store(dest, value);
                 }
                 Opcode::SetStructProperty => {
-                    let [obj, index, value] = self.frame.read_array();
+                    let obj = self.frame.read_u16();
+                    let index = self.frame.read_u8();
+                    let value = self.frame.read_u16();
                     let obj = self.load(obj) as usize;
                     let value = self.load(value);
                     self.heap.set_field(obj, index as usize, value);
                 }
                 Opcode::GetStructIndex => {
-                    let [dest, obj, index] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let obj = self.frame.read_u16();
+                    let index = self.frame.read_u16();
                     let obj = self.load(obj) as usize;
                     let index = self.load(index) as usize;
                     let value = self.heap.get_field(obj, index);
                     self.store(dest, value);
                 }
                 Opcode::SetStructIndex => {
-                    let [obj, index, value] = self.frame.read_array();
+                    let obj = self.frame.read_u16();
+                    let index = self.frame.read_u16();
+                    let value = self.frame.read_u16();
                     let obj = self.load(obj) as usize;
                     let index = self.load(index) as usize;
                     let value = self.load(value);
@@ -174,69 +189,77 @@ impl VM {
                     }
                 }
                 Opcode::PrintF64 => {
-                    let reg = self.frame.read_u8();
+                    let reg = self.frame.read_u16();
                     let value = self.load(reg);
                     let value = f64::from_bits(value);
                     println!("{value}");
                 }
                 Opcode::PrintI64 => {
-                    let reg = self.frame.read_u8();
+                    let reg = self.frame.read_u16();
                     let value = self.load(reg);
                     let value = cast!(value, i64);
                     println!("{value}");
                 }
                 Opcode::PrintU64 => {
-                    let reg = self.frame.read_u8();
+                    let reg = self.frame.read_u16();
                     let value = self.load(reg);
                     println!("{value}");
                 }
                 Opcode::PrintString => {
-                    let reg = self.frame.read_u8();
+                    let reg = self.frame.read_u16();
                     let value = self.load(reg);
                     let bytes = self.heap.data(value as usize);
                     let value = std::str::from_utf8(bytes).unwrap();
                     println!("{value}");
                 }
                 Opcode::PrintBool => {
-                    let reg = self.frame.read_u8();
+                    let reg = self.frame.read_u16();
                     let value = self.load(reg);
                     println!("{}", value == TRUE);
                 }
                 Opcode::PrintObj => {
-                    self.frame.read_u8();
+                    self.frame.read_u16();
                     println!("<object>");
                 }
                 Opcode::Copy => {
-                    let [dest, src] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let src = self.frame.read_u16();
                     let value = self.load(src);
                     self.store(dest, value);
                 }
                 Opcode::Not => {
-                    let [dest, src] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let src = self.frame.read_u16();
                     let value = self.load(src);
                     self.store(dest, (value == FALSE) as u64);
                 }
                 Opcode::F64Neg => {
-                    let [dest, src] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let src = self.frame.read_u16();
                     let value = self.load(src);
                     let value = -f64::from_bits(value);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::I64Neg => {
-                    let [dest, src] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let src = self.frame.read_u16();
                     let value = self.load(src);
                     let value = cast!(value, i64).wrapping_mul(-1);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::Equal => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let lhs = self.load(lhs);
                     let rhs = self.load(rhs);
                     let value = lhs == rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::NotEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let lhs = self.load(lhs);
                     let rhs = self.load(rhs);
                     let value = lhs != rhs;
@@ -244,210 +267,270 @@ impl VM {
                 }
 
                 Opcode::F64Add => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) + f64::from_bits(b);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Sub => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) - f64::from_bits(b);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Mul => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) * f64::from_bits(b);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Div => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) / f64::from_bits(b);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Greater => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) > f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64GreaterEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) >= f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Less => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) < f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64LessEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) <= f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Equal => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) == f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64NotEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = f64::from_bits(a) != f64::from_bits(b);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Add => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64).wrapping_add(cast!(b, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Sub => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64).wrapping_sub(cast!(b, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Mul => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64).wrapping_mul(cast!(b, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Div => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64).wrapping_div(cast!(b, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Greater => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) > cast!(b, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64GreaterEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) >= cast!(b, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Less => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) < cast!(b, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64LessEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) <= cast!(b, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Or => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) | cast!(b, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64And => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = cast!(a, i64) & cast!(b, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::U64Add => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a.wrapping_add(b);
                     self.store(dest, value);
                 }
                 Opcode::U64Sub => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a.wrapping_sub(b);
                     self.store(dest, value);
                 }
                 Opcode::U64Mul => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a.wrapping_mul(b);
                     self.store(dest, value);
                 }
                 Opcode::U64Div => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a.wrapping_div(b);
                     self.store(dest, value);
                 }
                 Opcode::U64Greater => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a > b;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64GreaterEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a >= b;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Less => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a < b;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64LessEqual => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a <= b;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Or => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a | b;
                     self.store(dest, value);
                 }
                 Opcode::U64And => {
-                    let [dest, lhs, rhs] = self.frame.read_array();
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u16();
                     let a = self.load(lhs);
                     let b = self.load(rhs);
                     let value = a & b;
@@ -457,15 +540,15 @@ impl VM {
         }
     }
 
-    fn load(&mut self, reg: u8) -> u64 {
+    fn load(&mut self, reg: u16) -> u64 {
         self.stack[self.frame.sp + reg as usize]
     }
 
-    fn store(&mut self, reg: u8, value: u64) {
+    fn store(&mut self, reg: u16, value: u64) {
         self.stack[self.frame.sp + reg as usize] = value;
     }
 
-    fn call(&mut self, function: u64, callee_reg: u8) {
+    fn call(&mut self, function: u64, callee_reg: u16) {
         let base = self.frame.sp + callee_reg as usize;
         if self.stack.len() < base + MAX_REGISTER_PER_FRAME {
             self.stack.resize(base + MAX_REGISTER_PER_FRAME, 0);
@@ -511,7 +594,7 @@ fn test_run() {
     code.op_binary(Opcode::U64Add, 0, 4, 5);
     code.op_return();
 
-    code.write_u64_at(2, function);
+    code.write_u64_at(3, function);
 
     let mut vm = VM::new(code);
     let start = Instant::now();

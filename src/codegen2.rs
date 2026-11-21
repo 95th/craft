@@ -131,8 +131,9 @@ impl<'a> Codegen2<'a> {
                 }
                 ir::Projection::Index(index) => {
                     let obj = self.gen_reg(place.reg);
+                    let index = self.gen_reg(index);
                     let value = self.gen_rvalue(value, None);
-                    self.code.op_set_struct_index(obj, index as u8, value);
+                    self.code.op_set_struct_index(obj, index, value);
                 }
                 ir::Projection::None => {
                     let reg = self.gen_reg(place.reg);
@@ -209,7 +210,7 @@ impl<'a> Codegen2<'a> {
                 }
                 self.gen_operand(callee, Some(first));
                 for i in 0..args.len() {
-                    self.gen_operand(args[i], Some(first + i as u8 + 1));
+                    self.gen_operand(args[i], Some(first + i as Reg + 1));
                 }
                 self.code.op_call(first);
                 self.next_reg = first + 1;
@@ -319,12 +320,12 @@ impl<'a> Codegen2<'a> {
                 self.code.op_const(dest, x);
             }
             ir::Constant::String(s) => {
-                let offset = self.code.len() + 2;
+                let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_string(dest, 0);
                 self.string_worklist.push((s, offset));
             }
             ir::Constant::Function(id) => {
-                let offset = self.code.len() + 2;
+                let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_const(dest, 0);
                 self.function_worklist.push((id, offset));
             }

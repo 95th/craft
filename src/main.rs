@@ -1020,6 +1020,7 @@ mod tests {
     }
 
     #[test]
+    // #[cfg_attr(feature = "lower", should_panic)]
     fn test_long_locals() {
         let mut source = String::new();
         for i in 0..1000 {
