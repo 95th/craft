@@ -25,7 +25,7 @@ impl BranchForwarding {
         }
     }
 
-    pub fn collect_reachable_blocks(&mut self, ir: &ir::Ir, entry: ir::BasicBlockId) {
+    fn collect_reachable_blocks(&mut self, ir: &ir::Ir, entry: ir::BasicBlockId) {
         let mut seen = FxHashSet::default();
         let mut pending = VecDeque::new();
         pending.push_back(entry);
@@ -48,7 +48,7 @@ impl BranchForwarding {
         }
     }
 
-    pub fn collect_empty_blocks(&mut self, ir: &ir::Ir) {
+    fn collect_empty_blocks(&mut self, ir: &ir::Ir) {
         for &block in self.reachable.iter() {
             if ir.basic_blocks[block].statements.is_empty()
                 && let ir::Terminator::Jump { target } = ir.basic_blocks[block].terminator
@@ -59,7 +59,7 @@ impl BranchForwarding {
         }
     }
 
-    pub fn optimize(&self, ir: &mut ir::Ir) {
+    fn optimize(&self, ir: &mut ir::Ir) {
         for &block in self.reachable.iter() {
             match &mut ir.basic_blocks[block].terminator {
                 ir::Terminator::Jump { target } => {
