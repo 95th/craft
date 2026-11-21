@@ -7,19 +7,26 @@ use crate::{
 
 const TRUE: u64 = 1;
 const FALSE: u64 = 0;
-const MAX_REGISTER_PER_FRAME: usize = 16 * 1024;
 
 struct CallFrame {
     ip: *const u8,
     sp: usize,
+    size: u16,
+    return_reg: u16,
 }
 
 impl CallFrame {
-    fn new(code: &[u8], function: usize, sp: usize) -> Self {
-        Self {
+    fn new(code: &[u8], function: usize, sp: usize, return_reg: u16) -> Self {
+        let mut frame = Self {
             ip: unsafe { code.as_ptr().add(function) },
             sp,
-        }
+            size: 0,
+            return_reg,
+        };
+        let instr = frame.read_instr();
+        debug_assert_eq!(instr, Opcode::FnStart);
+        frame.size = frame.read_u16();
+        frame
     }
 
     fn read_instr(&mut self) -> Opcode {
@@ -79,9 +86,10 @@ pub struct VM {
 impl VM {
     pub fn new(code: Code) -> Self {
         let code = code.into_inner();
+        let frame = CallFrame::new(&code, 0, 0, 0);
         Self {
-            stack: vec![0; MAX_REGISTER_PER_FRAME],
-            frame: CallFrame::new(&code, 0, 0),
+            stack: vec![0; frame.size as usize],
+            frame,
             frames: Vec::new(),
             code,
             heap: Heap::new(),
@@ -112,9 +120,11 @@ impl VM {
                     self.store(dest, obj);
                 }
                 Opcode::Call => {
+                    let dest = self.frame.read_u16();
                     let callee = self.frame.read_u16();
-                    let function = self.load(callee);
-                    self.call(function, callee);
+                    let callee = self.load(callee);
+                    let count = self.frame.read_u8();
+                    self.call(dest, callee, count);
                 }
                 Opcode::JumpIfTrue => {
                     let cond = self.frame.read_u16();
@@ -138,11 +148,14 @@ impl VM {
                 }
                 Opcode::Struct => {
                     let dest = self.frame.read_u16();
-                    let start = self.frame.read_u16();
                     let count = self.frame.read_u8();
-                    let i = self.frame.sp + (start as usize);
-                    let fields = &self.stack[i..i + count as usize];
-                    let obj = self.heap.alloc_struct(fields);
+                    let mut args = Vec::new();
+                    for _ in 0..count {
+                        let arg = self.frame.read_u16();
+                        let arg = self.load(arg);
+                        args.push(arg);
+                    }
+                    let obj = self.heap.alloc_struct(&args);
                     self.store(dest, obj as u64);
                 }
                 Opcode::RepeatStruct => {
@@ -191,7 +204,10 @@ impl VM {
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
+                        let return_reg = self.frame.return_reg;
+                        let value = self.stack[self.frame.sp];
                         self.frame = frame;
+                        self.store(return_reg, value);
                     } else {
                         return;
                     }
@@ -544,6 +560,7 @@ impl VM {
                     let value = a & b;
                     self.store(dest, value);
                 }
+                Opcode::FnStart => unreachable!(),
             }
         }
     }
@@ -556,15 +573,18 @@ impl VM {
         self.stack[self.frame.sp + reg as usize] = value;
     }
 
-    fn call(&mut self, function: u64, callee_reg: u16) {
-        let base = self.frame.sp + callee_reg as usize;
-        if self.stack.len() < base + MAX_REGISTER_PER_FRAME {
-            self.stack.resize(base + MAX_REGISTER_PER_FRAME, 0);
+    fn call(&mut self, dest: u16, function: u64, args: u8) {
+        let sp = self.frame.sp + self.frame.size as usize;
+        let mut frame = CallFrame::new(&self.code, function as usize, sp, dest);
+        frame.size = frame.size.max(1 + args as u16);
+        if self.stack.len() < sp + frame.size as usize {
+            self.stack.resize(sp + frame.size as usize, 0);
         }
-        self.frames.push(std::mem::replace(
-            &mut self.frame,
-            CallFrame::new(&self.code, function as usize, base),
-        ))
+        for i in 0..args {
+            let arg = self.frame.read_u16();
+            self.stack[sp + 1 + i as usize] = self.load(arg);
+        }
+        self.frames.push(std::mem::replace(&mut self.frame, frame))
     }
 }
 
@@ -573,14 +593,18 @@ fn test_run() {
     use std::time::Instant;
 
     let mut code = Code::new();
+    code.start_function(16);
+    let offset = code.len() + 3;
     code.op_const(0, 0);
     code.op_const(1, 35);
-    code.op_call(0);
+    code.op_call(0, 0, vec![1]);
     code.op_print_u64(0);
     code.op_return();
 
     let function = code.len() as u64;
+    code.write_u64_at(offset, function);
 
+    code.start_function(16);
     code.op_const(2, 2);
     code.op_binary(Opcode::U64Less, 3, 1, 2);
 
@@ -592,17 +616,17 @@ fn test_run() {
     code.op_const(4, function);
     code.op_const(5, 1);
     code.op_binary(Opcode::U64Sub, 5, 1, 5);
-    code.op_call(4);
+    code.op_call(4, 4, vec![5]);
 
     code.op_const(5, function);
     code.op_const(6, 2);
     code.op_binary(Opcode::U64Sub, 6, 1, 6);
-    code.op_call(5);
+    code.op_call(5, 5, vec![6]);
 
     code.op_binary(Opcode::U64Add, 0, 4, 5);
     code.op_return();
 
-    code.write_u64_at(3, function);
+    code.disassemble(code.len());
 
     let mut vm = VM::new(code);
     let start = Instant::now();

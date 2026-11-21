@@ -1,9 +1,12 @@
+use std::{cmp::Reverse, collections::BinaryHeap};
+
 use rustc_hash::FxHashMap;
 
 use crate::{
     bind::SymbolId,
     interner::{StrId, StrInterner},
     ir,
+    liveness::LivenessAnalysis,
     register_chunk::{Code, Opcode::*, Reg},
     typechecker::TyCtxt,
     types::Ty,
@@ -18,7 +21,6 @@ pub struct Codegen2<'a> {
     function_worklist: Vec<(SymbolId, usize)>,
     string_worklist: Vec<(StrId, usize)>,
     reg_map: FxHashMap<u32, Reg>,
-    next_reg: Reg,
 }
 
 impl<'a> Codegen2<'a> {
@@ -32,7 +34,6 @@ impl<'a> Codegen2<'a> {
             function_worklist: Vec::new(),
             string_worklist: Vec::new(),
             reg_map: FxHashMap::default(),
-            next_reg: 0,
         }
     }
 
@@ -67,9 +68,8 @@ impl<'a> Codegen2<'a> {
     }
 
     fn gen_function(&mut self, function: ir::BasicBlockId) {
-        self.reg_map.clear();
-        self.next_reg = 0;
-
+        let max_regs = self.allocate_registers(function);
+        self.code.start_function(max_regs);
         let mut offsets = FxHashMap::default();
         let mut blocks = self.ir.reachable_postorder(function);
         blocks.reverse();
@@ -85,6 +85,42 @@ impl<'a> Codegen2<'a> {
         for (block, patch_offset) in self.jump_worklist.drain(..) {
             self.code.patch_jump(patch_offset, offsets[&block]);
         }
+    }
+
+    fn allocate_registers(&mut self, function: ir::BasicBlockId) -> u16 {
+        let liveness = LivenessAnalysis::new(self.ir).compute(function);
+
+        let mut intervals: Vec<_> = liveness.reg_interval.iter().copied().enumerate().collect();
+        intervals.sort_by_key(|(_, i)| i.start);
+
+        self.reg_map.clear();
+        let mut active = FxHashMap::<Reg, usize>::default();
+        let mut free = BinaryHeap::<Reverse<Reg>>::new();
+        let mut next_reg = 0;
+        let mut just_freed = Vec::new();
+
+        for (reg_id, interval) in intervals {
+            for (reg, end) in active.iter() {
+                if *end < interval.start {
+                    just_freed.push(*reg);
+                }
+            }
+
+            while let Some(reg) = just_freed.pop() {
+                active.remove(&reg);
+                free.push(Reverse(reg));
+            }
+
+            if let Some(free) = free.pop() {
+                self.reg_map.insert(reg_id as u32, free.0);
+                active.insert(free.0, interval.end);
+            } else {
+                self.reg_map.insert(reg_id as u32, next_reg);
+                active.insert(next_reg, interval.end);
+                next_reg += 1;
+            }
+        }
+        next_reg
     }
 
     fn gen_block(&mut self, block: ir::BasicBlockId) {
@@ -106,7 +142,7 @@ impl<'a> Codegen2<'a> {
                 then_block,
                 else_block,
             } => {
-                let cond = self.gen_operand(cond, None);
+                let cond = self.gen_reg(cond);
                 if let Some(next) = next {
                     if next == then_block {
                         let false_jump = self.code.op_jump_if_false(cond);
@@ -129,32 +165,26 @@ impl<'a> Codegen2<'a> {
     }
 
     fn gen_stmt(&mut self, stmt: &ir::Statement) {
-        match stmt {
-            ir::Statement::Assign { place, value } => match place.projection {
-                ir::Projection::Field(index) => {
-                    let obj = self.gen_reg(place.reg);
-                    let value = self.gen_rvalue(value, None);
-                    self.code.op_set_struct_property(obj, index as u8, value);
-                }
-                ir::Projection::Index(index) => {
-                    let obj = self.gen_reg(place.reg);
-                    let index = self.gen_reg(index);
-                    let value = self.gen_rvalue(value, None);
-                    self.code.op_set_struct_index(obj, index, value);
-                }
-                ir::Projection::None => {
-                    let reg = self.gen_reg(place.reg);
-                    self.gen_rvalue(value, Some(reg));
-                }
-            },
-            ir::Statement::StorageLive { implicit, reg } => {
-                if *implicit {
-                    self.gen_reg(*reg);
-                }
+        match *stmt {
+            ir::Statement::Assign { reg, ref value } => {
+                let reg = self.gen_reg(reg);
+                self.gen_rvalue(value, reg);
             }
-            ir::Statement::Print(operand, ty) => {
-                let value = self.gen_operand(*operand, None);
-                match self.tcx.types.probe_value(*ty) {
+            ir::Statement::SetField { reg, index, value } => {
+                let reg = self.gen_reg(reg);
+                let value = self.gen_reg(value);
+                self.code.op_set_struct_property(reg, index as u8, value);
+            }
+            ir::Statement::SetIndex { reg, index, value } => {
+                let reg = self.gen_reg(reg);
+                let index = self.gen_reg(index);
+                let value = self.gen_reg(value);
+                self.code.op_set_struct_index(reg, index, value);
+            }
+            ir::Statement::ImplicitDef { .. } => {}
+            ir::Statement::Print(reg, ty) => {
+                let value = self.gen_reg(reg);
+                match self.tcx.types.probe_value(ty) {
                     Ty::F64 => self.code.op_print_f64(value),
                     Ty::I64 => self.code.op_print_i64(value),
                     Ty::U64 => self.code.op_print_u64(value),
@@ -166,83 +196,57 @@ impl<'a> Codegen2<'a> {
         }
     }
 
-    fn gen_rvalue(&mut self, value: &ir::RValue, dest: Option<Reg>) -> Reg {
+    fn gen_rvalue(&mut self, value: &ir::RValue, dest: Reg) {
         match *value {
-            ir::RValue::Use(operand) => return self.gen_operand(operand, dest),
-            ir::RValue::Binary { op, lhs, rhs } => return self.gen_binary(op, lhs, rhs, dest),
+            ir::RValue::Use(operand) => {
+                let operand = self.gen_reg(operand);
+                if operand != dest {
+                    self.code.op_copy(dest, operand);
+                }
+            }
+            ir::RValue::Constant(constant) => self.gen_constant(constant, dest),
+            ir::RValue::Field { reg, index } => {
+                let reg = self.gen_reg(reg);
+                self.code.op_get_struct_property(dest, reg, index as u8);
+            }
+            ir::RValue::Index { reg, index } => {
+                let reg = self.gen_reg(reg);
+                let index = self.gen_reg(index);
+                self.code.op_get_struct_index(dest, reg, index);
+            }
+            ir::RValue::Binary { op, lhs, rhs } => self.gen_binary(op, lhs, rhs, dest),
             ir::RValue::Not(operand) => {
-                let dest = self.gen_operand(operand, dest);
-                self.code.op_not(dest, dest);
-                dest
+                let operand = self.gen_reg(operand);
+                self.code.op_not(dest, operand);
             }
             ir::RValue::F64Neg(operand) => {
-                let dest = self.gen_operand(operand, dest);
-                self.code.op_neg_f64(dest, dest);
-                dest
+                let operand = self.gen_reg(operand);
+                self.code.op_neg_f64(dest, operand);
             }
             ir::RValue::I64Neg(operand) => {
-                let dest = self.gen_operand(operand, dest);
-                self.code.op_neg_i64(dest, dest);
-                dest
+                let operand = self.gen_reg(operand);
+                self.code.op_neg_i64(dest, operand);
             }
             ir::RValue::Struct { ref fields } => {
-                let regs: Vec<_> = (0..fields.len()).map(|_| self.temp()).collect();
-                for i in 0..fields.len() {
-                    self.gen_operand(fields[i], Some(regs[i]));
-                }
-                if fields.is_empty() {
-                    let dest = self.dest_or_temp(dest);
-                    self.code.op_struct(dest, 0, 0);
-                    return dest;
-                }
-                let dest = dest.unwrap_or(regs[0]);
-                self.code.op_struct(dest, regs[0], fields.len() as u8);
-                self.next_reg = regs[0] + 1;
-                dest
+                let args = fields.iter().map(|f| self.gen_reg(*f)).collect();
+                self.code.op_struct(dest, args);
             }
             ir::RValue::StructRepeat { value, count } => {
-                let value = self.gen_operand(value, None);
-                let count = self.gen_operand(count, None);
-                let dest = self.dest_or_temp(dest);
+                let value = self.gen_reg(value);
+                let count = self.gen_reg(count);
                 self.code.op_repeat_struct(dest, value, count);
-                dest
             }
             ir::RValue::Call { callee, ref args } => {
-                let first = match dest {
-                    Some(dest) if dest + 1 == self.next_reg => dest,
-                    _ => self.temp(),
-                };
-                for _ in 0..args.len() {
-                    self.temp();
-                }
-                self.gen_operand(callee, Some(first));
-                for i in 0..args.len() {
-                    self.gen_operand(args[i], Some(first + i as Reg + 1));
-                }
-                self.code.op_call(first);
-                self.next_reg = first + 1;
-                match dest {
-                    Some(dest) if dest == first => dest,
-                    Some(dest) => {
-                        self.code.op_copy(dest, first);
-                        dest
-                    }
-                    None => first,
-                }
+                let callee = self.gen_reg(callee);
+                let args = args.iter().map(|a| self.gen_reg(*a)).collect();
+                self.code.op_call(dest, callee, args);
             }
         }
     }
 
-    fn gen_binary(
-        &mut self,
-        op: ir::BinaryOp,
-        lhs: ir::Operand,
-        rhs: ir::Operand,
-        dest: Option<Reg>,
-    ) -> Reg {
-        let dest = self.dest_or_temp(dest);
-        let lhs = self.gen_operand(lhs, None);
-        let rhs = self.gen_operand(rhs, None);
+    fn gen_binary(&mut self, op: ir::BinaryOp, lhs: ir::RegId, rhs: ir::RegId, dest: Reg) {
+        let lhs = self.gen_reg(lhs);
+        let rhs = self.gen_reg(rhs);
         match op {
             ir::BinaryOp::F64Add => self.code.op_binary(F64Add, dest, lhs, rhs),
             ir::BinaryOp::F64Sub => self.code.op_binary(F64Sub, dest, lhs, rhs),
@@ -277,43 +281,9 @@ impl<'a> Codegen2<'a> {
             ir::BinaryOp::Equal => self.code.op_binary(Equal, dest, lhs, rhs),
             ir::BinaryOp::NotEqual => self.code.op_binary(NotEqual, dest, lhs, rhs),
         }
-        dest
     }
 
-    fn gen_operand(&mut self, operand: ir::Operand, dest: Option<Reg>) -> Reg {
-        match operand {
-            ir::Operand::Place(place) => match place.projection {
-                ir::Projection::Field(index) => {
-                    let obj = self.gen_reg(place.reg);
-                    let dest = self.dest_or_temp(dest);
-                    self.code.op_get_struct_property(dest, obj, index as u8);
-                    dest
-                }
-                ir::Projection::Index(index) => {
-                    let obj = self.gen_reg(place.reg);
-                    let index = self.gen_reg(index);
-                    let dest = self.dest_or_temp(dest);
-                    self.code.op_get_struct_index(dest, obj, index);
-                    dest
-                }
-                ir::Projection::None => {
-                    let reg = self.gen_reg(place.reg);
-                    if let Some(dest) = dest
-                        && dest != reg
-                    {
-                        self.code.op_copy(dest, reg);
-                        dest
-                    } else {
-                        reg
-                    }
-                }
-            },
-            ir::Operand::Constant(constant) => self.gen_constant(constant, dest),
-        }
-    }
-
-    fn gen_constant(&mut self, constant: ir::Constant, dest: Option<Reg>) -> Reg {
-        let dest = self.dest_or_temp(dest);
+    fn gen_constant(&mut self, constant: ir::Constant, dest: Reg) {
         match constant {
             ir::Constant::Unit => self.code.op_const(dest, 0),
             ir::Constant::Bool(x) => self.code.op_const(dest, if x { 1 } else { 0 }),
@@ -337,25 +307,9 @@ impl<'a> Codegen2<'a> {
                 self.function_worklist.push((id, offset));
             }
         }
-        dest
     }
 
     fn gen_reg(&mut self, reg_id: ir::RegId) -> Reg {
-        if let Some(reg) = self.reg_map.get(&reg_id) {
-            return *reg;
-        }
-        let reg = self.temp();
-        self.reg_map.insert(reg_id, reg);
-        reg
-    }
-
-    fn dest_or_temp(&mut self, dest: Option<Reg>) -> Reg {
-        dest.unwrap_or_else(|| self.temp())
-    }
-
-    fn temp(&mut self) -> Reg {
-        let reg = self.next_reg;
-        self.next_reg = self.next_reg.checked_add(1).expect("Too many temporaries");
-        reg
+        self.reg_map[&reg_id]
     }
 }

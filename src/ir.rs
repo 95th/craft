@@ -83,16 +83,16 @@ impl<'a> Lowering<'a> {
                 for &p in f.params.iter() {
                     self.lower_stmt(p);
                 }
-                self.lower_expr(f.body, Some(Place::reg(self.return_reg)));
+                self.lower_expr_into(self.return_reg, f.body);
             }
             ast::Stmt::TupleStruct(args) => {
                 let fields = args
                     .fields
                     .iter()
-                    .map(|_| Operand::Place(Place::reg(self.create_register(true))))
+                    .map(|_| self.create_register(true))
                     .collect();
                 self.push_stmt(Statement::Assign {
-                    place: Place::reg(self.return_reg),
+                    reg: self.return_reg,
                     value: RValue::Struct { fields },
                 });
             }
@@ -103,12 +103,12 @@ impl<'a> Lowering<'a> {
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
         match self.ast.stmts[stmt] {
             ast::Stmt::Let { init, .. } => {
-                let reg = self.lower_expr_to_reg(init);
+                let reg = self.lower_expr(init);
                 let symbol = self.ast.stmts.value_binding(stmt);
                 self.symbol_registers.insert(symbol, reg);
             }
             ast::Stmt::Expr { expr, .. } => {
-                self.lower_expr(expr, None);
+                self.lower_expr(expr);
             }
             ast::Stmt::Param { .. } => {
                 let symbol = self.ast.stmts.value_binding(stmt);
@@ -119,18 +119,42 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn lower_expr(&mut self, expr: ast::ExprId, place: Option<Place>) -> Operand {
-        crate::stack_safe(|| self.lower_expr_unsafe(expr, place))
+    fn lower_expr(&mut self, expr: ast::ExprId) -> RegId {
+        match self.ast.exprs[expr] {
+            ast::Expr::Variable(..) => {
+                let symbol_id = self.ast.exprs.value_binding(expr);
+                let symbol = &self.tcx.bcx.symbols[symbol_id];
+                match symbol.kind {
+                    SymbolKind::Let | SymbolKind::Param => self.symbol_registers[&symbol_id],
+                    SymbolKind::Fn => {
+                        self.function_worklist.push_back(symbol_id);
+                        let dest = self.create_register(false);
+                        self.store_constant(dest, Constant::Function(symbol_id));
+                        dest
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => {
+                let dest = self.create_register(false);
+                self.lower_expr_into(dest, expr);
+                dest
+            }
+        }
     }
 
-    fn lower_expr_unsafe(&mut self, expr: ast::ExprId, place: Option<Place>) -> Operand {
+    fn lower_expr_into(&mut self, dest: RegId, expr: ast::ExprId) {
+        crate::stack_safe(|| self.unsafe_lower_expr_into(dest, expr));
+    }
+
+    fn unsafe_lower_expr_into(&mut self, dest: RegId, expr: ast::ExprId) {
         let ty = self.tcx.expr_types[&expr];
-        let value = match self.ast.exprs[expr] {
+        match self.ast.exprs[expr] {
             ast::Expr::Bool(x) => {
-                return self.constant_operand(place, Constant::Bool(x));
+                self.store_constant(dest, Constant::Bool(x));
             }
             ast::Expr::Number(x) => {
-                return self.constant_operand(place, Constant::F64(x));
+                self.store_constant(dest, Constant::F64(x));
             }
             ast::Expr::Int(x) => {
                 let constant = if self.tcx.types.probe_value(ty) == Ty::U64 {
@@ -138,187 +162,174 @@ impl<'a> Lowering<'a> {
                 } else {
                     Constant::I64(x as i64)
                 };
-                return self.constant_operand(place, constant);
+                self.store_constant(dest, constant);
             }
             ast::Expr::String(s) => {
-                return self.constant_operand(place, Constant::String(s));
+                self.store_constant(dest, Constant::String(s));
             }
             ast::Expr::Binary {
                 lhs,
                 op: ast::BinaryOp::Or,
                 rhs,
             } => {
-                let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
-                self.lower_expr(lhs, Some(place));
+                self.lower_expr_into(dest, lhs);
 
                 let merge_block = self.create_block();
                 let false_block = self.create_block();
                 self.set_terminator(Terminator::Branch {
-                    cond: Operand::Place(place),
+                    cond: dest,
                     then_block: merge_block,
                     else_block: false_block,
                 });
 
                 self.current_block = false_block;
-                self.lower_expr(rhs, Some(place));
+                self.lower_expr_into(dest, rhs);
                 self.set_terminator(Terminator::Jump {
                     target: merge_block,
                 });
 
                 self.current_block = merge_block;
-                return Operand::Place(place);
             }
             ast::Expr::Binary {
                 lhs,
                 op: ast::BinaryOp::And,
                 rhs,
             } => {
-                let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
-                self.lower_expr(lhs, Some(place));
-
+                self.lower_expr_into(dest, lhs);
                 let merge_block = self.create_block();
                 let true_block = self.create_block();
                 self.set_terminator(Terminator::Branch {
-                    cond: Operand::Place(place),
+                    cond: dest,
                     then_block: true_block,
                     else_block: merge_block,
                 });
 
                 self.current_block = true_block;
-                self.lower_expr(rhs, Some(place));
+                self.lower_expr_into(dest, rhs);
                 self.set_terminator(Terminator::Jump {
                     target: merge_block,
                 });
 
                 self.current_block = merge_block;
-                return Operand::Place(place);
             }
             ast::Expr::Binary { lhs, op, rhs } => {
                 let lhs_ty = self.tcx.expr_types[&lhs];
                 let op = BinaryOp::from_ast(op, self.tcx.types.probe_value(lhs_ty));
-                let lhs = self.lower_expr(lhs, None);
-                let rhs = self.lower_expr(rhs, None);
-                RValue::Binary { op, lhs, rhs }
+                let lhs = self.lower_expr(lhs);
+                let rhs = self.lower_expr(rhs);
+                self.store_value(dest, RValue::Binary { op, lhs, rhs });
             }
             ast::Expr::Not(e) => {
-                let operand = self.lower_expr(e, None);
-                RValue::Not(operand)
+                let operand = self.lower_expr(e);
+                self.store_value(dest, RValue::Not(operand))
             }
             ast::Expr::Negate(e) => {
-                let operand = self.lower_expr(e, None);
-                match self.tcx.types.probe_value(ty) {
+                let operand = self.lower_expr(e);
+                let value = match self.tcx.types.probe_value(ty) {
                     Ty::F64 => RValue::F64Neg(operand),
                     Ty::I64 => RValue::I64Neg(operand),
                     _ => unreachable!(),
-                }
+                };
+                self.store_value(dest, value);
             }
             ast::Expr::Call { callee, ref args } => {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.tcx.bcx.std.print {
-                    let arg = self.lower_expr(args[0], None);
+                    let arg = self.lower_expr(args[0]);
                     let arg_ty = self.tcx.expr_types[&args[0]];
                     self.push_stmt(Statement::Print(arg, arg_ty));
-                    return self.constant_operand(place, Constant::Unit);
+                    return;
                 }
 
-                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
                 if symbol != SymbolId::MAX
                     && let decl = self.tcx.bcx.symbols[symbol].declaration
                     && let ast::Stmt::TupleStruct(_) = &self.ast.stmts[decl]
                 {
-                    RValue::Struct { fields: args }
+                    let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                    self.store_value(dest, RValue::Struct { fields: args })
                 } else {
-                    let callee = self.lower_expr(callee, None);
-                    RValue::Call { callee, args }
+                    let callee = self.lower_expr(callee);
+                    let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                    self.store_value(dest, RValue::Call { callee, args })
                 }
             }
             ast::Expr::Array(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
-                RValue::Struct { fields: args }
+                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                self.store_value(dest, RValue::Struct { fields: args })
             }
             ast::Expr::ArrayRepeat { expr, count } => {
-                let value = self.lower_expr(expr, None);
-                let count = self.lower_expr(count, None);
-                RValue::StructRepeat { value, count }
+                let value = self.lower_expr(expr);
+                let count = self.lower_expr(count);
+                self.store_value(dest, RValue::StructRepeat { value, count })
             }
             ast::Expr::Struct(ref s) => {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let declared = self.tcx.struct_properties[&symbol].clone();
                 let args = declared
                     .keys()
-                    .map(|name| self.lower_expr(s.fields[name], None))
+                    .map(|name| self.lower_expr(s.fields[name]))
                     .collect();
-                RValue::Struct { fields: args }
+                self.store_value(dest, RValue::Struct { fields: args })
             }
             ast::Expr::Tuple(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x, None)).collect();
-                RValue::Struct { fields: args }
+                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
+                self.store_value(dest, RValue::Struct { fields: args })
             }
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
-                let reg = self.lower_expr_to_reg(obj);
+                let reg = self.lower_expr(obj);
                 let Ty::Named(symbol) = self.tcx.types.probe_value(obj_ty) else {
                     unreachable!();
                 };
                 let properties = &self.tcx.struct_properties[&symbol];
                 let index = properties.get_index_of(&name).unwrap();
-                return self.store_in_place(
-                    place,
-                    Operand::Place(Place {
+                self.store_value(
+                    dest,
+                    RValue::Field {
                         reg,
-                        projection: Projection::Field(index as u16),
-                    }),
+                        index: index as u16,
+                    },
                 );
             }
             ast::Expr::TupleField { obj, index } => {
-                let reg = self.lower_expr_to_reg(obj);
-                return self.store_in_place(
-                    place,
-                    Operand::Place(Place {
+                let reg = self.lower_expr(obj);
+                self.store_value(
+                    dest,
+                    RValue::Field {
                         reg,
-                        projection: Projection::Field(index as u16),
-                    }),
+                        index: index as u16,
+                    },
                 );
             }
             ast::Expr::ArrayIndex { array, index } => {
-                let array = self.lower_expr_to_reg(array);
-                let index = self.lower_expr_to_reg(index);
-                return self.store_in_place(
-                    place,
-                    Operand::Place(Place {
-                        reg: array,
-                        projection: Projection::Index(index),
-                    }),
-                );
+                let array = self.lower_expr(array);
+                let index = self.lower_expr(index);
+                self.store_value(dest, RValue::Index { reg: array, index });
             }
             ast::Expr::Block { ref stmts, expr } => {
-                if stmts.is_empty() {
-                    return match expr {
-                        Some(expr) => self.lower_expr(expr, place),
-                        None => self.constant_operand(place, Constant::Unit),
-                    };
-                }
-
                 for &stmt in stmts {
                     self.lower_stmt(stmt);
                 }
-                return if let Some(expr) = expr {
-                    self.lower_expr(expr, place)
-                } else {
-                    self.constant_operand(place, Constant::Unit)
-                };
+                if let Some(expr) = expr {
+                    self.lower_expr_into(dest, expr)
+                }
             }
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
                 let symbol = &self.tcx.bcx.symbols[symbol_id];
-                return match symbol.kind {
+                match symbol.kind {
                     SymbolKind::Let | SymbolKind::Param => {
                         let reg = self.symbol_registers[&symbol_id];
-                        self.store_in_place(place, Operand::Place(Place::reg(reg)))
+                        if reg != dest {
+                            self.push_stmt(Statement::Assign {
+                                reg: dest,
+                                value: RValue::Use(reg),
+                            });
+                        }
                     }
                     SymbolKind::Fn => {
                         self.function_worklist.push_back(symbol_id);
-                        self.constant_operand(place, Constant::Function(symbol_id))
+                        self.store_constant(dest, Constant::Function(symbol_id));
                     }
                     _ => unreachable!(),
                 };
@@ -328,7 +339,7 @@ impl<'a> Lowering<'a> {
                 then_clause,
                 else_clause,
             } => {
-                let cond = self.lower_expr(cond, None);
+                let cond = self.lower_expr(cond);
 
                 let then_block = self.create_block();
                 let else_block = else_clause.map(|_| self.create_block());
@@ -341,7 +352,7 @@ impl<'a> Lowering<'a> {
                 });
 
                 self.current_block = then_block;
-                self.lower_expr(then_clause, place);
+                self.lower_expr_into(dest, then_clause);
                 self.set_terminator(Terminator::Jump {
                     target: merge_block,
                 });
@@ -350,30 +361,29 @@ impl<'a> Lowering<'a> {
                     && let Some(else_block) = else_block
                 {
                     self.current_block = else_block;
-                    self.lower_expr(else_clause, place);
+                    self.lower_expr_into(dest, else_clause);
                     self.set_terminator(Terminator::Jump {
                         target: merge_block,
                     });
                 }
 
                 self.current_block = merge_block;
-                return place.map_or(Operand::Constant(Constant::Unit), |place| {
-                    Operand::Place(place)
-                });
             }
             ast::Expr::Assign { lhs, rhs } => {
-                let lhs_place = match self.ast.exprs[lhs] {
+                match self.ast.exprs[lhs] {
                     ast::Expr::Variable(_) => {
                         let symbol = self.ast.exprs.value_binding(lhs);
-                        let reg = self.symbol_registers[&symbol];
-                        Place::reg(reg)
+                        let place = self.symbol_registers[&symbol];
+                        self.lower_expr_into(place, rhs);
                     }
                     ast::Expr::TupleField { obj, index } => {
-                        let obj = self.lower_expr_to_reg(obj);
-                        Place {
+                        let obj = self.lower_expr(obj);
+                        let value = self.lower_expr(rhs);
+                        self.push_stmt(Statement::SetField {
                             reg: obj,
-                            projection: Projection::Field(index),
-                        }
+                            index,
+                            value,
+                        });
                     }
                     ast::Expr::StructField { obj, name } => {
                         let ty = self.tcx.expr_types[&obj];
@@ -381,56 +391,56 @@ impl<'a> Lowering<'a> {
                             unreachable!();
                         };
                         let properties = &self.tcx.struct_properties[&symbol];
-                        let index = properties.get_index_of(&name).unwrap();
+                        let index = properties.get_index_of(&name).unwrap() as u16;
 
-                        let obj = self.lower_expr_to_reg(obj);
-                        Place {
+                        let obj = self.lower_expr(obj);
+                        let value = self.lower_expr(rhs);
+                        self.push_stmt(Statement::SetField {
                             reg: obj,
-                            projection: Projection::Field(index as u16),
-                        }
+                            index,
+                            value,
+                        });
                     }
                     ast::Expr::ArrayIndex { array, index } => {
-                        let array = self.lower_expr_to_reg(array);
-                        let index = self.lower_expr_to_reg(index);
-                        Place {
+                        let array = self.lower_expr(array);
+                        let index = self.lower_expr(index);
+                        let value = self.lower_expr(rhs);
+                        self.push_stmt(Statement::SetIndex {
                             reg: array,
-                            projection: Projection::Index(index),
-                        }
+                            index,
+                            value,
+                        });
                     }
                     _ => unreachable!(),
                 };
-                self.lower_expr(rhs, Some(lhs_place));
-                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::While { cond, body } => {
                 let body_block = self.create_block();
                 let cond_block = self.create_block();
                 let merge_block = self.create_block();
-                let cond_reg = self.create_register(false);
 
-                let cond_operand = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                let cond_reg = self.lower_expr(cond);
                 self.set_terminator(Terminator::Branch {
-                    cond: cond_operand,
+                    cond: cond_reg,
                     then_block: body_block,
                     else_block: merge_block,
                 });
 
                 self.current_block = body_block;
                 self.enter_loop(cond_block, merge_block);
-                self.lower_expr(body, None);
+                self.lower_expr(body);
                 self.loop_contexts.pop();
                 self.set_terminator(Terminator::Jump { target: cond_block });
 
                 self.current_block = cond_block;
-                let cond_operand = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                let cond_reg = self.lower_expr(cond);
                 self.set_terminator(Terminator::Branch {
-                    cond: cond_operand,
+                    cond: cond_reg,
                     then_block: body_block,
                     else_block: merge_block,
                 });
 
                 self.current_block = merge_block;
-                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::For {
                 init,
@@ -446,10 +456,8 @@ impl<'a> Lowering<'a> {
                 let incr_block = self.create_block();
                 let merge_block = self.create_block();
 
-                let cond_reg = self.create_register(false);
-
                 if let Some(cond) = cond {
-                    let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                    let cond = self.lower_expr(cond);
                     self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
@@ -461,16 +469,16 @@ impl<'a> Lowering<'a> {
 
                 self.current_block = body_block;
                 self.enter_loop(incr_block, merge_block);
-                self.lower_expr(body, None);
+                self.lower_expr(body);
                 self.loop_contexts.pop();
                 self.set_terminator(Terminator::Jump { target: incr_block });
 
                 self.current_block = incr_block;
                 if let Some(incr) = incr {
-                    self.lower_expr(incr, None);
+                    self.lower_expr(incr);
                 }
                 if let Some(cond) = cond {
-                    let cond = self.lower_expr(cond, Some(Place::reg(cond_reg)));
+                    let cond = self.lower_expr(cond);
                     self.set_terminator(Terminator::Branch {
                         cond,
                         then_block: body_block,
@@ -481,16 +489,13 @@ impl<'a> Lowering<'a> {
                 }
 
                 self.current_block = merge_block;
-                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Break => {
                 let context = *self.loop_contexts.last().unwrap();
                 self.set_terminator(Terminator::Jump {
                     target: context.break_target,
                 });
-
                 self.current_block = self.create_block();
-                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Continue => {
                 let context = *self.loop_contexts.last().unwrap();
@@ -499,47 +504,26 @@ impl<'a> Lowering<'a> {
                 });
 
                 self.current_block = self.create_block();
-                return self.constant_operand(place, Constant::Unit);
             }
             ast::Expr::Return(expr) => {
-                let value = if let Some(expr) = expr {
-                    self.lower_expr(expr, None)
-                } else {
-                    Operand::Constant(Constant::Unit)
-                };
-                self.push_stmt(Statement::Assign {
-                    place: Place::reg(self.return_reg),
-                    value: RValue::Use(value),
-                });
+                if let Some(expr) = expr {
+                    self.lower_expr_into(self.return_reg, expr);
+                }
                 self.set_terminator(Terminator::Return);
                 self.current_block = self.create_block();
-                return self.constant_operand(place, Constant::Unit);
             }
-            ast::Expr::Unit => return self.constant_operand(place, Constant::Unit),
-        };
-        let place = place.unwrap_or_else(|| Place::reg(self.create_register(false)));
-        self.push_stmt(Statement::Assign { place, value });
-        Operand::Place(place)
-    }
-
-    fn lower_expr_to_reg(&mut self, expr: ast::ExprId) -> RegId {
-        let reg = self.create_register(false);
-        self.lower_expr(expr, Some(Place::reg(reg)));
-        reg
-    }
-
-    fn constant_operand(&mut self, place: Option<Place>, value: Constant) -> Operand {
-        self.store_in_place(place, Operand::Constant(value))
-    }
-
-    fn store_in_place(&mut self, place: Option<Place>, operand: Operand) -> Operand {
-        if let Some(place) = place {
-            self.push_stmt(Statement::Assign {
-                place,
-                value: RValue::Use(operand),
-            });
+            ast::Expr::Unit => {
+                self.store_constant(dest, Constant::Unit);
+            }
         }
-        operand
+    }
+
+    fn store_constant(&mut self, dest: RegId, value: Constant) {
+        self.store_value(dest, RValue::Constant(value));
+    }
+
+    fn store_value(&mut self, dest: RegId, value: RValue) {
+        self.push_stmt(Statement::Assign { reg: dest, value });
     }
 
     fn set_terminator(&mut self, terminator: Terminator) {
@@ -559,7 +543,9 @@ impl<'a> Lowering<'a> {
     fn create_register(&mut self, implicit: bool) -> RegId {
         let reg = self.next_register;
         self.next_register += 1;
-        self.push_stmt(Statement::StorageLive { reg, implicit });
+        if implicit {
+            self.push_stmt(Statement::ImplicitDef { reg });
+        }
         reg
     }
 
@@ -597,9 +583,24 @@ pub struct BasicBlock {
 
 #[derive(Debug)]
 pub enum Statement {
-    Assign { place: Place, value: RValue },
-    StorageLive { reg: RegId, implicit: bool },
-    Print(Operand, TyId),
+    Assign {
+        reg: RegId,
+        value: RValue,
+    },
+    SetField {
+        reg: RegId,
+        index: u16,
+        value: RegId,
+    },
+    SetIndex {
+        reg: RegId,
+        index: RegId,
+        value: RegId,
+    },
+    ImplicitDef {
+        reg: RegId,
+    },
+    Print(RegId, TyId),
 }
 
 #[derive(Debug)]
@@ -608,7 +609,7 @@ pub enum Terminator {
         target: BasicBlockId,
     },
     Branch {
-        cond: Operand,
+        cond: RegId,
         then_block: BasicBlockId,
         else_block: BasicBlockId,
     },
@@ -617,45 +618,35 @@ pub enum Terminator {
 
 #[derive(Debug)]
 pub enum RValue {
-    Use(Operand),
+    Constant(Constant),
+    Use(RegId),
+    Field {
+        reg: RegId,
+        index: u16,
+    },
+    Index {
+        reg: RegId,
+        index: RegId,
+    },
     Binary {
         op: BinaryOp,
-        lhs: Operand,
-        rhs: Operand,
+        lhs: RegId,
+        rhs: RegId,
     },
-    Not(Operand),
-    F64Neg(Operand),
-    I64Neg(Operand),
+    Not(RegId),
+    F64Neg(RegId),
+    I64Neg(RegId),
     Struct {
-        fields: Vec<Operand>,
+        fields: Vec<RegId>,
     },
     StructRepeat {
-        value: Operand,
-        count: Operand,
+        value: RegId,
+        count: RegId,
     },
     Call {
-        callee: Operand,
-        args: Vec<Operand>,
+        callee: RegId,
+        args: Vec<RegId>,
     },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Operand {
-    Place(Place),
-    Constant(Constant),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Place {
-    pub reg: RegId,
-    pub projection: Projection,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Projection {
-    None,
-    Field(u16),
-    Index(RegId),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -759,15 +750,6 @@ impl BinaryOp {
                 ast::BinaryOp::NotEqual => Self::NotEqual,
                 _ => unreachable!(),
             },
-        }
-    }
-}
-
-impl Place {
-    fn reg(reg: RegId) -> Self {
-        Self {
-            reg,
-            projection: Projection::None,
         }
     }
 }

@@ -25,21 +25,14 @@ impl<'a> LivenessAnalysis<'a> {
         }
     }
 
-    pub fn compute(&mut self) -> Liveness {
+    pub fn compute(&mut self, function: ir::BasicBlockId) -> Liveness {
         let mut out = Liveness {
             live_in: FxHashMap::default(),
             live_out: FxHashMap::default(),
             reg_interval: Vec::new(),
             block_interval: FxHashMap::default(),
         };
-        self.check_function(self.ir.main, &mut out);
-        for f in self.ir.functions.values() {
-            self.check_function(*f, &mut out);
-        }
-        out
-    }
 
-    fn check_function(&mut self, function: ir::BasicBlockId, out: &mut Liveness) {
         let regs = self.ir.reg_count[&function] as usize;
         let blocks = self.ir.reachable_postorder(function);
         for block in blocks.iter() {
@@ -118,6 +111,8 @@ impl<'a> LivenessAnalysis<'a> {
                 println!("Reg {reg} => {interval:?}");
             }
         }
+
+        out
     }
 
     fn compute_use_def(&mut self, block: ir::BasicBlockId, regs: usize) {
@@ -136,25 +131,23 @@ impl<'a> LivenessAnalysis<'a> {
 
     fn for_each_reg_in_stmt(&mut self, stmt: &ir::Statement, visitor: &mut impl RegVisitor) {
         match *stmt {
-            ir::Statement::Assign { place, ref value } => {
+            ir::Statement::Assign { reg, ref value } => {
                 self.for_each_reg_in_rvalue(value, visitor);
-                match place.projection {
-                    ir::Projection::None => {
-                        visitor.on_def(place.reg);
-                    }
-                    ir::Projection::Field(_) => {
-                        visitor.on_use(place.reg);
-                    }
-                    ir::Projection::Index(index) => {
-                        visitor.on_use(place.reg);
-                        visitor.on_use(index);
-                    }
-                }
+                visitor.on_def(reg);
             }
-            ir::Statement::StorageLive { .. } => {}
-            ir::Statement::Print(operand, ..) => {
-                self.for_each_reg_in_operand(operand, visitor);
+            ir::Statement::SetField { reg, value, .. } => {
+                visitor.on_use(reg);
+                visitor.on_use(value);
             }
+            ir::Statement::SetIndex { reg, index, value } => {
+                visitor.on_use(reg);
+                visitor.on_use(index);
+                visitor.on_use(value);
+            }
+            ir::Statement::ImplicitDef { reg } => {
+                visitor.on_def(reg);
+            }
+            ir::Statement::Print(operand, ..) => visitor.on_use(operand),
         }
     }
 
@@ -165,50 +158,42 @@ impl<'a> LivenessAnalysis<'a> {
     ) {
         match self.ir.basic_blocks[block].terminator {
             ir::Terminator::Jump { .. } => {}
-            ir::Terminator::Branch { cond, .. } => self.for_each_reg_in_operand(cond, visitor),
+            ir::Terminator::Branch { cond, .. } => visitor.on_use(cond),
             ir::Terminator::Return => {}
         }
     }
 
     fn for_each_reg_in_rvalue(&mut self, value: &ir::RValue, visitor: &mut impl RegVisitor) {
         match *value {
-            ir::RValue::Use(operand) => self.for_each_reg_in_operand(operand, visitor),
-            ir::RValue::Binary { lhs, rhs, .. } => {
-                self.for_each_reg_in_operand(lhs, visitor);
-                self.for_each_reg_in_operand(rhs, visitor);
+            ir::RValue::Use(operand) => visitor.on_use(operand),
+            ir::RValue::Constant(..) => {}
+            ir::RValue::Field { reg, .. } => visitor.on_use(reg),
+            ir::RValue::Index { reg, index } => {
+                visitor.on_use(reg);
+                visitor.on_use(index);
             }
-            ir::RValue::Not(operand) => self.for_each_reg_in_operand(operand, visitor),
-            ir::RValue::F64Neg(operand) => self.for_each_reg_in_operand(operand, visitor),
-            ir::RValue::I64Neg(operand) => self.for_each_reg_in_operand(operand, visitor),
+            ir::RValue::Binary { lhs, rhs, .. } => {
+                visitor.on_use(lhs);
+                visitor.on_use(rhs);
+            }
+            ir::RValue::Not(operand) => visitor.on_use(operand),
+            ir::RValue::F64Neg(operand) => visitor.on_use(operand),
+            ir::RValue::I64Neg(operand) => visitor.on_use(operand),
             ir::RValue::Struct { ref fields } => {
                 for value in fields.iter() {
-                    self.for_each_reg_in_operand(*value, visitor);
+                    visitor.on_use(*value);
                 }
             }
             ir::RValue::StructRepeat { value, count } => {
-                self.for_each_reg_in_operand(value, visitor);
-                self.for_each_reg_in_operand(count, visitor);
+                visitor.on_use(value);
+                visitor.on_use(count);
             }
             ir::RValue::Call { callee, ref args } => {
-                self.for_each_reg_in_operand(callee, visitor);
+                visitor.on_use(callee);
                 for arg in args {
-                    self.for_each_reg_in_operand(*arg, visitor);
+                    visitor.on_use(*arg);
                 }
             }
-        }
-    }
-
-    fn for_each_reg_in_operand(&mut self, operand: ir::Operand, visitor: &mut impl RegVisitor) {
-        match operand {
-            ir::Operand::Place(place) => {
-                visitor.on_use(place.reg);
-                match place.projection {
-                    ir::Projection::None => {}
-                    ir::Projection::Field(_) => {}
-                    ir::Projection::Index(index) => visitor.on_use(index),
-                }
-            }
-            ir::Operand::Constant(..) => {}
         }
     }
 }

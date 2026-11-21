@@ -7,7 +7,7 @@ pub enum Opcode {
     Const,
     String,
 
-    // Operand_Fn
+    // Operand_Dest + Operand_Fn + u8 ArgCount + <N Operands>
     Call,
 
     // Operand_Cond + i32 offset
@@ -17,7 +17,7 @@ pub enum Opcode {
     // i32 offset
     Jump,
 
-    // Operand_Dest + Operand_Start + u8 Count
+    // Operand_Dest + u8 count + <N Operands>
     Struct,
 
     // Operand_Dest + Operand_Value + Operand_Count
@@ -88,6 +88,8 @@ pub enum Opcode {
     U64LessEqual,
     U64Or,
     U64And,
+
+    FnStart = u8::MAX,
 }
 
 pub type Reg = u16;
@@ -118,6 +120,11 @@ impl Code {
         Disassembler::new(&self.code).disassemble(end);
     }
 
+    pub fn start_function(&mut self, frame_size: u16) {
+        self.op(FnStart);
+        self.write_u16(frame_size);
+    }
+
     pub fn op_const(&mut self, dest: Reg, value: u64) {
         self.op(Const);
         self.write_u16(dest);
@@ -130,9 +137,14 @@ impl Code {
         self.write_u64(value);
     }
 
-    pub fn op_call(&mut self, callee: Reg) {
+    pub fn op_call(&mut self, dest: Reg, callee: Reg, args: Vec<Reg>) {
         self.op(Call);
+        self.write_u16(dest);
         self.write_u16(callee);
+        self.write_u8(args.len() as u8);
+        for arg in args {
+            self.write_u16(arg);
+        }
     }
 
     pub fn op_jump_if_true(&mut self, cond: Reg) -> usize {
@@ -160,11 +172,13 @@ impl Code {
         self.write_i32_at(from, offset as i32);
     }
 
-    pub fn op_struct(&mut self, dest: Reg, start: Reg, count: u8) {
+    pub fn op_struct(&mut self, dest: Reg, fields: Vec<Reg>) {
         self.op(Struct);
         self.write_u16(dest);
-        self.write_u16(start);
-        self.write_u8(count);
+        self.write_u8(fields.len() as u8);
+        for field in fields {
+            self.write_u16(field);
+        }
     }
 
     pub fn op_repeat_struct(&mut self, dest: Reg, value: Reg, count: Reg) {
@@ -318,6 +332,10 @@ impl<'a> Disassembler<'a> {
             let instr: Opcode = unsafe { std::mem::transmute(self.read_u8()) };
             print!("{:<05} {instr:?}", self.i - 1);
             match instr {
+                FnStart => {
+                    let frame_size = self.read_u16();
+                    println!(" Frame size={frame_size}");
+                }
                 Const => {
                     let dest = self.read_u16();
                     let n = self.read_u64();
@@ -333,8 +351,15 @@ impl<'a> Disassembler<'a> {
                     println!(" r{dest} = {n} ({s:?})");
                 }
                 Call => {
+                    let dest = self.read_u16();
                     let callee = self.read_u16();
-                    println!(" r{callee}");
+                    let count = self.read_u8();
+                    print!(" r{dest} = r{callee} (");
+                    for _ in 0..count {
+                        let reg = self.read_u16();
+                        print!("r{reg}, ");
+                    }
+                    println!(")");
                 }
                 JumpIfTrue | JumpIfFalse => {
                     let cond = self.read_u16();
@@ -349,9 +374,13 @@ impl<'a> Disassembler<'a> {
                 }
                 Struct => {
                     let dest = self.read_u16();
-                    let start = self.read_u16();
                     let count = self.read_u8();
-                    println!(" r{dest} = r{start} x {count}");
+                    print!(" r{dest} = ");
+                    for _ in 0..count {
+                        let reg = self.read_u16();
+                        print!("r{reg}, ");
+                    }
+                    println!();
                 }
                 RepeatStruct => {
                     let dest = self.read_u16();
