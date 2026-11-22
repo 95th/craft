@@ -205,7 +205,7 @@ impl VM {
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
                         let return_reg = self.frame.return_reg;
-                        let value = self.stack[self.frame.sp];
+                        let value = self.load(0);
                         self.frame = frame;
                         self.store(return_reg, value);
                     } else {
