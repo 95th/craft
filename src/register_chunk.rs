@@ -120,9 +120,14 @@ impl Code {
         Disassembler::new(&self.code).disassemble(end);
     }
 
-    pub fn start_function(&mut self, frame_size: u16) {
+    pub fn start_function(&mut self) -> usize {
         self.op(FnStart);
-        self.write_u16(frame_size);
+        self.write_u16(0);
+        self.code.len() - 3
+    }
+
+    pub fn update_frame_size(&mut self, function: usize, size: u16) {
+        self.write_u16_at(function + 1, size);
     }
 
     pub fn op_const(&mut self, dest: Reg, value: u64) {
@@ -309,6 +314,10 @@ impl Code {
 
     fn write_u64(&mut self, n: u64) {
         self.code.extend(n.to_ne_bytes());
+    }
+
+    fn write_u16_at(&mut self, i: usize, n: u16) {
+        self.code[i..i + 2].copy_from_slice(&n.to_ne_bytes());
     }
 
     fn write_i32_at(&mut self, i: usize, n: i32) {

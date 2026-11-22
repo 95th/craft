@@ -89,7 +89,7 @@ impl<'a> Lowering<'a> {
                 let fields = args
                     .fields
                     .iter()
-                    .map(|_| self.create_register(true))
+                    .map(|_| Operand::Reg(self.create_register(true)))
                     .collect();
                 self.push_stmt(Statement::Assign {
                     reg: self.return_reg,
@@ -103,7 +103,8 @@ impl<'a> Lowering<'a> {
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
         match self.ast.stmts[stmt] {
             ast::Stmt::Let { init, .. } => {
-                let reg = self.lower_expr(init);
+                let reg = self.create_register(false);
+                self.lower_expr_into(reg, init);
                 let symbol = self.ast.stmts.value_binding(stmt);
                 self.symbol_registers.insert(symbol, reg);
             }
@@ -119,26 +120,37 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn lower_expr(&mut self, expr: ast::ExprId) -> RegId {
+    fn lower_expr(&mut self, expr: ast::ExprId) -> Operand {
         match self.ast.exprs[expr] {
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
                 let symbol = &self.tcx.bcx.symbols[symbol_id];
                 match symbol.kind {
-                    SymbolKind::Let | SymbolKind::Param => self.symbol_registers[&symbol_id],
+                    SymbolKind::Let | SymbolKind::Param => {
+                        Operand::Reg(self.symbol_registers[&symbol_id])
+                    }
                     SymbolKind::Fn => {
                         self.function_worklist.push_back(symbol_id);
-                        let dest = self.create_register(false);
-                        self.store_constant(dest, Constant::Function(symbol_id));
-                        dest
+                        Operand::Constant(Constant::Function(symbol_id))
                     }
                     _ => unreachable!(),
                 }
             }
+            ast::Expr::Bool(x) => Operand::Constant(Constant::Bool(x)),
+            ast::Expr::Number(x) => Operand::Constant(Constant::F64(x)),
+            ast::Expr::Int(x) => {
+                let ty = self.tcx.expr_types[&expr];
+                if self.tcx.types.probe_value(ty) == Ty::U64 {
+                    Operand::Constant(Constant::U64(x as u64))
+                } else {
+                    Operand::Constant(Constant::I64(x as i64))
+                }
+            }
+            ast::Expr::String(s) => Operand::Constant(Constant::String(s)),
             _ => {
                 let dest = self.create_register(false);
                 self.lower_expr_into(dest, expr);
-                dest
+                Operand::Reg(dest)
             }
         }
     }
@@ -177,7 +189,7 @@ impl<'a> Lowering<'a> {
                 let merge_block = self.create_block();
                 let false_block = self.create_block();
                 self.set_terminator(Terminator::Branch {
-                    cond: dest,
+                    cond: Operand::Reg(dest),
                     then_block: merge_block,
                     else_block: false_block,
                 });
@@ -199,7 +211,7 @@ impl<'a> Lowering<'a> {
                 let merge_block = self.create_block();
                 let true_block = self.create_block();
                 self.set_terminator(Terminator::Branch {
-                    cond: dest,
+                    cond: Operand::Reg(dest),
                     then_block: true_block,
                     else_block: merge_block,
                 });
@@ -286,7 +298,7 @@ impl<'a> Lowering<'a> {
                 self.store_value(
                     dest,
                     RValue::Field {
-                        reg,
+                        base: reg,
                         index: index as u16,
                     },
                 );
@@ -296,7 +308,7 @@ impl<'a> Lowering<'a> {
                 self.store_value(
                     dest,
                     RValue::Field {
-                        reg,
+                        base: reg,
                         index: index as u16,
                     },
                 );
@@ -304,7 +316,7 @@ impl<'a> Lowering<'a> {
             ast::Expr::ArrayIndex { array, index } => {
                 let array = self.lower_expr(array);
                 let index = self.lower_expr(index);
-                self.store_value(dest, RValue::Index { reg: array, index });
+                self.store_value(dest, RValue::Index { base: array, index });
             }
             ast::Expr::Block { ref stmts, expr } => {
                 for &stmt in stmts {
@@ -323,7 +335,7 @@ impl<'a> Lowering<'a> {
                         if reg != dest {
                             self.push_stmt(Statement::Assign {
                                 reg: dest,
-                                value: RValue::Use(reg),
+                                value: RValue::Use(Operand::Reg(reg)),
                             });
                         }
                     }
@@ -380,7 +392,7 @@ impl<'a> Lowering<'a> {
                         let obj = self.lower_expr(obj);
                         let value = self.lower_expr(rhs);
                         self.push_stmt(Statement::SetField {
-                            reg: obj,
+                            base: obj,
                             index,
                             value,
                         });
@@ -396,7 +408,7 @@ impl<'a> Lowering<'a> {
                         let obj = self.lower_expr(obj);
                         let value = self.lower_expr(rhs);
                         self.push_stmt(Statement::SetField {
-                            reg: obj,
+                            base: obj,
                             index,
                             value,
                         });
@@ -406,7 +418,7 @@ impl<'a> Lowering<'a> {
                         let index = self.lower_expr(index);
                         let value = self.lower_expr(rhs);
                         self.push_stmt(Statement::SetIndex {
-                            reg: array,
+                            base: array,
                             index,
                             value,
                         });
@@ -519,7 +531,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn store_constant(&mut self, dest: RegId, value: Constant) {
-        self.store_value(dest, RValue::Constant(value));
+        self.store_value(dest, RValue::Use(Operand::Constant(value)));
     }
 
     fn store_value(&mut self, dest: RegId, value: RValue) {
@@ -588,19 +600,19 @@ pub enum Statement {
         value: RValue,
     },
     SetField {
-        reg: RegId,
+        base: Operand,
         index: u16,
-        value: RegId,
+        value: Operand,
     },
     SetIndex {
-        reg: RegId,
-        index: RegId,
-        value: RegId,
+        base: Operand,
+        index: Operand,
+        value: Operand,
     },
     ImplicitDef {
         reg: RegId,
     },
-    Print(RegId, TyId),
+    Print(Operand, TyId),
 }
 
 #[derive(Debug)]
@@ -609,7 +621,7 @@ pub enum Terminator {
         target: BasicBlockId,
     },
     Branch {
-        cond: RegId,
+        cond: Operand,
         then_block: BasicBlockId,
         else_block: BasicBlockId,
     },
@@ -618,34 +630,33 @@ pub enum Terminator {
 
 #[derive(Debug)]
 pub enum RValue {
-    Constant(Constant),
-    Use(RegId),
+    Use(Operand),
     Field {
-        reg: RegId,
+        base: Operand,
         index: u16,
     },
     Index {
-        reg: RegId,
-        index: RegId,
+        base: Operand,
+        index: Operand,
     },
     Binary {
         op: BinaryOp,
-        lhs: RegId,
-        rhs: RegId,
+        lhs: Operand,
+        rhs: Operand,
     },
-    Not(RegId),
-    F64Neg(RegId),
-    I64Neg(RegId),
+    Not(Operand),
+    F64Neg(Operand),
+    I64Neg(Operand),
     Struct {
-        fields: Vec<RegId>,
+        fields: Vec<Operand>,
     },
     StructRepeat {
-        value: RegId,
-        count: RegId,
+        value: Operand,
+        count: Operand,
     },
     Call {
-        callee: RegId,
-        args: Vec<RegId>,
+        callee: Operand,
+        args: Vec<Operand>,
     },
 }
 
@@ -658,6 +669,12 @@ pub enum Constant {
     F64(f64),
     String(StrId),
     Function(SymbolId),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Operand {
+    Constant(Constant),
+    Reg(RegId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -807,26 +824,32 @@ impl<'a> Regs<'a> {
                 self.visit_rvalue(value, visitor);
                 visitor.on_def(reg);
             }
-            Statement::SetField { reg, value, .. } => {
-                visitor.on_use(reg);
-                visitor.on_use(value);
+            Statement::SetField {
+                base: reg, value, ..
+            } => {
+                self.visit_operand(reg, visitor);
+                self.visit_operand(value, visitor);
             }
-            Statement::SetIndex { reg, index, value } => {
-                visitor.on_use(reg);
-                visitor.on_use(index);
-                visitor.on_use(value);
+            Statement::SetIndex {
+                base: reg,
+                index,
+                value,
+            } => {
+                self.visit_operand(reg, visitor);
+                self.visit_operand(index, visitor);
+                self.visit_operand(value, visitor);
             }
             Statement::ImplicitDef { reg } => {
                 visitor.on_def(reg);
             }
-            Statement::Print(reg, ..) => visitor.on_use(reg),
+            Statement::Print(operand, ..) => self.visit_operand(operand, visitor),
         }
     }
 
     pub fn visit_terminator(&self, block: BasicBlockId, visitor: &mut impl RegVisitor) {
         match self.ir.basic_blocks[block].terminator {
             Terminator::Jump { .. } => {}
-            Terminator::Branch { cond, .. } => visitor.on_use(cond),
+            Terminator::Branch { cond, .. } => self.visit_operand(cond, visitor),
             Terminator::Return => {
                 if self.entry != self.ir.main {
                     // Return variable is required even though there is no explicit read.
@@ -838,35 +861,41 @@ impl<'a> Regs<'a> {
 
     pub fn visit_rvalue(&self, value: &RValue, visitor: &mut impl RegVisitor) {
         match *value {
-            RValue::Use(reg) => visitor.on_use(reg),
-            RValue::Constant(..) => {}
-            RValue::Field { reg, .. } => visitor.on_use(reg),
-            RValue::Index { reg, index } => {
-                visitor.on_use(reg);
-                visitor.on_use(index);
+            RValue::Use(operand) => self.visit_operand(operand, visitor),
+            RValue::Field { base, .. } => self.visit_operand(base, visitor),
+            RValue::Index { base, index } => {
+                self.visit_operand(base, visitor);
+                self.visit_operand(index, visitor);
             }
             RValue::Binary { lhs, rhs, .. } => {
-                visitor.on_use(lhs);
-                visitor.on_use(rhs);
+                self.visit_operand(lhs, visitor);
+                self.visit_operand(rhs, visitor);
             }
-            RValue::Not(reg) => visitor.on_use(reg),
-            RValue::F64Neg(reg) => visitor.on_use(reg),
-            RValue::I64Neg(reg) => visitor.on_use(reg),
+            RValue::Not(operand) => self.visit_operand(operand, visitor),
+            RValue::F64Neg(operand) => self.visit_operand(operand, visitor),
+            RValue::I64Neg(operand) => self.visit_operand(operand, visitor),
             RValue::Struct { ref fields } => {
                 for value in fields.iter() {
-                    visitor.on_use(*value);
+                    self.visit_operand(*value, visitor)
                 }
             }
             RValue::StructRepeat { value, count } => {
-                visitor.on_use(value);
-                visitor.on_use(count);
+                self.visit_operand(value, visitor);
+                self.visit_operand(count, visitor);
             }
             RValue::Call { callee, ref args } => {
-                visitor.on_use(callee);
+                self.visit_operand(callee, visitor);
                 for arg in args {
-                    visitor.on_use(*arg);
+                    self.visit_operand(*arg, visitor);
                 }
             }
+        }
+    }
+
+    pub fn visit_operand(&self, operand: Operand, visitor: &mut impl RegVisitor) {
+        match operand {
+            Operand::Constant(..) => {}
+            Operand::Reg(reg) => visitor.on_use(reg),
         }
     }
 }

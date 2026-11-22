@@ -593,18 +593,16 @@ fn test_run() {
     use std::time::Instant;
 
     let mut code = Code::new();
-    code.start_function(16);
-    let offset = code.len() + 3;
+    let main = code.start_function();
+    let fib_ref = code.len() + 3;
     code.op_const(0, 0);
     code.op_const(1, 35);
     code.op_call(0, 0, vec![1]);
     code.op_print_u64(0);
     code.op_return();
 
-    let function = code.len() as u64;
-    code.write_u64_at(offset, function);
-
-    code.start_function(16);
+    let fib = code.start_function();
+    code.write_u64_at(fib_ref, fib as u64);
     code.op_const(2, 2);
     code.op_binary(Opcode::U64Less, 3, 1, 2);
 
@@ -613,18 +611,21 @@ fn test_run() {
     code.op_return();
 
     code.patch_jump(false_offset, code.len());
-    code.op_const(4, function);
+    code.op_const(4, fib as u64);
     code.op_const(5, 1);
     code.op_binary(Opcode::U64Sub, 5, 1, 5);
     code.op_call(4, 4, vec![5]);
 
-    code.op_const(5, function);
+    code.op_const(5, fib as u64);
     code.op_const(6, 2);
     code.op_binary(Opcode::U64Sub, 6, 1, 6);
     code.op_call(5, 5, vec![6]);
 
     code.op_binary(Opcode::U64Add, 0, 4, 5);
     code.op_return();
+
+    code.update_frame_size(main, 3);
+    code.update_frame_size(fib, 10);
 
     code.disassemble(code.len());
 

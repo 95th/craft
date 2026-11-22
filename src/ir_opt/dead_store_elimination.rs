@@ -57,10 +57,9 @@ fn collect_dead_stores(ir: &ir::Ir, function: ir::BasicBlockId) -> Vec<(ir::Basi
 
 fn is_pure(value: &ir::RValue) -> bool {
     match value {
-        ir::RValue::Constant(..) => true,
         ir::RValue::Use(_) => true,
         ir::RValue::Field { .. } => true,
-        ir::RValue::Index { .. } => false,
+        ir::RValue::Index { .. } => true,
         ir::RValue::Binary { op, .. } => !matches!(op, ir::BinaryOp::I64Div | ir::BinaryOp::U64Div),
         ir::RValue::Not(_) => true,
         ir::RValue::F64Neg(_) => true,

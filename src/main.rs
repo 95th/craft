@@ -1298,7 +1298,9 @@ mod tests {
     #[test]
     fn test_dse_if() {
         let source = r#"
-            if true {}
+            if true {
+                print(1);
+            }
         "#;
         run_ok(source)
     }

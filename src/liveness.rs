@@ -160,7 +160,7 @@ pub struct Interval {
 }
 
 impl Interval {
-    const UNINIT: Self = Self {
+    pub const UNINIT: Self = Self {
         start: usize::MAX,
         end: usize::MAX,
     };

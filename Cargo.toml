@@ -10,7 +10,7 @@ default = ["lower", "trace"]
 
 [profile.release]
 codegen-units = 1
-strip = "symbols"
+debug = true
 
 [dependencies]
 bitflags = "2.13.2"
