@@ -7,7 +7,7 @@ pub struct DeadStoreElimination;
 impl IrOptimizationPass for DeadStoreElimination {
     fn run(&mut self, ir: &mut ir::Ir, function: ir::BasicBlockId) -> bool {
         let dead_stores = collect_dead_stores(ir, function);
-        if cfg!(feature = "lower") {
+        if cfg!(feature = "trace") {
             for &(block, i) in dead_stores.iter() {
                 println!(
                     "Dead {block:?} => {:?}",
@@ -36,7 +36,7 @@ fn collect_dead_stores(ir: &ir::Ir, function: ir::BasicBlockId) -> Vec<(ir::Basi
         };
         regs.visit_terminator(block, &mut tracker);
         for i in (0..ir.basic_blocks[block].statements.len()).rev() {
-            if cfg!(feature = "lower") {
+            if cfg!(feature = "trace") {
                 println!("Live: {}", tracker.live);
             }
             let stmt = &ir.basic_blocks[block].statements[i];
