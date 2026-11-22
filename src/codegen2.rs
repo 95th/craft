@@ -198,10 +198,10 @@ impl<'a> Codegen2<'a> {
 
     fn gen_rvalue(&mut self, value: &ir::RValue, dest: Reg) {
         match *value {
-            ir::RValue::Use(operand) => {
-                let operand = self.gen_reg(operand);
-                if operand != dest {
-                    self.code.op_copy(dest, operand);
+            ir::RValue::Use(reg) => {
+                let reg = self.gen_reg(reg);
+                if reg != dest {
+                    self.code.op_copy(dest, reg);
                 }
             }
             ir::RValue::Constant(constant) => self.gen_constant(constant, dest),
@@ -215,17 +215,17 @@ impl<'a> Codegen2<'a> {
                 self.code.op_get_struct_index(dest, reg, index);
             }
             ir::RValue::Binary { op, lhs, rhs } => self.gen_binary(op, lhs, rhs, dest),
-            ir::RValue::Not(operand) => {
-                let operand = self.gen_reg(operand);
-                self.code.op_not(dest, operand);
+            ir::RValue::Not(reg) => {
+                let reg = self.gen_reg(reg);
+                self.code.op_not(dest, reg);
             }
-            ir::RValue::F64Neg(operand) => {
-                let operand = self.gen_reg(operand);
-                self.code.op_neg_f64(dest, operand);
+            ir::RValue::F64Neg(reg) => {
+                let reg = self.gen_reg(reg);
+                self.code.op_neg_f64(dest, reg);
             }
-            ir::RValue::I64Neg(operand) => {
-                let operand = self.gen_reg(operand);
-                self.code.op_neg_i64(dest, operand);
+            ir::RValue::I64Neg(reg) => {
+                let reg = self.gen_reg(reg);
+                self.code.op_neg_i64(dest, reg);
             }
             ir::RValue::Struct { ref fields } => {
                 let args = fields.iter().map(|f| self.gen_reg(*f)).collect();
