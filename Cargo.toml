@@ -6,11 +6,13 @@ edition = "2024"
 [features]
 lower = []
 trace = []
-default = ["lower", "trace"]
+default = ["lower"]
 
 [profile.release]
 codegen-units = 1
-debug = true
+strip = "symbols"
+lto = "fat"
+panic = "abort"
 
 [dependencies]
 bitflags = "2.13.2"
