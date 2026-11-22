@@ -220,14 +220,14 @@ impl<'a> Lowering<'a> {
                 self.store_value(dest, RValue::Binary { op, lhs, rhs });
             }
             ast::Expr::Not(e) => {
-                let operand = self.lower_expr(e);
-                self.store_value(dest, RValue::Not(operand))
+                let reg = self.lower_expr(e);
+                self.store_value(dest, RValue::Not(reg))
             }
             ast::Expr::Negate(e) => {
-                let operand = self.lower_expr(e);
+                let reg = self.lower_expr(e);
                 let value = match self.tcx.types.probe_value(ty) {
-                    Ty::F64 => RValue::F64Neg(operand),
-                    Ty::I64 => RValue::I64Neg(operand),
+                    Ty::F64 => RValue::F64Neg(reg),
+                    Ty::I64 => RValue::I64Neg(reg),
                     _ => unreachable!(),
                 };
                 self.store_value(dest, value);
@@ -819,7 +819,7 @@ impl<'a> Regs<'a> {
             Statement::ImplicitDef { reg } => {
                 visitor.on_def(reg);
             }
-            Statement::Print(operand, ..) => visitor.on_use(operand),
+            Statement::Print(reg, ..) => visitor.on_use(reg),
         }
     }
 
@@ -838,7 +838,7 @@ impl<'a> Regs<'a> {
 
     pub fn visit_rvalue(&self, value: &RValue, visitor: &mut impl RegVisitor) {
         match *value {
-            RValue::Use(operand) => visitor.on_use(operand),
+            RValue::Use(reg) => visitor.on_use(reg),
             RValue::Constant(..) => {}
             RValue::Field { reg, .. } => visitor.on_use(reg),
             RValue::Index { reg, index } => {
@@ -849,9 +849,9 @@ impl<'a> Regs<'a> {
                 visitor.on_use(lhs);
                 visitor.on_use(rhs);
             }
-            RValue::Not(operand) => visitor.on_use(operand),
-            RValue::F64Neg(operand) => visitor.on_use(operand),
-            RValue::I64Neg(operand) => visitor.on_use(operand),
+            RValue::Not(reg) => visitor.on_use(reg),
+            RValue::F64Neg(reg) => visitor.on_use(reg),
+            RValue::I64Neg(reg) => visitor.on_use(reg),
             RValue::Struct { ref fields } => {
                 for value in fields.iter() {
                     visitor.on_use(*value);
