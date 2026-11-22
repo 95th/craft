@@ -99,6 +99,7 @@ impl VM {
         }
     }
 
+    #[inline(never)]
     pub fn run(&mut self) {
         loop {
             let instr = self.frame.read_instr();
@@ -587,7 +588,7 @@ impl VM {
         }
     }
 
-    fn load(&mut self, reg: u16) -> u64 {
+    fn load(&self, reg: u16) -> u64 {
         self.stack[self.frame.sp + reg as usize]
     }
 
@@ -597,11 +598,13 @@ impl VM {
 
     fn call(&mut self, dest: u16, function: u64) {
         let sp = self.frame.sp + dest as usize;
-        let frame = CallFrame::new(&self.code, function as usize, sp);
-        if self.stack.len() < sp + frame.size as usize {
-            self.stack.resize(sp + frame.size as usize, 0);
+        self.frames.push(std::mem::replace(
+            &mut self.frame,
+            CallFrame::new(&self.code, function as usize, sp),
+        ));
+        if self.stack.len() < sp + self.frame.size as usize {
+            self.stack.resize(sp + self.frame.size as usize, 0);
         }
-        self.frames.push(std::mem::replace(&mut self.frame, frame))
     }
 }
 
