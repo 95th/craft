@@ -270,6 +270,31 @@ impl<'a> Codegen2<'a> {
     }
 
     fn gen_binary(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: ir::Operand, dest: Reg) {
+        macro_rules! handle_rhs_u64 {
+            ($yes:expr, $no:expr) => {{
+                let lhs = self.gen_operand(lhs);
+                match rhs {
+                    ir::Operand::Constant(constant) => {
+                        let ir::Constant::U64(rhs) = constant else {
+                            unreachable!()
+                        };
+                        self.code.op_binary_imm($yes, dest, lhs, rhs);
+                    }
+                    ir::Operand::Reg(rhs) => {
+                        let rhs = self.gen_reg(rhs);
+                        self.code.op_binary($no, dest, lhs, rhs);
+                    }
+                }
+                return;
+            }};
+        }
+
+        match op {
+            ir::BinaryOp::U64Sub => handle_rhs_u64!(U64SubI, U64Sub),
+            ir::BinaryOp::U64Less => handle_rhs_u64!(U64LessI, U64Less),
+            _ => (),
+        }
+
         let lhs = self.gen_operand(lhs);
         let rhs = self.gen_operand(rhs);
         match op {

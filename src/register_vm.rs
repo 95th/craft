@@ -289,275 +289,290 @@ impl VM {
                     let value = lhs != rhs;
                     self.store(dest, value as u64);
                 }
-
                 Opcode::F64Add => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) + f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) + f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Sub => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) - f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) - f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Mul => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) * f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) * f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Div => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) / f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) / f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Greater => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) > f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) > f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64GreaterEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) >= f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) >= f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Less => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) < f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) < f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64LessEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) <= f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) <= f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Equal => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) == f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) == f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64NotEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = f64::from_bits(a) != f64::from_bits(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = f64::from_bits(lhs) != f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Add => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64).wrapping_add(cast!(b, i64));
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64).wrapping_add(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Sub => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64).wrapping_sub(cast!(b, i64));
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64).wrapping_sub(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Mul => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64).wrapping_mul(cast!(b, i64));
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64).wrapping_mul(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Div => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64).wrapping_div(cast!(b, i64));
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64).wrapping_div(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Greater => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) > cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) > cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64GreaterEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) >= cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) >= cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Less => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) < cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) < cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64LessEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) <= cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) <= cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Or => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) | cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) | cast!(rhs, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64And => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = cast!(a, i64) & cast!(b, i64);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = cast!(lhs, i64) & cast!(rhs, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::U64Add => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a.wrapping_add(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs.wrapping_add(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Sub => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a.wrapping_sub(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs.wrapping_sub(rhs);
+                    self.store(dest, value);
+                }
+                Opcode::U64SubI => {
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u64();
+                    let lhs = self.load(lhs);
+                    let value = lhs.wrapping_sub(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Mul => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a.wrapping_mul(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs.wrapping_mul(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Div => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a.wrapping_div(b);
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs.wrapping_div(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Greater => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a > b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs > rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64GreaterEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a >= b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs >= rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Less => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a < b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs < rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::U64LessI => {
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u64();
+                    let lhs = self.load(lhs);
+                    let value = lhs < rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64LessEqual => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a <= b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs <= rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Or => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a | b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs | rhs;
                     self.store(dest, value);
                 }
                 Opcode::U64And => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
                     let rhs = self.frame.read_u16();
-                    let a = self.load(lhs);
-                    let b = self.load(rhs);
-                    let value = a & b;
+                    let lhs = self.load(lhs);
+                    let rhs = self.load(rhs);
+                    let value = lhs & rhs;
                     self.store(dest, value);
                 }
                 Opcode::FnStart => unreachable!(),

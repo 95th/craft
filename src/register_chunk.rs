@@ -89,6 +89,10 @@ pub enum Opcode {
     U64Or,
     U64And,
 
+    // Operand_Dest + Operand_Lhs + Constant_Rhs
+    U64SubI,
+    U64LessI,
+
     FnStart = u8::MAX,
 }
 
@@ -286,6 +290,13 @@ impl Code {
         self.write_u16(rhs);
     }
 
+    pub fn op_binary_imm(&mut self, op: Opcode, dest: Reg, lhs: Reg, rhs_value: u64) {
+        self.op(op);
+        self.write_u16(dest);
+        self.write_u16(lhs);
+        self.write_u64(rhs_value);
+    }
+
     pub fn write_u64_at(&mut self, i: usize, n: u64) {
         self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
     }
@@ -432,6 +443,12 @@ impl<'a> Disassembler<'a> {
                     let dest = self.read_u16();
                     let src = self.read_u16();
                     println!(" r{dest} = r{src}");
+                }
+                U64SubI | U64LessI => {
+                    let dest = self.read_u16();
+                    let lhs = self.read_u16();
+                    let rhs = self.read_u64();
+                    println!(" r{dest} = r{lhs}, {rhs}");
                 }
                 _ => {
                     let dest = self.read_u16();
