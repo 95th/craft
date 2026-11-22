@@ -268,7 +268,7 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let src = self.frame.read_u16();
                     let value = self.load(src);
-                    let value = cast!(value, i64).wrapping_mul(-1);
+                    let value = cast!(value, i64).wrapping_neg();
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::Equal => {

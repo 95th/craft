@@ -33,10 +33,11 @@ impl<'a> LivenessAnalysis<'a> {
             block_interval: FxHashMap::default(),
         };
 
-        let regs = self.ir.reg_count[&function] as usize;
+        let reg_count = self.ir.reg_count[&function] as usize;
         let blocks = self.ir.reachable_postorder(function);
+        let regs = self.ir.regs(function);
         for block in blocks.iter() {
-            self.compute_use_def(*block, regs);
+            self.compute_use_def(&regs, *block, reg_count);
             out.live_in.insert(*block, BitVec::new());
             out.live_out.insert(*block, BitVec::new());
         }
@@ -46,7 +47,7 @@ impl<'a> LivenessAnalysis<'a> {
             iterations += 1;
             let mut changed = false;
             for &block in blocks.iter() {
-                let mut live_out = BitVec::repeat(false, regs);
+                let mut live_out = BitVec::repeat(false, reg_count);
                 self.ir
                     .for_each_successor(block, |succ| live_out |= &out.live_in[&succ]);
 
@@ -75,16 +76,18 @@ impl<'a> LivenessAnalysis<'a> {
         let mut tracker = IntervalTracker {
             i: 0,
             blocks: FxHashMap::default(),
-            regs: vec![Interval::UNINIT; regs],
+            regs: vec![Interval::UNINIT; reg_count],
         };
+
+        let regs = self.ir.regs(function);
 
         for &block in blocks.iter().rev() {
             tracker.start_block(block);
             for stmt in self.ir.basic_blocks[block].statements.iter() {
-                self.for_each_reg_in_stmt(stmt, &mut tracker);
+                regs.visit_stmt(stmt, &mut tracker);
                 tracker.increment();
             }
-            self.for_each_reg_in_terminator(block, &mut tracker);
+            regs.visit_terminator(block, &mut tracker);
             tracker.end_block(block);
             tracker.increment();
         }
@@ -118,92 +121,19 @@ impl<'a> LivenessAnalysis<'a> {
         out
     }
 
-    fn compute_use_def(&mut self, block: ir::BasicBlockId, regs: usize) {
+    fn compute_use_def(&mut self, regs: &ir::Regs, block: ir::BasicBlockId, reg_count: usize) {
         let mut defuse = ComputeDefUse {
-            uses: BitVec::repeat(false, regs),
-            defs: BitVec::repeat(false, regs),
+            uses: BitVec::repeat(false, reg_count),
+            defs: BitVec::repeat(false, reg_count),
         };
         for stmt in self.ir.basic_blocks[block].statements.iter() {
-            self.for_each_reg_in_stmt(stmt, &mut defuse);
+            regs.visit_stmt(stmt, &mut defuse);
         }
-        self.for_each_reg_in_terminator(block, &mut defuse);
+        regs.visit_terminator(block, &mut defuse);
 
         self.uses.insert(block, defuse.uses);
         self.defs.insert(block, defuse.defs);
     }
-
-    fn for_each_reg_in_stmt(&mut self, stmt: &ir::Statement, visitor: &mut impl RegVisitor) {
-        match *stmt {
-            ir::Statement::Assign { reg, ref value } => {
-                self.for_each_reg_in_rvalue(value, visitor);
-                visitor.on_def(reg);
-            }
-            ir::Statement::SetField { reg, value, .. } => {
-                visitor.on_use(reg);
-                visitor.on_use(value);
-            }
-            ir::Statement::SetIndex { reg, index, value } => {
-                visitor.on_use(reg);
-                visitor.on_use(index);
-                visitor.on_use(value);
-            }
-            ir::Statement::ImplicitDef { reg } => {
-                visitor.on_def(reg);
-            }
-            ir::Statement::Print(operand, ..) => visitor.on_use(operand),
-        }
-    }
-
-    fn for_each_reg_in_terminator(
-        &mut self,
-        block: ir::BasicBlockId,
-        visitor: &mut impl RegVisitor,
-    ) {
-        match self.ir.basic_blocks[block].terminator {
-            ir::Terminator::Jump { .. } => {}
-            ir::Terminator::Branch { cond, .. } => visitor.on_use(cond),
-            ir::Terminator::Return => {}
-        }
-    }
-
-    fn for_each_reg_in_rvalue(&mut self, value: &ir::RValue, visitor: &mut impl RegVisitor) {
-        match *value {
-            ir::RValue::Use(operand) => visitor.on_use(operand),
-            ir::RValue::Constant(..) => {}
-            ir::RValue::Field { reg, .. } => visitor.on_use(reg),
-            ir::RValue::Index { reg, index } => {
-                visitor.on_use(reg);
-                visitor.on_use(index);
-            }
-            ir::RValue::Binary { lhs, rhs, .. } => {
-                visitor.on_use(lhs);
-                visitor.on_use(rhs);
-            }
-            ir::RValue::Not(operand) => visitor.on_use(operand),
-            ir::RValue::F64Neg(operand) => visitor.on_use(operand),
-            ir::RValue::I64Neg(operand) => visitor.on_use(operand),
-            ir::RValue::Struct { ref fields } => {
-                for value in fields.iter() {
-                    visitor.on_use(*value);
-                }
-            }
-            ir::RValue::StructRepeat { value, count } => {
-                visitor.on_use(value);
-                visitor.on_use(count);
-            }
-            ir::RValue::Call { callee, ref args } => {
-                visitor.on_use(callee);
-                for arg in args {
-                    visitor.on_use(*arg);
-                }
-            }
-        }
-    }
-}
-
-trait RegVisitor {
-    fn on_def(&mut self, reg: RegId);
-    fn on_use(&mut self, reg: RegId);
 }
 
 struct ComputeDefUse {
@@ -211,7 +141,7 @@ struct ComputeDefUse {
     defs: BitVec,
 }
 
-impl RegVisitor for ComputeDefUse {
+impl ir::RegVisitor for ComputeDefUse {
     fn on_def(&mut self, reg: RegId) {
         self.defs.set(reg as usize, true);
     }
@@ -242,7 +172,7 @@ struct IntervalTracker {
     blocks: FxHashMap<ir::BasicBlockId, Interval>,
 }
 
-impl RegVisitor for IntervalTracker {
+impl ir::RegVisitor for IntervalTracker {
     fn on_def(&mut self, reg: RegId) {
         self.update_reg(reg);
     }

@@ -1275,4 +1275,31 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_dse_assign() {
+        let source = r#"
+            let i = 1;
+            i = i + 1;
+            i = 3;
+            print(i);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_dse_logic() {
+        let source = r#"
+            let x = 1 == 2 || 1 == 3;
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_dse_if() {
+        let source = r#"
+            if true {}
+        "#;
+        run_ok(source)
+    }
 }

@@ -789,4 +789,89 @@ impl Ir {
         dfs(self, entry, &mut seen, &mut list);
         list
     }
+
+    pub fn regs(&self, entry: BasicBlockId) -> Regs<'_> {
+        Regs { ir: self, entry }
+    }
+}
+
+pub struct Regs<'a> {
+    ir: &'a Ir,
+    entry: BasicBlockId,
+}
+
+impl<'a> Regs<'a> {
+    pub fn visit_stmt(&self, stmt: &Statement, visitor: &mut impl RegVisitor) {
+        match *stmt {
+            Statement::Assign { reg, ref value } => {
+                self.visit_rvalue(value, visitor);
+                visitor.on_def(reg);
+            }
+            Statement::SetField { reg, value, .. } => {
+                visitor.on_use(reg);
+                visitor.on_use(value);
+            }
+            Statement::SetIndex { reg, index, value } => {
+                visitor.on_use(reg);
+                visitor.on_use(index);
+                visitor.on_use(value);
+            }
+            Statement::ImplicitDef { reg } => {
+                visitor.on_def(reg);
+            }
+            Statement::Print(operand, ..) => visitor.on_use(operand),
+        }
+    }
+
+    pub fn visit_terminator(&self, block: BasicBlockId, visitor: &mut impl RegVisitor) {
+        match self.ir.basic_blocks[block].terminator {
+            Terminator::Jump { .. } => {}
+            Terminator::Branch { cond, .. } => visitor.on_use(cond),
+            Terminator::Return => {
+                if self.entry != self.ir.main {
+                    // Return variable is required even though there is no explicit read.
+                    visitor.on_use(0);
+                }
+            }
+        }
+    }
+
+    pub fn visit_rvalue(&self, value: &RValue, visitor: &mut impl RegVisitor) {
+        match *value {
+            RValue::Use(operand) => visitor.on_use(operand),
+            RValue::Constant(..) => {}
+            RValue::Field { reg, .. } => visitor.on_use(reg),
+            RValue::Index { reg, index } => {
+                visitor.on_use(reg);
+                visitor.on_use(index);
+            }
+            RValue::Binary { lhs, rhs, .. } => {
+                visitor.on_use(lhs);
+                visitor.on_use(rhs);
+            }
+            RValue::Not(operand) => visitor.on_use(operand),
+            RValue::F64Neg(operand) => visitor.on_use(operand),
+            RValue::I64Neg(operand) => visitor.on_use(operand),
+            RValue::Struct { ref fields } => {
+                for value in fields.iter() {
+                    visitor.on_use(*value);
+                }
+            }
+            RValue::StructRepeat { value, count } => {
+                visitor.on_use(value);
+                visitor.on_use(count);
+            }
+            RValue::Call { callee, ref args } => {
+                visitor.on_use(callee);
+                for arg in args {
+                    visitor.on_use(*arg);
+                }
+            }
+        }
+    }
+}
+
+pub trait RegVisitor {
+    fn on_def(&mut self, reg: RegId);
+    fn on_use(&mut self, reg: RegId);
 }
