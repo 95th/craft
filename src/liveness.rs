@@ -41,7 +41,9 @@ impl<'a> LivenessAnalysis<'a> {
             out.live_out.insert(*block, BitVec::new());
         }
 
+        let mut iterations = 0;
         loop {
+            iterations += 1;
             let mut changed = false;
             for &block in blocks.iter() {
                 let mut live_out = BitVec::repeat(false, regs);
@@ -63,6 +65,7 @@ impl<'a> LivenessAnalysis<'a> {
         }
 
         if cfg!(feature = "trace") {
+            println!("Iterations: {iterations}");
             for &block in blocks.iter() {
                 println!("Live-in {block:?} => {}", out.live_in[&block]);
                 println!("Live-out {block:?} => {}", out.live_out[&block]);
