@@ -7,9 +7,9 @@ pub enum Opcode {
     Const,
     String,
 
-    // Operand_Dest + Operand_Fn + u8 ArgCount + <N Operands>
+    // Operand_Callee
     Call,
-    // Operand_Dest + u32 FnAddress + u8 ArgCount + <N Operands>
+    // Operand_Dest + u32 FnAddress
     CallI,
 
     // Operand_Cond + i32 offset
@@ -19,7 +19,7 @@ pub enum Opcode {
     // i32 offset
     Jump,
 
-    // Operand_Dest + u8 count + <N Operands>
+    // Operand_Dest + Operand_First + u8_Count
     Struct,
 
     // Operand_Dest + Operand_Value + Operand_Count
@@ -149,24 +149,15 @@ impl Code {
         self.write_u64(value);
     }
 
-    pub fn op_call(&mut self, dest: Reg, callee: Reg, args: Vec<Reg>) {
+    pub fn op_call(&mut self, callee: Reg) {
         self.op(Call);
-        self.write_u16(dest);
         self.write_u16(callee);
-        self.write_u8(args.len() as u8);
-        for arg in args {
-            self.write_u16(arg);
-        }
     }
 
-    pub fn op_call_imm(&mut self, dest: Reg, callee: u32, args: Vec<Reg>) {
+    pub fn op_call_imm(&mut self, dest: Reg, callee: u32) {
         self.op(CallI);
         self.write_u16(dest);
         self.write_u32(callee);
-        self.write_u8(args.len() as u8);
-        for arg in args {
-            self.write_u16(arg);
-        }
     }
 
     pub fn op_jump_if_true(&mut self, cond: Reg) -> usize {
@@ -194,13 +185,11 @@ impl Code {
         self.write_i32_at(from, offset as i32);
     }
 
-    pub fn op_struct(&mut self, dest: Reg, fields: Vec<Reg>) {
+    pub fn op_struct(&mut self, dest: Reg, first: Reg, count: u8) {
         self.op(Struct);
         self.write_u16(dest);
-        self.write_u8(fields.len() as u8);
-        for field in fields {
-            self.write_u16(field);
-        }
+        self.write_u16(first);
+        self.write_u8(count);
     }
 
     pub fn op_repeat_struct(&mut self, dest: Reg, value: Reg, count: Reg) {
@@ -392,26 +381,13 @@ impl<'a> Disassembler<'a> {
                     println!(" r{dest} = {n} ({s:?})");
                 }
                 Call => {
-                    let dest = self.read_u16();
                     let callee = self.read_u16();
-                    let count = self.read_u8();
-                    print!(" r{dest} = r{callee} (");
-                    for _ in 0..count {
-                        let reg = self.read_u16();
-                        print!("r{reg}, ");
-                    }
-                    println!(")");
+                    println!(" r{callee}");
                 }
                 CallI => {
                     let dest = self.read_u16();
                     let callee = self.read_u32();
-                    let count = self.read_u8();
-                    print!(" r{dest} = @{callee} (");
-                    for _ in 0..count {
-                        let reg = self.read_u16();
-                        print!("r{reg}, ");
-                    }
-                    println!(")");
+                    println!(" r{dest} = @{callee}");
                 }
                 JumpIfTrue | JumpIfFalse => {
                     let cond = self.read_u16();
@@ -426,13 +402,9 @@ impl<'a> Disassembler<'a> {
                 }
                 Struct => {
                     let dest = self.read_u16();
+                    let first = self.read_u16();
                     let count = self.read_u8();
-                    print!(" r{dest} = ");
-                    for _ in 0..count {
-                        let reg = self.read_u16();
-                        print!("r{reg}, ");
-                    }
-                    println!();
+                    println!(" r{dest} = r{first} x {count}");
                 }
                 RepeatStruct => {
                     let dest = self.read_u16();

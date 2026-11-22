@@ -12,16 +12,14 @@ struct CallFrame {
     ip: *const u8,
     sp: usize,
     size: u16,
-    return_reg: u16,
 }
 
 impl CallFrame {
-    fn new(code: &[u8], function: usize, sp: usize, return_reg: u16) -> Self {
+    fn new(code: &[u8], function: usize, sp: usize) -> Self {
         let mut frame = Self {
             ip: unsafe { code.as_ptr().add(function) },
             sp,
             size: 0,
-            return_reg,
         };
         let instr = frame.read_instr();
         debug_assert_eq!(instr, Opcode::FnStart);
@@ -90,7 +88,7 @@ pub struct VM {
 impl VM {
     pub fn new(code: Code) -> Self {
         let code = code.into_inner();
-        let frame = CallFrame::new(&code, 0, 0, 0);
+        let frame = CallFrame::new(&code, 0, 0);
         Self {
             stack: vec![0; frame.size as usize],
             frame,
@@ -124,17 +122,14 @@ impl VM {
                     self.store(dest, obj);
                 }
                 Opcode::Call => {
-                    let dest = self.frame.read_u16();
                     let callee = self.frame.read_u16();
-                    let callee = self.load(callee);
-                    let count = self.frame.read_u8();
-                    self.call(dest, callee, count);
+                    let function = self.load(callee);
+                    self.call(callee, function);
                 }
                 Opcode::CallI => {
                     let dest = self.frame.read_u16();
-                    let callee = self.frame.read_u32() as u64;
-                    let count = self.frame.read_u8();
-                    self.call(dest, callee, count);
+                    let function = self.frame.read_u32() as u64;
+                    self.call(dest, function);
                 }
                 Opcode::JumpIfTrue => {
                     let cond = self.frame.read_u16();
@@ -158,14 +153,11 @@ impl VM {
                 }
                 Opcode::Struct => {
                     let dest = self.frame.read_u16();
+                    let first = self.frame.read_u16();
                     let count = self.frame.read_u8();
-                    let mut args = Vec::new();
-                    for _ in 0..count {
-                        let arg = self.frame.read_u16();
-                        let arg = self.load(arg);
-                        args.push(arg);
-                    }
-                    let obj = self.heap.alloc_struct(&args);
+                    let i = self.frame.sp + first as usize;
+                    let args = &self.stack[i..i + count as usize];
+                    let obj = self.heap.alloc_struct(args);
                     self.store(dest, obj as u64);
                 }
                 Opcode::RepeatStruct => {
@@ -214,10 +206,7 @@ impl VM {
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
-                        let return_reg = self.frame.return_reg;
-                        let value = self.load(0);
                         self.frame = frame;
-                        self.store(return_reg, value);
                     } else {
                         return;
                     }
@@ -606,16 +595,11 @@ impl VM {
         self.stack[self.frame.sp + reg as usize] = value;
     }
 
-    fn call(&mut self, dest: u16, function: u64, args: u8) {
-        let sp = self.frame.sp + self.frame.size as usize;
-        let mut frame = CallFrame::new(&self.code, function as usize, sp, dest);
-        frame.size = frame.size.max(1 + args as u16);
+    fn call(&mut self, dest: u16, function: u64) {
+        let sp = self.frame.sp + dest as usize;
+        let frame = CallFrame::new(&self.code, function as usize, sp);
         if self.stack.len() < sp + frame.size as usize {
             self.stack.resize(sp + frame.size as usize, 0);
-        }
-        for i in 0..args {
-            let arg = self.frame.read_u16();
-            self.stack[sp + 1 + i as usize] = self.load(arg);
         }
         self.frames.push(std::mem::replace(&mut self.frame, frame))
     }
@@ -630,7 +614,7 @@ fn test_run() {
     let fib_ref = code.len() + 3;
     code.op_const(0, 0);
     code.op_const(1, 35);
-    code.op_call(0, 0, vec![1]);
+    code.op_call(0);
     code.op_print_u64(0);
     code.op_return();
 
@@ -647,12 +631,12 @@ fn test_run() {
     code.op_const(4, fib as u64);
     code.op_const(5, 1);
     code.op_binary(Opcode::U64Sub, 5, 1, 5);
-    code.op_call(4, 4, vec![5]);
+    code.op_call(4);
 
     code.op_const(5, fib as u64);
     code.op_const(6, 2);
     code.op_binary(Opcode::U64Sub, 6, 1, 6);
-    code.op_call(5, 5, vec![6]);
+    code.op_call(5);
 
     code.op_binary(Opcode::U64Add, 0, 4, 5);
     code.op_return();

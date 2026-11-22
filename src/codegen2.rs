@@ -223,17 +223,7 @@ impl<'a> Codegen2<'a> {
 
     fn gen_rvalue(&mut self, value: &ir::RValue, dest: Reg) {
         match *value {
-            ir::RValue::Use(operand) => match operand {
-                ir::Operand::Constant(constant) => {
-                    self.gen_constant(constant, dest);
-                }
-                ir::Operand::Reg(reg) => {
-                    let reg = self.gen_reg(reg);
-                    if reg != dest {
-                        self.code.op_copy(dest, reg);
-                    }
-                }
-            },
+            ir::RValue::Use(operand) => self.gen_operand_into(operand, dest),
             ir::RValue::Field { base, index } => {
                 let reg = self.gen_operand(base);
                 self.code.op_get_struct_property(dest, reg, index as u8);
@@ -257,8 +247,15 @@ impl<'a> Codegen2<'a> {
                 self.code.op_neg_i64(dest, reg);
             }
             ir::RValue::Struct { ref fields } => {
-                let args = fields.iter().map(|f| self.gen_operand(*f)).collect();
-                self.code.op_struct(dest, args);
+                let mut first = dest;
+                for f in fields {
+                    let reg = self.new_scratch_reg();
+                    self.gen_operand_into(*f, reg);
+                    if first == dest {
+                        first = reg;
+                    }
+                }
+                self.code.op_struct(dest, first, fields.len() as u8);
             }
             ir::RValue::StructRepeat { value, count } => {
                 let value = self.gen_operand(value);
@@ -270,15 +267,26 @@ impl<'a> Codegen2<'a> {
                     let ir::Constant::Function(id) = constant else {
                         unreachable!()
                     };
-                    let args = args.iter().map(|a| self.gen_operand(*a)).collect();
+                    let return_reg = self.new_scratch_reg();
+                    for arg in args {
+                        let reg = self.new_scratch_reg();
+                        self.gen_operand_into(*arg, reg);
+                    }
                     let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
-                    self.code.op_call_imm(dest, 0, args);
+                    self.code.op_call_imm(return_reg, 0);
+                    self.code.op_copy(dest, return_reg);
                     self.function_worklist.push((id, offset, true));
                 }
                 ir::Operand::Reg(reg) => {
                     let callee = self.gen_reg(reg);
-                    let args = args.iter().map(|a| self.gen_operand(*a)).collect();
-                    self.code.op_call(dest, callee, args);
+                    let return_reg = self.new_scratch_reg();
+                    self.code.op_copy(return_reg, callee);
+                    for arg in args {
+                        let reg = self.new_scratch_reg();
+                        self.gen_operand_into(*arg, reg);
+                    }
+                    self.code.op_call(return_reg);
+                    self.code.op_copy(dest, return_reg);
                 }
             },
         }
@@ -346,6 +354,20 @@ impl<'a> Codegen2<'a> {
             ir::BinaryOp::U64And => self.code.op_binary(U64And, dest, lhs, rhs),
             ir::BinaryOp::Equal => self.code.op_binary(Equal, dest, lhs, rhs),
             ir::BinaryOp::NotEqual => self.code.op_binary(NotEqual, dest, lhs, rhs),
+        }
+    }
+
+    fn gen_operand_into(&mut self, operand: ir::Operand, dest: Reg) {
+        match operand {
+            ir::Operand::Constant(constant) => {
+                self.gen_constant(constant, dest);
+            }
+            ir::Operand::Reg(reg) => {
+                let reg = self.gen_reg(reg);
+                if reg != dest {
+                    self.code.op_copy(dest, reg);
+                }
+            }
         }
     }
 
