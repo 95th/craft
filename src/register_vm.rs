@@ -57,6 +57,10 @@ impl CallFrame {
         i32::from_ne_bytes(self.read_array())
     }
 
+    fn read_u32(&mut self) -> u32 {
+        u32::from_ne_bytes(self.read_array())
+    }
+
     fn read_u64(&mut self) -> u64 {
         u64::from_ne_bytes(self.read_array())
     }
@@ -123,6 +127,12 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let callee = self.frame.read_u16();
                     let callee = self.load(callee);
+                    let count = self.frame.read_u8();
+                    self.call(dest, callee, count);
+                }
+                Opcode::CallI => {
+                    let dest = self.frame.read_u16();
+                    let callee = self.frame.read_u32() as u64;
                     let count = self.frame.read_u8();
                     self.call(dest, callee, count);
                 }

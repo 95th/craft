@@ -9,6 +9,8 @@ pub enum Opcode {
 
     // Operand_Dest + Operand_Fn + u8 ArgCount + <N Operands>
     Call,
+    // Operand_Dest + u32 FnAddress + u8 ArgCount + <N Operands>
+    CallI,
 
     // Operand_Cond + i32 offset
     JumpIfTrue,
@@ -156,6 +158,16 @@ impl Code {
         }
     }
 
+    pub fn op_call_imm(&mut self, dest: Reg, callee: u32, args: Vec<Reg>) {
+        self.op(CallI);
+        self.write_u16(dest);
+        self.write_u32(callee);
+        self.write_u8(args.len() as u8);
+        for arg in args {
+            self.write_u16(arg);
+        }
+    }
+
     pub fn op_jump_if_true(&mut self, cond: Reg) -> usize {
         self.op(JumpIfTrue);
         self.write_u16(cond);
@@ -297,6 +309,10 @@ impl Code {
         self.write_u64(rhs_value);
     }
 
+    pub fn write_u32_at(&mut self, i: usize, n: u32) {
+        self.code[i..i + 4].copy_from_slice(&n.to_ne_bytes());
+    }
+
     pub fn write_u64_at(&mut self, i: usize, n: u64) {
         self.code[i..i + 8].copy_from_slice(&n.to_ne_bytes());
     }
@@ -320,6 +336,10 @@ impl Code {
     }
 
     fn write_i32(&mut self, n: i32) {
+        self.code.extend(n.to_ne_bytes());
+    }
+
+    fn write_u32(&mut self, n: u32) {
         self.code.extend(n.to_ne_bytes());
     }
 
@@ -375,6 +395,17 @@ impl<'a> Disassembler<'a> {
                     let callee = self.read_u16();
                     let count = self.read_u8();
                     print!(" r{dest} = r{callee} (");
+                    for _ in 0..count {
+                        let reg = self.read_u16();
+                        print!("r{reg}, ");
+                    }
+                    println!(")");
+                }
+                CallI => {
+                    let dest = self.read_u16();
+                    let callee = self.read_u32();
+                    let count = self.read_u8();
+                    print!(" r{dest} = @{callee} (");
                     for _ in 0..count {
                         let reg = self.read_u16();
                         print!("r{reg}, ");
@@ -473,6 +504,10 @@ impl<'a> Disassembler<'a> {
 
     fn read_i32(&mut self) -> i32 {
         i32::from_ne_bytes(self.read_array())
+    }
+
+    fn read_u32(&mut self) -> u32 {
+        u32::from_ne_bytes(self.read_array())
     }
 
     fn read_u64(&mut self) -> u64 {

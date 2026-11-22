@@ -18,7 +18,7 @@ pub struct Codegen2<'a> {
     interner: &'a StrInterner,
     code: Code,
     jump_worklist: Vec<(ir::BasicBlockId, usize)>,
-    function_worklist: Vec<(SymbolId, usize)>,
+    function_worklist: Vec<(SymbolId, usize, bool)>,
     string_worklist: Vec<(StrId, usize)>,
     reg_map: FxHashMap<u32, Reg>,
     next_reg: u16,
@@ -47,13 +47,17 @@ impl<'a> Codegen2<'a> {
         self.gen_function(self.ir.main);
 
         let mut functions = FxHashMap::default();
-        while let Some((function, patch_offset)) = self.function_worklist.pop() {
+        while let Some((function, patch_offset, immediate)) = self.function_worklist.pop() {
             let function = *functions.entry(function).or_insert_with(|| {
                 let function_offset = self.code.len();
                 self.gen_function(self.ir.functions[&function]);
                 function_offset
             });
-            self.code.write_u64_at(patch_offset, function as u64);
+            if immediate {
+                self.code.write_u32_at(patch_offset, function as u32);
+            } else {
+                self.code.write_u64_at(patch_offset, function as u64);
+            }
         }
 
         let code_end = self.code.len();
@@ -261,11 +265,22 @@ impl<'a> Codegen2<'a> {
                 let count = self.gen_operand(count);
                 self.code.op_repeat_struct(dest, value, count);
             }
-            ir::RValue::Call { callee, ref args } => {
-                let callee = self.gen_operand(callee);
-                let args = args.iter().map(|a| self.gen_operand(*a)).collect();
-                self.code.op_call(dest, callee, args);
-            }
+            ir::RValue::Call { callee, ref args } => match callee {
+                ir::Operand::Constant(constant) => {
+                    let ir::Constant::Function(id) = constant else {
+                        unreachable!()
+                    };
+                    let args = args.iter().map(|a| self.gen_operand(*a)).collect();
+                    let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
+                    self.code.op_call_imm(dest, 0, args);
+                    self.function_worklist.push((id, offset, true));
+                }
+                ir::Operand::Reg(reg) => {
+                    let callee = self.gen_reg(reg);
+                    let args = args.iter().map(|a| self.gen_operand(*a)).collect();
+                    self.code.op_call(dest, callee, args);
+                }
+            },
         }
     }
 
@@ -365,7 +380,7 @@ impl<'a> Codegen2<'a> {
             ir::Constant::Function(id) => {
                 let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_const(dest, 0);
-                self.function_worklist.push((id, offset));
+                self.function_worklist.push((id, offset, false));
             }
         }
     }
