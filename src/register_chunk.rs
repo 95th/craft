@@ -92,6 +92,7 @@ pub enum Opcode {
     U64And,
 
     // Operand_Dest + Operand_Lhs + Constant_Rhs
+    U64AddI,
     U64SubI,
     U64LessI,
 
@@ -443,13 +444,13 @@ impl<'a> Disassembler<'a> {
                     let dest = self.read_u16();
                     let obj = self.read_u16();
                     let index = self.read_u8();
-                    println!(" r{dest} = r{obj} '.' {index}");
+                    println!(" r{dest} = r{obj}.{index}");
                 }
                 SetStructProperty => {
                     let obj = self.read_u16();
                     let index = self.read_u8();
                     let value = self.read_u16();
-                    println!(" r{obj} '.' {index} = r{value}");
+                    println!(" r{obj}.{index} = r{value}");
                 }
                 GetStructIndex => {
                     let dest = self.read_u16();
@@ -475,7 +476,7 @@ impl<'a> Disassembler<'a> {
                     let src = self.read_u16();
                     println!(" r{dest} = r{src}");
                 }
-                U64SubI | U64LessI => {
+                U64AddI | U64SubI | U64LessI => {
                     let dest = self.read_u16();
                     let lhs = self.read_u16();
                     let rhs = self.read_u64();

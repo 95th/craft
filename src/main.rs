@@ -185,10 +185,10 @@ mod tests {
     #[test]
     fn test_simple_big() {
         let source = r#"
-            let x = 1 + 2 / 3 - 4 * 5 * (1 - 2);
+            let x: u64 = 1 + 2 / 3 - 4 * 5 * (1 - 2);
             x = 12;
             let y = if x == 12 || x == 2 && x > 1 { x + 1 } else if x > 12 { x + 2 } else { x + 3 };
-            fn foo(a: i64, b: i64) -> i64 {
+            fn foo(a: u64, b: u64) -> u64 {
                 if a > b {
                     return 0;
                 }

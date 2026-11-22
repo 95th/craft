@@ -306,6 +306,7 @@ impl<'a> Codegen2<'a> {
 
         match op {
             ir::BinaryOp::U64Sub => handle_rhs_u64!(U64SubI, U64Sub),
+            ir::BinaryOp::U64Add => handle_rhs_u64!(U64AddI, U64Add),
             ir::BinaryOp::U64Less => handle_rhs_u64!(U64LessI, U64Less),
             _ => (),
         }

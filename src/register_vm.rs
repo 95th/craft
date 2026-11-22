@@ -488,6 +488,14 @@ impl VM {
                     let value = lhs.wrapping_add(rhs);
                     self.store(dest, value);
                 }
+                Opcode::U64AddI => {
+                    let dest = self.frame.read_u16();
+                    let lhs = self.frame.read_u16();
+                    let rhs = self.frame.read_u64();
+                    let lhs = self.load(lhs);
+                    let value = lhs.wrapping_add(rhs);
+                    self.store(dest, value);
+                }
                 Opcode::U64Sub => {
                     let dest = self.frame.read_u16();
                     let lhs = self.frame.read_u16();
