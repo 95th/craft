@@ -1,6 +1,5 @@
-use std::{cmp::Reverse, collections::BinaryHeap};
-
-use rustc_hash::FxHashMap;
+use bitvec::vec::BitVec;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     bind::SymbolId,
@@ -100,40 +99,114 @@ impl<'a> Codegen2<'a> {
     fn allocate_registers(&mut self, function: ir::BasicBlockId) {
         let liveness = LivenessAnalysis::new(self.ir).compute(function);
 
-        let mut intervals: Vec<_> = liveness.reg_interval.iter().copied().enumerate().collect();
+        let mut intervals: Vec<_> = liveness
+            .reg_interval
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(reg, interval)| {
+                if interval == Interval::UNINIT {
+                    None
+                } else {
+                    Some((reg as ir::RegId, interval))
+                }
+            })
+            .collect();
         intervals.sort_by_key(|(_, i)| i.start);
+
+        let reg_groups = self.collect_reg_groups(function);
 
         self.next_reg = 0;
         self.reg_map.clear();
-        let mut active = FxHashMap::<Reg, usize>::default();
-        let mut free = BinaryHeap::<Reverse<Reg>>::new();
+        let mut active_ir_regs = FxHashSet::default();
+        let mut active = FxHashMap::<Reg, (ir::RegId, usize)>::default();
+        let mut live = BitVec::<usize>::new();
         let mut just_freed = Vec::new();
 
-        for (reg_id, interval) in intervals {
-            if interval == Interval::UNINIT {
+        for (ir_reg, interval) in intervals {
+            if active_ir_regs.contains(&ir_reg) {
                 continue;
             }
 
-            for (reg, end) in active.iter() {
+            for (reg, (ir_reg, end)) in active.iter() {
                 if *end < interval.start {
                     just_freed.push(*reg);
+                    active_ir_regs.remove(ir_reg);
                 }
             }
 
             while let Some(reg) = just_freed.pop() {
                 active.remove(&reg);
-                free.push(Reverse(reg));
+                live.set(reg as usize, false);
             }
 
-            if let Some(free) = free.pop() {
-                self.reg_map.insert(reg_id as u32, free.0);
-                active.insert(free.0, interval.end);
+            if let Some(&(ir_start, ir_end)) = reg_groups.get(&ir_reg) {
+                let len = (ir_end - ir_start + 1) as usize;
+
+                let start_reg = if let Some(highest_used) = live.iter_ones().rev().next() {
+                    highest_used + 1
+                } else {
+                    live.len()
+                };
+
+                for j in 0..len {
+                    let reg = start_reg + j;
+                    let ir_reg = ir_start + j as u32;
+                    if reg < live.len() {
+                        live.set(reg, true);
+                    } else {
+                        live.push(true);
+                        self.next_reg += 1;
+                    }
+                    self.reg_map.insert(ir_reg, reg as Reg);
+                    let interval = liveness.reg_interval[ir_reg as usize];
+                    active.insert(reg as Reg, (ir_reg, interval.end));
+                    active_ir_regs.insert(ir_reg);
+                }
             } else {
-                self.reg_map.insert(reg_id as u32, self.next_reg);
-                active.insert(self.next_reg, interval.end);
-                self.next_reg += 1;
+                if let Some(free) = live.iter_zeros().next() {
+                    self.reg_map.insert(ir_reg, free as Reg);
+                    active.insert(free as Reg, (ir_reg, interval.end));
+                    active_ir_regs.insert(ir_reg);
+                } else {
+                    self.reg_map.insert(ir_reg, self.next_reg);
+                    active.insert(self.next_reg, (ir_reg, interval.end));
+                    active_ir_regs.insert(ir_reg);
+                    self.next_reg += 1;
+                    live.push(true);
+                }
             }
         }
+    }
+
+    fn collect_reg_groups(
+        &self,
+        entry: ir::BasicBlockId,
+    ) -> FxHashMap<ir::RegId, (ir::RegId, ir::RegId)> {
+        let mut out = FxHashMap::default();
+        for block in self.ir.reachable_postorder(entry) {
+            for stmt in self.ir.basic_blocks[block].statements.iter() {
+                match *stmt {
+                    ir::Statement::Assign {
+                        value:
+                            ir::RValue::Call {
+                                return_reg,
+                                ref args,
+                                ..
+                            },
+                        ..
+                    } => {
+                        let start = return_reg;
+                        let end = args.last().copied().unwrap_or(return_reg);
+                        for reg in start..=end {
+                            out.insert(reg, (start, end));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
     }
 
     fn gen_block(&mut self, block: ir::BasicBlockId, next_block: Option<ir::BasicBlockId>) {
@@ -262,31 +335,29 @@ impl<'a> Codegen2<'a> {
                 let count = self.gen_operand(count);
                 self.code.op_repeat_struct(dest, value, count);
             }
-            ir::RValue::Call { callee, ref args } => match callee {
+            ir::RValue::Call {
+                callee, return_reg, ..
+            } => match callee {
                 ir::Operand::Constant(constant) => {
                     let ir::Constant::Function(id) = constant else {
                         unreachable!()
                     };
-                    let return_reg = self.new_scratch_reg();
-                    for arg in args {
-                        let reg = self.new_scratch_reg();
-                        self.gen_operand_into(*arg, reg);
-                    }
+                    let return_reg = self.gen_reg(return_reg);
                     let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                     self.code.op_call_imm(return_reg, 0);
-                    self.code.op_copy(dest, return_reg);
+                    if dest != return_reg {
+                        self.code.op_copy(dest, return_reg);
+                    }
                     self.function_worklist.push((id, offset, true));
                 }
                 ir::Operand::Reg(reg) => {
                     let callee = self.gen_reg(reg);
-                    let return_reg = self.new_scratch_reg();
+                    let return_reg = self.gen_reg(return_reg);
                     self.code.op_copy(return_reg, callee);
-                    for arg in args {
-                        let reg = self.new_scratch_reg();
-                        self.gen_operand_into(*arg, reg);
-                    }
                     self.code.op_call(return_reg);
-                    self.code.op_copy(dest, return_reg);
+                    if dest != return_reg {
+                        self.code.op_copy(dest, return_reg);
+                    }
                 }
             },
         }

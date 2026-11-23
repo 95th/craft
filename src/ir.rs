@@ -261,8 +261,26 @@ impl<'a> Lowering<'a> {
                     self.store_value(dest, RValue::Struct { fields: args })
                 } else {
                     let callee = self.lower_expr(callee);
-                    let args = args.iter().map(|x| self.lower_expr(*x)).collect();
-                    self.store_value(dest, RValue::Call { callee, args })
+                    let return_reg = if dest == self.next_register - 1 {
+                        dest
+                    } else {
+                        self.create_register(false)
+                    };
+                    let arg_regs = (0..args.len())
+                        .map(|_| self.create_register(false))
+                        .collect::<Vec<_>>();
+
+                    for i in 0..args.len() {
+                        self.lower_expr_into(arg_regs[i], args[i]);
+                    }
+                    self.store_value(
+                        dest,
+                        RValue::Call {
+                            callee,
+                            return_reg,
+                            args: arg_regs,
+                        },
+                    )
                 }
             }
             ast::Expr::Array(ref args) => {
@@ -656,7 +674,8 @@ pub enum RValue {
     },
     Call {
         callee: Operand,
-        args: Vec<Operand>,
+        return_reg: RegId,
+        args: Vec<RegId>,
     },
 }
 
@@ -883,11 +902,16 @@ impl<'a> Regs<'a> {
                 self.visit_operand(value, visitor);
                 self.visit_operand(count, visitor);
             }
-            RValue::Call { callee, ref args } => {
+            RValue::Call {
+                callee,
+                return_reg,
+                ref args,
+            } => {
                 self.visit_operand(callee, visitor);
                 for arg in args {
-                    self.visit_operand(*arg, visitor);
+                    visitor.on_use(*arg);
                 }
+                visitor.on_def(return_reg);
             }
         }
     }

@@ -134,14 +134,14 @@ mod tests {
     fn run_ok(source: &str) {
         let mut diagnostics = Diagnostics::new();
         if cfg!(feature = "lower") {
-            let code = lower_and_compile(source, &mut diagnostics).expect("OK");
+            let code = lower_and_compile(source, &mut diagnostics);
             diagnostics.print(source);
-            let mut vm = register_vm::VM::new(code);
+            let mut vm = register_vm::VM::new(code.expect("OK"));
             vm.run();
         } else {
-            let code = compile(source, &mut diagnostics).expect("OK");
+            let code = compile(source, &mut diagnostics);
             diagnostics.print(source);
-            let mut vm = VM::new(code);
+            let mut vm = VM::new(code.expect("OK"));
             vm.run();
         }
     }
@@ -1301,6 +1301,21 @@ mod tests {
             if true {
                 print(1);
             }
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_function_variable_multiple_args() {
+        let source = r#"
+            fn foo(a: u64, b: u64, c: u64) -> u64 {
+                a + b + c
+            }
+
+            let f = foo;
+            let a = 10;
+            let r = f(a + 2, a + 4, a + 6);
+            print(r);
         "#;
         run_ok(source)
     }
