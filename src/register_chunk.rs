@@ -92,9 +92,41 @@ pub enum Opcode {
     U64And,
 
     // Operand_Dest + Operand_Lhs + Constant_Rhs
+    EqualI,
+    NotEqualI,
+
+    F64AddI,
+    F64SubI,
+    F64MulI,
+    F64DivI,
+    F64GreaterI,
+    F64GreaterEqualI,
+    F64LessI,
+    F64LessEqualI,
+    F64EqualI,
+    F64NotEqualI,
+
+    I64AddI,
+    I64SubI,
+    I64MulI,
+    I64DivI,
+    I64GreaterI,
+    I64GreaterEqualI,
+    I64LessI,
+    I64LessEqualI,
+    I64OrI,
+    I64AndI,
+
     U64AddI,
     U64SubI,
+    U64MulI,
+    U64DivI,
+    U64GreaterI,
+    U64GreaterEqualI,
     U64LessI,
+    U64LessEqualI,
+    U64OrI,
+    U64AndI,
 
     FnStart = u8::MAX,
 }
@@ -448,13 +480,22 @@ impl<'a> Disassembler<'a> {
                     let src = self.read_u16();
                     println!(" r{dest} = r{src}");
                 }
-                U64AddI | U64SubI | U64LessI => {
+                EqualI | NotEqualI | F64AddI | F64SubI | F64MulI | F64DivI | F64GreaterI
+                | F64GreaterEqualI | F64LessI | F64LessEqualI | F64EqualI | F64NotEqualI
+                | I64AddI | I64SubI | I64MulI | I64DivI | I64GreaterI | I64GreaterEqualI
+                | I64LessI | I64LessEqualI | I64OrI | I64AndI | U64AddI | U64SubI | U64MulI
+                | U64DivI | U64GreaterI | U64GreaterEqualI | U64LessI | U64LessEqualI | U64OrI
+                | U64AndI => {
                     let dest = self.read_u16();
                     let lhs = self.read_u16();
                     let rhs = self.read_u64();
                     println!(" r{dest} = r{lhs}, {rhs}");
                 }
-                _ => {
+                Equal | NotEqual | F64Add | F64Sub | F64Mul | F64Div | F64Greater
+                | F64GreaterEqual | F64Less | F64LessEqual | F64Equal | F64NotEqual | I64Add
+                | I64Sub | I64Mul | I64Div | I64Greater | I64GreaterEqual | I64Less
+                | I64LessEqual | I64Or | I64And | U64Add | U64Sub | U64Mul | U64Div
+                | U64Greater | U64GreaterEqual | U64Less | U64LessEqual | U64Or | U64And => {
                     let dest = self.read_u16();
                     let lhs = self.read_u16();
                     let rhs = self.read_u16();

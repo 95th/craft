@@ -293,32 +293,84 @@ impl<'a> Codegen2<'a> {
     }
 
     fn gen_binary(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: ir::Operand, dest: Reg) {
-        macro_rules! handle_rhs_u64 {
-            ($yes:expr, $no:expr) => {{
-                let lhs = self.gen_operand(lhs);
-                match rhs {
-                    ir::Operand::Constant(constant) => {
-                        let ir::Constant::U64(rhs) = constant else {
-                            unreachable!()
-                        };
-                        self.code.op_binary_imm($yes, dest, lhs, rhs);
-                    }
-                    ir::Operand::Reg(rhs) => {
-                        let rhs = self.gen_reg(rhs);
-                        self.code.op_binary($no, dest, lhs, rhs);
-                    }
-                }
-                return;
-            }};
+        match rhs {
+            ir::Operand::Constant(ir::Constant::U64(rhs)) => {
+                self.gen_binary_u64(op, lhs, rhs, dest)
+            }
+            ir::Operand::Constant(ir::Constant::I64(rhs)) => {
+                self.gen_binary_i64(op, lhs, rhs, dest)
+            }
+            ir::Operand::Constant(ir::Constant::F64(rhs)) => {
+                self.gen_binary_f64(op, lhs, rhs, dest)
+            }
+            _ => self.gen_binary_reg(op, lhs, rhs, dest),
         }
+    }
 
+    fn gen_binary_u64(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: u64, dest: Reg) {
+        let lhs = self.gen_operand(lhs);
         match op {
-            ir::BinaryOp::U64Sub => handle_rhs_u64!(U64SubI, U64Sub),
-            ir::BinaryOp::U64Add => handle_rhs_u64!(U64AddI, U64Add),
-            ir::BinaryOp::U64Less => handle_rhs_u64!(U64LessI, U64Less),
-            _ => (),
+            ir::BinaryOp::U64Add => self.code.op_binary_imm(U64AddI, dest, lhs, rhs),
+            ir::BinaryOp::U64Sub => self.code.op_binary_imm(U64SubI, dest, lhs, rhs),
+            ir::BinaryOp::U64Mul => self.code.op_binary_imm(U64MulI, dest, lhs, rhs),
+            ir::BinaryOp::U64Div => self.code.op_binary_imm(U64DivI, dest, lhs, rhs),
+            ir::BinaryOp::U64Greater => self.code.op_binary_imm(U64GreaterI, dest, lhs, rhs),
+            ir::BinaryOp::U64GreaterEqual => {
+                self.code.op_binary_imm(U64GreaterEqualI, dest, lhs, rhs)
+            }
+            ir::BinaryOp::U64Less => self.code.op_binary_imm(U64LessI, dest, lhs, rhs),
+            ir::BinaryOp::U64LessEqual => self.code.op_binary_imm(U64LessEqualI, dest, lhs, rhs),
+            ir::BinaryOp::U64Or => self.code.op_binary_imm(U64OrI, dest, lhs, rhs),
+            ir::BinaryOp::U64And => self.code.op_binary_imm(U64AndI, dest, lhs, rhs),
+            ir::BinaryOp::Equal => self.code.op_binary_imm(EqualI, dest, lhs, rhs),
+            ir::BinaryOp::NotEqual => self.code.op_binary_imm(NotEqualI, dest, lhs, rhs),
+            _ => unreachable!(),
         }
+    }
 
+    fn gen_binary_i64(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: i64, dest: Reg) {
+        let lhs = self.gen_operand(lhs);
+        let rhs = u64::from_ne_bytes(rhs.to_ne_bytes());
+        match op {
+            ir::BinaryOp::I64Add => self.code.op_binary_imm(I64AddI, dest, lhs, rhs),
+            ir::BinaryOp::I64Sub => self.code.op_binary_imm(I64SubI, dest, lhs, rhs),
+            ir::BinaryOp::I64Mul => self.code.op_binary_imm(I64MulI, dest, lhs, rhs),
+            ir::BinaryOp::I64Div => self.code.op_binary_imm(I64DivI, dest, lhs, rhs),
+            ir::BinaryOp::I64Greater => self.code.op_binary_imm(I64GreaterI, dest, lhs, rhs),
+            ir::BinaryOp::I64GreaterEqual => {
+                self.code.op_binary_imm(I64GreaterEqualI, dest, lhs, rhs)
+            }
+            ir::BinaryOp::I64Less => self.code.op_binary_imm(I64LessI, dest, lhs, rhs),
+            ir::BinaryOp::I64LessEqual => self.code.op_binary_imm(I64LessEqualI, dest, lhs, rhs),
+            ir::BinaryOp::I64Or => self.code.op_binary_imm(I64OrI, dest, lhs, rhs),
+            ir::BinaryOp::I64And => self.code.op_binary_imm(I64AndI, dest, lhs, rhs),
+            ir::BinaryOp::Equal => self.code.op_binary_imm(EqualI, dest, lhs, rhs),
+            ir::BinaryOp::NotEqual => self.code.op_binary_imm(NotEqualI, dest, lhs, rhs),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gen_binary_f64(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: f64, dest: Reg) {
+        let lhs = self.gen_operand(lhs);
+        let rhs = rhs.to_bits();
+        match op {
+            ir::BinaryOp::F64Add => self.code.op_binary_imm(F64AddI, dest, lhs, rhs),
+            ir::BinaryOp::F64Sub => self.code.op_binary_imm(F64SubI, dest, lhs, rhs),
+            ir::BinaryOp::F64Mul => self.code.op_binary_imm(F64MulI, dest, lhs, rhs),
+            ir::BinaryOp::F64Div => self.code.op_binary_imm(F64DivI, dest, lhs, rhs),
+            ir::BinaryOp::F64Greater => self.code.op_binary_imm(F64GreaterI, dest, lhs, rhs),
+            ir::BinaryOp::F64GreaterEqual => {
+                self.code.op_binary_imm(F64GreaterEqualI, dest, lhs, rhs)
+            }
+            ir::BinaryOp::F64Less => self.code.op_binary_imm(F64LessI, dest, lhs, rhs),
+            ir::BinaryOp::F64LessEqual => self.code.op_binary_imm(F64LessEqualI, dest, lhs, rhs),
+            ir::BinaryOp::F64Equal => self.code.op_binary_imm(F64EqualI, dest, lhs, rhs),
+            ir::BinaryOp::F64NotEqual => self.code.op_binary_imm(F64NotEqualI, dest, lhs, rhs),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gen_binary_reg(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: ir::Operand, dest: Reg) {
         let lhs = self.gen_operand(lhs);
         let rhs = self.gen_operand(rhs);
         match op {

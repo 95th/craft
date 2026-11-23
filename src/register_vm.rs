@@ -272,320 +272,345 @@ impl VM {
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::Equal => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs == rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::NotEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs != rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Add => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) + f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Sub => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) - f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Mul => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) * f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Div => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) / f64::from_bits(rhs);
                     self.store(dest, value.to_bits());
                 }
                 Opcode::F64Greater => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) > f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64GreaterEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) >= f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Less => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) < f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64LessEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) <= f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64Equal => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) == f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::F64NotEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = f64::from_bits(lhs) != f64::from_bits(rhs);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Add => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64).wrapping_add(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Sub => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64).wrapping_sub(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Mul => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64).wrapping_mul(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Div => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64).wrapping_div(cast!(rhs, i64));
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Greater => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) > cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64GreaterEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) >= cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Less => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) < cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64LessEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) <= cast!(rhs, i64);
                     self.store(dest, value as u64);
                 }
                 Opcode::I64Or => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) | cast!(rhs, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64And => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = cast!(lhs, i64) & cast!(rhs, i64);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::U64Add => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
-                    let value = lhs.wrapping_add(rhs);
-                    self.store(dest, value);
-                }
-                Opcode::U64AddI => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u64();
-                    let lhs = self.load(lhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs.wrapping_add(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Sub => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
-                    let value = lhs.wrapping_sub(rhs);
-                    self.store(dest, value);
-                }
-                Opcode::U64SubI => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u64();
-                    let lhs = self.load(lhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs.wrapping_sub(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Mul => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs.wrapping_mul(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Div => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs.wrapping_div(rhs);
                     self.store(dest, value);
                 }
                 Opcode::U64Greater => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs > rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64GreaterEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs >= rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Less => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
-                    let value = lhs < rhs;
-                    self.store(dest, value as u64);
-                }
-                Opcode::U64LessI => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u64();
-                    let lhs = self.load(lhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs < rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64LessEqual => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs <= rhs;
                     self.store(dest, value as u64);
                 }
                 Opcode::U64Or => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
                     let value = lhs | rhs;
                     self.store(dest, value);
                 }
                 Opcode::U64And => {
-                    let dest = self.frame.read_u16();
-                    let lhs = self.frame.read_u16();
-                    let rhs = self.frame.read_u16();
-                    let lhs = self.load(lhs);
-                    let rhs = self.load(rhs);
+                    let (dest, lhs, rhs) = self.binary_operands();
+                    let value = lhs & rhs;
+                    self.store(dest, value);
+                }
+                Opcode::EqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs == rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::NotEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs != rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64AddI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) + f64::from_bits(rhs);
+                    self.store(dest, value.to_bits());
+                }
+                Opcode::F64SubI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) - f64::from_bits(rhs);
+                    self.store(dest, value.to_bits());
+                }
+                Opcode::F64MulI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) * f64::from_bits(rhs);
+                    self.store(dest, value.to_bits());
+                }
+                Opcode::F64DivI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) / f64::from_bits(rhs);
+                    self.store(dest, value.to_bits());
+                }
+                Opcode::F64GreaterI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) > f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64GreaterEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) >= f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64LessI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) < f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64LessEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) <= f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64EqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) == f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::F64NotEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = f64::from_bits(lhs) != f64::from_bits(rhs);
+                    self.store(dest, value as u64);
+                }
+                Opcode::I64AddI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64).wrapping_add(cast!(rhs, i64));
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::I64SubI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64).wrapping_sub(cast!(rhs, i64));
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::I64MulI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64).wrapping_mul(cast!(rhs, i64));
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::I64DivI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64).wrapping_div(cast!(rhs, i64));
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::I64GreaterI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) > cast!(rhs, i64);
+                    self.store(dest, value as u64);
+                }
+                Opcode::I64GreaterEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) >= cast!(rhs, i64);
+                    self.store(dest, value as u64);
+                }
+                Opcode::I64LessI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) < cast!(rhs, i64);
+                    self.store(dest, value as u64);
+                }
+                Opcode::I64LessEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) <= cast!(rhs, i64);
+                    self.store(dest, value as u64);
+                }
+                Opcode::I64OrI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) | cast!(rhs, i64);
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::I64AndI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = cast!(lhs, i64) & cast!(rhs, i64);
+                    self.store(dest, cast!(value, u64));
+                }
+                Opcode::U64AddI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs.wrapping_add(rhs);
+                    self.store(dest, value);
+                }
+                Opcode::U64SubI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs.wrapping_sub(rhs);
+                    self.store(dest, value);
+                }
+                Opcode::U64MulI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs.wrapping_mul(rhs);
+                    self.store(dest, value);
+                }
+                Opcode::U64DivI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs.wrapping_div(rhs);
+                    self.store(dest, value);
+                }
+                Opcode::U64GreaterI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs > rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::U64GreaterEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs >= rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::U64LessI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs < rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::U64LessEqualI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs <= rhs;
+                    self.store(dest, value as u64);
+                }
+                Opcode::U64OrI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
+                    let value = lhs | rhs;
+                    self.store(dest, value);
+                }
+                Opcode::U64AndI => {
+                    let (dest, lhs, rhs) = self.binary_imm_operands();
                     let value = lhs & rhs;
                     self.store(dest, value);
                 }
                 Opcode::FnStart => unreachable!(),
             }
         }
+    }
+
+    fn binary_operands(&mut self) -> (u16, u64, u64) {
+        let dest = self.frame.read_u16();
+        let lhs = self.frame.read_u16();
+        let rhs = self.frame.read_u16();
+        let lhs = self.load(lhs);
+        let rhs = self.load(rhs);
+        (dest, lhs, rhs)
+    }
+
+    fn binary_imm_operands(&mut self) -> (u16, u64, u64) {
+        let dest = self.frame.read_u16();
+        let lhs = self.frame.read_u16();
+        let rhs = self.frame.read_u64();
+        let lhs = self.load(lhs);
+        (dest, lhs, rhs)
     }
 
     fn load(&self, reg: u16) -> u64 {
