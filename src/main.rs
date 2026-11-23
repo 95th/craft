@@ -34,6 +34,7 @@ enum Error {
     Parse,
     Bind,
     TypeCheck,
+    Runtime,
 }
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
@@ -104,7 +105,7 @@ fn main() {
         match lower_and_compile(source, &mut diagnostics) {
             Ok(code) => {
                 let mut vm = register_vm::VM::new(code);
-                vm.run();
+                vm.run().expect("OK");
             }
             Err(_) => {
                 diagnostics.print(source);
@@ -117,7 +118,7 @@ fn main() {
         match compile(source, &mut diagnostics) {
             Ok(code) => {
                 let mut vm = VM::new(code);
-                vm.run();
+                vm.run()
             }
             Err(_) => {
                 diagnostics.print(source);
@@ -131,26 +132,28 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn run_ok(source: &str) {
+    fn run(source: &str) -> Result<(), Error> {
         let mut diagnostics = Diagnostics::new();
         if cfg!(feature = "lower") {
             let code = lower_and_compile(source, &mut diagnostics);
             diagnostics.print(source);
-            let mut vm = register_vm::VM::new(code.expect("OK"));
-            vm.run();
+            let mut vm = register_vm::VM::new(code?);
+            vm.run()?;
         } else {
             let code = compile(source, &mut diagnostics);
             diagnostics.print(source);
-            let mut vm = VM::new(code.expect("OK"));
+            let mut vm = VM::new(code?);
             vm.run();
         }
+        Ok(())
     }
 
-    fn check_err(source: &str, error: Error) {
-        let mut diagnostics = Diagnostics::new();
-        let result = compile(source, &mut diagnostics);
-        diagnostics.print(source);
-        assert_eq!(result.unwrap_err(), error);
+    fn run_ok(source: &str) {
+        run(source).expect("OK");
+    }
+
+    fn run_err(source: &str, error: Error) {
+        assert_eq!(run(source).unwrap_err(), error)
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
         let source = r#"
             fn foo(n: f64, n: f64) -> f64 { n + 1 }
         "#;
-        check_err(source, Error::Bind);
+        run_err(source, Error::Bind);
     }
 
     #[test]
@@ -272,7 +275,7 @@ mod tests {
             let a: (f64, (f64)) = (1.0, (2.0, 3.0));
             foo(a.0, (a.1).0);
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -371,7 +374,7 @@ mod tests {
                 b: 20
             };
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -384,7 +387,7 @@ mod tests {
             let foo = Foo {
             };
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -397,7 +400,7 @@ mod tests {
                 a: true
             };
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -405,7 +408,7 @@ mod tests {
         let source = r#"
             true + 1;
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -413,7 +416,7 @@ mod tests {
         let source = r#"
             let a = b + 1;
         "#;
-        check_err(source, Error::Bind);
+        run_err(source, Error::Bind);
     }
 
     #[test]
@@ -424,7 +427,7 @@ mod tests {
                 a: f64
             }
         "#;
-        check_err(source, Error::Parse);
+        run_err(source, Error::Parse);
     }
 
     #[test]
@@ -433,7 +436,7 @@ mod tests {
             struct Foo {}
             struct Foo {}
         "#;
-        check_err(source, Error::Bind);
+        run_err(source, Error::Bind);
     }
 
     #[test]
@@ -540,7 +543,7 @@ mod tests {
             }
             i;
         "#;
-        check_err(source, Error::Bind);
+        run_err(source, Error::Bind);
     }
 
     #[test]
@@ -549,7 +552,7 @@ mod tests {
             for (i = 0 i < 10; i = i + 1) {
             }
         "#;
-        check_err(source, Error::Parse);
+        run_err(source, Error::Parse);
     }
 
     #[test]
@@ -582,7 +585,7 @@ mod tests {
             if Foo {}
             while Foo {}
         "#;
-        check_err(source, Error::Bind);
+        run_err(source, Error::Bind);
     }
 
     #[test]
@@ -592,7 +595,7 @@ mod tests {
             if (Foo {}) {}
             while (Foo {}) {}
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -778,7 +781,7 @@ mod tests {
             let x = if true { foo } else { bar };
             print(x(10));
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -879,7 +882,7 @@ mod tests {
             let a: u64 = 10;
             print(-a);
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -896,7 +899,7 @@ mod tests {
         let source = r#"
             let a: u64 = -1;
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -906,7 +909,7 @@ mod tests {
             print(-a);
             let b: u64 = a;
         "#;
-        check_err(source, Error::TypeCheck);
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -1318,5 +1321,41 @@ mod tests {
             print(r);
         "#;
         run_ok(source)
+    }
+
+    #[test]
+    fn test_u64_div_by_zero() {
+        let source = r#"
+            let a: u64 = 1;
+            print(a / 0);
+        "#;
+        run_err(source, Error::Runtime)
+    }
+
+    #[test]
+    fn test_i64_div_by_zero() {
+        let source = r#"
+            let a: i64 = 1;
+            print(a / 0);
+        "#;
+        run_err(source, Error::Runtime)
+    }
+
+    #[test]
+    fn test_f64_div_by_zero() {
+        let source = r#"
+            let a: f64 = 1.0;
+            print(a / 0.0);
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_array_out_of_bounds() {
+        let source = r#"
+            let a = [1];
+            print(a[1]);
+        "#;
+        run_err(source, Error::Runtime)
     }
 }

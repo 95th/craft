@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::{
+    Error,
     heap::Heap,
     register_chunk::{Code, Opcode},
 };
@@ -100,7 +101,7 @@ impl VM {
     }
 
     #[inline(never)]
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), Error> {
         loop {
             let instr = self.frame.read_instr();
             match instr {
@@ -193,8 +194,12 @@ impl VM {
                     let index = self.frame.read_u16();
                     let obj = self.load(obj) as usize;
                     let index = self.load(index) as usize;
-                    let value = self.heap.get_field(obj, index);
-                    self.store(dest, value);
+                    if let Some(value) = self.heap.get_index(obj, index) {
+                        self.store(dest, value);
+                    } else {
+                        eprintln!("Array index out of bounds");
+                        return Err(Error::Runtime);
+                    }
                 }
                 Opcode::SetStructIndex => {
                     let obj = self.frame.read_u16();
@@ -203,13 +208,16 @@ impl VM {
                     let obj = self.load(obj) as usize;
                     let index = self.load(index) as usize;
                     let value = self.load(value);
-                    self.heap.set_field(obj, index as usize, value);
+                    if !self.heap.set_index(obj, index as usize, value) {
+                        eprintln!("Array index out of bounds");
+                        return Err(Error::Runtime);
+                    }
                 }
                 Opcode::Return => {
                     if let Some(frame) = self.frames.pop() {
                         self.frame = frame;
                     } else {
-                        return;
+                        return Ok(());
                     }
                 }
                 Opcode::PrintF64 => {
@@ -348,7 +356,12 @@ impl VM {
                 }
                 Opcode::I64Div => {
                     let (dest, lhs, rhs) = self.binary_operands();
-                    let value = cast!(lhs, i64).wrapping_div(cast!(rhs, i64));
+                    let rhs = cast!(rhs, i64);
+                    if rhs == 0 {
+                        eprintln!("Divide by zero");
+                        return Err(Error::Runtime);
+                    }
+                    let value = cast!(lhs, i64).wrapping_div(rhs);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64Greater => {
@@ -398,6 +411,10 @@ impl VM {
                 }
                 Opcode::U64Div => {
                     let (dest, lhs, rhs) = self.binary_operands();
+                    if rhs == 0 {
+                        eprintln!("Divide by zero");
+                        return Err(Error::Runtime);
+                    }
                     let value = lhs.wrapping_div(rhs);
                     self.store(dest, value);
                 }
@@ -508,7 +525,12 @@ impl VM {
                 }
                 Opcode::I64DivI => {
                     let (dest, lhs, rhs) = self.binary_imm_operands();
-                    let value = cast!(lhs, i64).wrapping_div(cast!(rhs, i64));
+                    let rhs = cast!(rhs, i64);
+                    if rhs == 0 {
+                        eprintln!("Divide by zero");
+                        return Err(Error::Runtime);
+                    }
+                    let value = cast!(lhs, i64).wrapping_div(rhs);
                     self.store(dest, cast!(value, u64));
                 }
                 Opcode::I64GreaterI => {
@@ -558,6 +580,10 @@ impl VM {
                 }
                 Opcode::U64DivI => {
                     let (dest, lhs, rhs) = self.binary_imm_operands();
+                    if rhs == 0 {
+                        eprintln!("Divide by zero");
+                        return Err(Error::Runtime);
+                    }
                     let value = lhs.wrapping_div(rhs);
                     self.store(dest, value);
                 }
@@ -676,6 +702,6 @@ fn test_run() {
 
     let mut vm = VM::new(code);
     let start = Instant::now();
-    vm.run();
+    vm.run().expect("Ok");
     println!("took: {:?}", start.elapsed());
 }

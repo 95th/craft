@@ -457,14 +457,14 @@ impl VM {
                 Opcode::GetStructIndex => {
                     let index = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap() as usize;
-                    let value = self.heap.get_field(obj, index as usize);
+                    let value = self.heap.get_index(obj, index as usize).unwrap();
                     self.stack.push(value);
                 }
                 Opcode::SetStructIndex => {
                     let value = self.stack.pop().unwrap();
                     let index = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap() as usize;
-                    self.heap.set_field(obj, index as usize, value);
+                    assert!(self.heap.set_index(obj, index as usize, value));
                 }
             }
         }
