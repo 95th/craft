@@ -1324,6 +1324,21 @@ mod tests {
     }
 
     #[test]
+    fn test_function_void() {
+        let source = r#"
+            fn foo(a: u64, b: u64, c: u64) {
+                print(a + b + c);
+            }
+
+            let f = foo;
+            let a = 10;
+            let r = f(a + 2, a + 4, a + 6 + 7 + 8 + 9);
+            print(r == ());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
     fn test_u64_div_by_zero() {
         let source = r#"
             let a: u64 = 1;

@@ -333,6 +333,8 @@ impl<'a> Lowering<'a> {
                 }
                 if let Some(expr) = expr {
                     self.lower_expr_into(dest, expr)
+                } else {
+                    self.store_constant(dest, Constant::Unit);
                 }
             }
             ast::Expr::Variable(..) => {
