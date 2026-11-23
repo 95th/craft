@@ -20,9 +20,9 @@ pub struct Codegen2<'a> {
     function_worklist: Vec<(SymbolId, usize, bool)>,
     string_worklist: Vec<(StrId, usize)>,
     reg_map: FxHashMap<u32, Reg>,
-    next_reg: u16,
-    next_scratch_reg: u16,
-    max_scratch_reg: u16,
+    next_reg: Reg,
+    next_scratch_reg: Reg,
+    max_scratch_reg: Reg,
 }
 
 impl<'a> Codegen2<'a> {
@@ -116,7 +116,6 @@ impl<'a> Codegen2<'a> {
 
         let reg_groups = self.collect_reg_groups(function);
 
-        self.next_reg = 0;
         self.reg_map.clear();
         let mut active_ir_regs = FxHashSet::default();
         let mut active = FxHashMap::<Reg, (ir::RegId, usize)>::default();
@@ -129,7 +128,7 @@ impl<'a> Codegen2<'a> {
             }
 
             for (reg, (ir_reg, end)) in active.iter() {
-                if *end < interval.start {
+                if *end <= interval.start {
                     just_freed.push(*reg);
                     active_ir_regs.remove(ir_reg);
                 }
@@ -156,7 +155,6 @@ impl<'a> Codegen2<'a> {
                         live.set(reg, true);
                     } else {
                         live.push(true);
-                        self.next_reg += 1;
                     }
                     self.reg_map.insert(ir_reg, reg as Reg);
                     let interval = liveness.reg_interval[ir_reg as usize];
@@ -164,19 +162,22 @@ impl<'a> Codegen2<'a> {
                     active_ir_regs.insert(ir_reg);
                 }
             } else {
-                if let Some(free) = live.iter_zeros().next() {
-                    self.reg_map.insert(ir_reg, free as Reg);
-                    active.insert(free as Reg, (ir_reg, interval.end));
-                    active_ir_regs.insert(ir_reg);
+                let reg = if let Some(reg) = live.iter_zeros().next() {
+                    live.set(reg, true);
+                    reg as Reg
                 } else {
-                    self.reg_map.insert(ir_reg, self.next_reg);
-                    active.insert(self.next_reg, (ir_reg, interval.end));
-                    active_ir_regs.insert(ir_reg);
-                    self.next_reg += 1;
+                    let reg = live.len();
                     live.push(true);
-                }
+                    reg as Reg
+                };
+                self.reg_map.insert(ir_reg, reg);
+                active.insert(reg, (ir_reg, interval.end));
+                active_ir_regs.insert(ir_reg);
             }
         }
+        self.next_reg = live.len() as Reg;
+        self.next_scratch_reg = self.next_reg;
+        self.max_scratch_reg = self.next_reg;
     }
 
     fn collect_reg_groups(
@@ -186,22 +187,29 @@ impl<'a> Codegen2<'a> {
         let mut out = FxHashMap::default();
         for block in self.ir.reachable_postorder(entry) {
             for stmt in self.ir.basic_blocks[block].statements.iter() {
-                match *stmt {
-                    ir::Statement::Assign {
-                        value:
-                            ir::RValue::Call {
-                                return_reg,
-                                ref args,
-                                ..
-                            },
-                        ..
-                    } => {
-                        let start = return_reg;
-                        let end = args.last().copied().unwrap_or(return_reg);
-                        for reg in start..=end {
-                            out.insert(reg, (start, end));
+                match stmt {
+                    ir::Statement::Assign { value, .. } => match *value {
+                        ir::RValue::Call {
+                            return_reg,
+                            ref args,
+                            ..
+                        } => {
+                            let start = return_reg;
+                            let end = args.last().copied().unwrap_or(return_reg);
+                            for reg in start..=end {
+                                out.insert(reg, (start, end));
+                            }
                         }
-                    }
+                        ir::RValue::Struct { ref fields } => {
+                            if let Some(start) = fields.first().copied() {
+                                let end = fields.last().copied().unwrap_or(start);
+                                for reg in start..=end {
+                                    out.insert(reg, (start, end));
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
@@ -320,14 +328,7 @@ impl<'a> Codegen2<'a> {
                 self.code.op_neg_i64(dest, reg);
             }
             ir::RValue::Struct { ref fields } => {
-                let mut first = dest;
-                for f in fields {
-                    let reg = self.new_scratch_reg();
-                    self.gen_operand_into(*f, reg);
-                    if first == dest {
-                        first = reg;
-                    }
-                }
+                let first = fields.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code.op_struct(dest, first, fields.len() as u8);
             }
             ir::RValue::StructRepeat { value, count } => {
@@ -374,6 +375,10 @@ impl<'a> Codegen2<'a> {
             ir::Operand::Constant(ir::Constant::F64(rhs)) => {
                 self.gen_binary_f64(op, lhs, rhs, dest)
             }
+            ir::Operand::Constant(ir::Constant::Bool(rhs)) => {
+                self.gen_binary_other(op, lhs, rhs as u64, dest)
+            }
+            ir::Operand::Constant(ir::Constant::Unit) => self.gen_binary_other(op, lhs, 0, dest),
             _ => self.gen_binary_reg(op, lhs, rhs, dest),
         }
     }
@@ -393,6 +398,15 @@ impl<'a> Codegen2<'a> {
             ir::BinaryOp::U64LessEqual => self.code.op_binary_imm(U64LessEqualI, dest, lhs, rhs),
             ir::BinaryOp::U64Or => self.code.op_binary_imm(U64OrI, dest, lhs, rhs),
             ir::BinaryOp::U64And => self.code.op_binary_imm(U64AndI, dest, lhs, rhs),
+            ir::BinaryOp::Equal => self.code.op_binary_imm(EqualI, dest, lhs, rhs),
+            ir::BinaryOp::NotEqual => self.code.op_binary_imm(NotEqualI, dest, lhs, rhs),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gen_binary_other(&mut self, op: ir::BinaryOp, lhs: ir::Operand, rhs: u64, dest: Reg) {
+        let lhs = self.gen_operand(lhs);
+        match op {
             ir::BinaryOp::Equal => self.code.op_binary_imm(EqualI, dest, lhs, rhs),
             ir::BinaryOp::NotEqual => self.code.op_binary_imm(NotEqualI, dest, lhs, rhs),
             _ => unreachable!(),

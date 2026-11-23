@@ -302,9 +302,9 @@ mod tests {
             }
 
             let foo = Foo {
-                a: 10,
+                a: 10 + 3 + 4,
                 b: "hello world",
-                c: true
+                c: true == false != true
             };
 
             print(foo.b);
@@ -1314,7 +1314,7 @@ mod tests {
 
             let f = foo;
             let a = 10;
-            let r = f(a + 2, a + 4, a + 6);
+            let r = f(a + 2, a + 4, a + 6 + 7 + 8 + 9);
             print(r);
         "#;
         run_ok(source)

@@ -89,7 +89,7 @@ impl<'a> Lowering<'a> {
                 let fields = args
                     .fields
                     .iter()
-                    .map(|_| Operand::Reg(self.create_register(true)))
+                    .map(|_| self.create_register(true))
                     .collect();
                 self.push_stmt(Statement::Assign {
                     reg: self.return_reg,
@@ -257,8 +257,7 @@ impl<'a> Lowering<'a> {
                     && let decl = self.tcx.bcx.symbols[symbol].declaration
                     && let ast::Stmt::TupleStruct(_) = &self.ast.stmts[decl]
                 {
-                    let args = args.iter().map(|x| self.lower_expr(*x)).collect();
-                    self.store_value(dest, RValue::Struct { fields: args })
+                    self.lower_struct_into(dest, args);
                 } else {
                     let callee = self.lower_expr(callee);
                     let return_reg = if dest == self.next_register - 1 {
@@ -266,10 +265,7 @@ impl<'a> Lowering<'a> {
                     } else {
                         self.create_register(false)
                     };
-                    let arg_regs = (0..args.len())
-                        .map(|_| self.create_register(false))
-                        .collect::<Vec<_>>();
-
+                    let arg_regs = self.create_n_registers(false, args.len());
                     for i in 0..args.len() {
                         self.lower_expr_into(arg_regs[i], args[i]);
                     }
@@ -283,9 +279,8 @@ impl<'a> Lowering<'a> {
                     )
                 }
             }
-            ast::Expr::Array(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
-                self.store_value(dest, RValue::Struct { fields: args })
+            ast::Expr::Array(ref args) | ast::Expr::Tuple(ref args) => {
+                self.lower_struct_into(dest, args);
             }
             ast::Expr::ArrayRepeat { expr, count } => {
                 let value = self.lower_expr(expr);
@@ -295,15 +290,11 @@ impl<'a> Lowering<'a> {
             ast::Expr::Struct(ref s) => {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let declared = self.tcx.struct_properties[&symbol].clone();
-                let args = declared
-                    .keys()
-                    .map(|name| self.lower_expr(s.fields[name]))
-                    .collect();
-                self.store_value(dest, RValue::Struct { fields: args })
-            }
-            ast::Expr::Tuple(ref args) => {
-                let args = args.iter().map(|x| self.lower_expr(*x)).collect();
-                self.store_value(dest, RValue::Struct { fields: args })
+                let regs = self.create_n_registers(false, declared.len());
+                for (i, name) in declared.keys().enumerate() {
+                    self.lower_expr_into(regs[i], s.fields[name]);
+                }
+                self.store_value(dest, RValue::Struct { fields: regs })
             }
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
@@ -548,6 +539,14 @@ impl<'a> Lowering<'a> {
         }
     }
 
+    fn lower_struct_into(&mut self, dest: RegId, fields: &[ast::ExprId]) {
+        let regs = self.create_n_registers(false, fields.len());
+        for i in 0..fields.len() {
+            self.lower_expr_into(regs[i], fields[i]);
+        }
+        self.store_value(dest, RValue::Struct { fields: regs })
+    }
+
     fn store_constant(&mut self, dest: RegId, value: Constant) {
         self.store_value(dest, RValue::Use(Operand::Constant(value)));
     }
@@ -577,6 +576,10 @@ impl<'a> Lowering<'a> {
             self.push_stmt(Statement::ImplicitDef { reg });
         }
         reg
+    }
+
+    fn create_n_registers(&mut self, implicit: bool, count: usize) -> Vec<RegId> {
+        (0..count).map(|_| self.create_register(implicit)).collect()
     }
 
     fn push_stmt(&mut self, statement: Statement) {
@@ -666,7 +669,7 @@ pub enum RValue {
     F64Neg(Operand),
     I64Neg(Operand),
     Struct {
-        fields: Vec<Operand>,
+        fields: Vec<RegId>,
     },
     StructRepeat {
         value: Operand,
@@ -895,7 +898,7 @@ impl<'a> Regs<'a> {
             RValue::I64Neg(operand) => self.visit_operand(operand, visitor),
             RValue::Struct { ref fields } => {
                 for value in fields.iter() {
-                    self.visit_operand(*value, visitor)
+                    visitor.on_use(*value);
                 }
             }
             RValue::StructRepeat { value, count } => {
