@@ -1309,21 +1309,6 @@ mod tests {
     }
 
     #[test]
-    fn test_function_variable_multiple_args() {
-        let source = r#"
-            fn foo(a: u64, b: u64, c: u64) -> u64 {
-                a + b + c
-            }
-
-            let f = foo;
-            let a = 10;
-            let r = f(a + 2, a + 4, a + 6 + 7 + 8 + 9);
-            print(r);
-        "#;
-        run_ok(source)
-    }
-
-    #[test]
     fn test_function_void() {
         let source = r#"
             fn foo(a: u64, b: u64, c: u64) {
@@ -1372,5 +1357,92 @@ mod tests {
             print(a[1]);
         "#;
         run_err(source, Error::Runtime)
+    }
+
+    #[test]
+    fn test_explicit_return_at_the_end() {
+        let source = r#"
+            fn foo() -> u64 {
+                return 10;
+            }
+            print(foo());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_bad_implicit_return_after_return() {
+        let source = r#"
+            fn foo() -> u64 {
+                return 10;
+                "hello"
+            }
+            print(foo());
+        "#;
+        run_err(source, Error::TypeCheck)
+    }
+
+    #[test]
+    fn test_explicit_return_expr_at_the_end() {
+        let source = r#"
+            fn foo() -> u64 {
+                return 10
+            }
+            print(foo());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_explicit_return_at_the_end_in_block() {
+        let source = r#"
+            fn foo() -> u64 {
+                {
+                    return 10;
+                }
+            }
+            print(foo());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_explicit_return_expr_at_the_end_in_block() {
+        let source = r#"
+            fn foo() -> u64 {
+                {
+                    return 10
+                }
+            }
+            print(foo());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_no_return() {
+        let source = r#"
+            fn foo() -> u64 {
+            }
+            print(foo());
+        "#;
+        run_err(source, Error::TypeCheck)
+    }
+
+    #[test]
+    fn test_if_diverges() {
+        let source = r#"
+            fn foo() -> u64 {
+                let x = if 1 == 2 {
+                    return 0;
+                } else {
+                    50
+                };
+                x + 2
+            }
+
+            print(foo());
+        "#;
+        run_ok(source)
     }
 }

@@ -36,6 +36,7 @@ pub struct TypeChecker<'a> {
     type_params: FxHashMap<TyId, Vec<TyId>>,
     integer_literals: Vec<(ExprId, TyId)>,
     deferred_negation_checks: Vec<(ExprId, TyId)>,
+    diverges: bool,
 }
 
 impl<'a> TypeChecker<'a> {
@@ -64,6 +65,7 @@ impl<'a> TypeChecker<'a> {
             type_params: FxHashMap::default(),
             integer_literals: Vec::new(),
             deferred_negation_checks: Vec::new(),
+            diverges: false,
         }
     }
 
@@ -71,7 +73,7 @@ impl<'a> TypeChecker<'a> {
         self.register_default_types();
         self.register_default_functions();
 
-        check_scope(&mut self, nodes);
+        check_scope(&mut self, nodes, None);
         deferred_check_integers(&mut self);
         if self.has_error {
             Err(Error::TypeCheck)
@@ -208,13 +210,22 @@ fn check_literal_range_u64(c: &mut TypeChecker, expr: ExprId) {
     }
 }
 
-fn check_scope(c: &mut TypeChecker, nodes: &[StmtId]) {
+fn check_scope(c: &mut TypeChecker, nodes: &[StmtId], trailing_expr: Option<ExprId>) -> TyId {
+    let prev_diverges = std::mem::take(&mut c.diverges);
     for node in nodes {
         declare_item(c, *node);
     }
-
     for node in nodes {
         check_stmt(c, *node);
+    }
+    let ty = trailing_expr.map(|expr| check_expr(c, expr));
+    let diverges = std::mem::replace(&mut c.diverges, prev_diverges);
+    if let Some(ty) = ty {
+        ty
+    } else if diverges {
+        c.types.new_key(Ty::Unknown)
+    } else {
+        c.std.unit
     }
 }
 
@@ -442,14 +453,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 c.std.unit
             }
         }
-        Expr::Block { ref stmts, expr } => crate::stack_safe(|| {
-            check_scope(c, stmts);
-            if let Some(expr) = expr {
-                check_expr(c, expr)
-            } else {
-                c.std.unit
-            }
-        }),
+        Expr::Block { ref stmts, expr } => crate::stack_safe(|| check_scope(c, stmts, expr)),
         Expr::While { cond, body } => {
             let cond_ty = check_expr(c, cond);
             c.unify(c.std.boolean, cond_ty, c.ast.exprs.span(cond));
@@ -488,6 +492,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 c.containing_return_ty.unwrap(),
                 c.ast.exprs.span(node),
             );
+            c.diverges = true;
             c.types.new_key(Ty::Unknown)
         }
         Expr::Unit => c.std.unit,
