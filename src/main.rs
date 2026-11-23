@@ -1491,4 +1491,18 @@ mod tests {
         "#;
         run_err(source, Error::TypeCheck)
     }
+
+    #[test]
+    fn test_if_diverges_5() {
+        let source = r#"
+            fn foo() -> u64 {
+                if return 1 {
+                    return 0;
+                };
+            }
+
+            print(foo());
+        "#;
+        run_ok(source)
+    }
 }
