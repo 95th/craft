@@ -1445,4 +1445,20 @@ mod tests {
         "#;
         run_ok(source)
     }
+
+    #[test]
+    fn test_if_diverges_2() {
+        let source = r#"
+            fn foo() -> u64 {
+                if 1 == 2 {
+                    return 0;
+                } else {
+                    return 2;
+                }
+            }
+
+            print(foo());
+        "#;
+        run_ok(source)
+    }
 }
