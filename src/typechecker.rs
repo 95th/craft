@@ -350,64 +350,69 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
             c.std.unit
         }
-        Expr::Binary { lhs, op, rhs } => {
-            let lhs_ty = check_expr(c, lhs);
-            let rhs_ty = check_expr(c, rhs);
-            match op {
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-                    match c.types.probe_value(lhs_ty) {
-                        Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => lhs_ty,
-                        _ => {
-                            let message = format!(
-                                "expect `i64`, `u64` or `f64`, found `{}`",
-                                lhs_ty.display(c)
-                            );
-                            c.error(message, c.ast.exprs.span(lhs));
-                            c.types.new_key(Ty::Unknown)
-                        }
+        Expr::Binary { lhs, op, rhs } => match op {
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                let lhs_ty = check_expr(c, lhs);
+                let rhs_ty = check_expr(c, rhs);
+                c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                match c.types.probe_value(lhs_ty) {
+                    Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => lhs_ty,
+                    _ => {
+                        let message = format!(
+                            "expect `i64`, `u64` or `f64`, found `{}`",
+                            lhs_ty.display(c)
+                        );
+                        c.error(message, c.ast.exprs.span(lhs));
+                        c.types.new_key(Ty::Unknown)
                     }
-                }
-                BinaryOp::BitOr | BinaryOp::BitAnd => {
-                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-                    match c.types.probe_value(lhs_ty) {
-                        Ty::I64 | Ty::U64 | Ty::UnknownInt => lhs_ty,
-                        _ => {
-                            let message =
-                                format!("expect `i64` or `u64`, found `{}`", lhs_ty.display(c));
-                            c.error(message, c.ast.exprs.span(lhs));
-                            c.types.new_key(Ty::Unknown)
-                        }
-                    }
-                }
-                BinaryOp::Greater
-                | BinaryOp::GreaterEqual
-                | BinaryOp::Less
-                | BinaryOp::LessEqual => {
-                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-                    match c.types.probe_value(lhs_ty) {
-                        Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => {}
-                        _ => {
-                            let message = format!(
-                                "expect `i64`, `u64` or `f64`, found `{}`",
-                                lhs_ty.display(c)
-                            );
-                            c.error(message, c.ast.exprs.span(lhs));
-                        }
-                    }
-                    c.std.boolean
-                }
-                BinaryOp::Equal | BinaryOp::NotEqual => {
-                    c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
-                    c.std.boolean
-                }
-                BinaryOp::Or | BinaryOp::And => {
-                    c.unify(c.std.boolean, lhs_ty, c.ast.exprs.span(lhs));
-                    c.unify(c.std.boolean, rhs_ty, c.ast.exprs.span(rhs));
-                    c.std.boolean
                 }
             }
-        }
+            BinaryOp::BitOr | BinaryOp::BitAnd => {
+                let lhs_ty = check_expr(c, lhs);
+                let rhs_ty = check_expr(c, rhs);
+                c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                match c.types.probe_value(lhs_ty) {
+                    Ty::I64 | Ty::U64 | Ty::UnknownInt => lhs_ty,
+                    _ => {
+                        let message =
+                            format!("expect `i64` or `u64`, found `{}`", lhs_ty.display(c));
+                        c.error(message, c.ast.exprs.span(lhs));
+                        c.types.new_key(Ty::Unknown)
+                    }
+                }
+            }
+            BinaryOp::Greater | BinaryOp::GreaterEqual | BinaryOp::Less | BinaryOp::LessEqual => {
+                let lhs_ty = check_expr(c, lhs);
+                let rhs_ty = check_expr(c, rhs);
+                c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                match c.types.probe_value(lhs_ty) {
+                    Ty::I64 | Ty::U64 | Ty::F64 | Ty::UnknownInt => {}
+                    _ => {
+                        let message = format!(
+                            "expect `i64`, `u64` or `f64`, found `{}`",
+                            lhs_ty.display(c)
+                        );
+                        c.error(message, c.ast.exprs.span(lhs));
+                    }
+                }
+                c.std.boolean
+            }
+            BinaryOp::Equal | BinaryOp::NotEqual => {
+                let lhs_ty = check_expr(c, lhs);
+                let rhs_ty = check_expr(c, rhs);
+                c.unify(lhs_ty, rhs_ty, c.ast.exprs.span(rhs));
+                c.std.boolean
+            }
+            BinaryOp::Or | BinaryOp::And => {
+                let lhs_ty = check_expr(c, lhs);
+                c.unify(c.std.boolean, lhs_ty, c.ast.exprs.span(lhs));
+                let prev_diverges = std::mem::take(&mut c.diverges);
+                let rhs_ty = check_expr(c, rhs);
+                c.unify(c.std.boolean, rhs_ty, c.ast.exprs.span(rhs));
+                c.diverges = prev_diverges;
+                c.std.boolean
+            }
+        },
         Expr::Not(expr) => {
             let ty = check_expr(c, expr);
             c.unify(c.std.boolean, ty, c.ast.exprs.span(expr));
