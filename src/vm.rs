@@ -253,6 +253,14 @@ impl VM {
                     self.frame.read_u16();
                     println!("<object>");
                 }
+                Opcode::Assert => {
+                    let reg = self.frame.read_u16();
+                    let value = self.load(reg);
+                    if value != TRUE {
+                        println!("assertion failed!");
+                        return Err(Error::Runtime);
+                    }
+                }
                 Opcode::Copy => {
                     let dest = self.frame.read_u16();
                     let src = self.frame.read_u16();

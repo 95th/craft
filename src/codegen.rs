@@ -279,19 +279,15 @@ impl<'a> Codegen<'a> {
                 let value = self.gen_operand(value);
                 self.code.op_set_struct_property(reg, index as u8, value);
             }
-            ir::Statement::SetIndex {
-                base: reg,
-                index,
-                value,
-            } => {
-                let reg = self.gen_operand(reg);
+            ir::Statement::SetIndex { base, index, value } => {
+                let reg = self.gen_operand(base);
                 let index = self.gen_operand(index);
                 let value = self.gen_operand(value);
                 self.code.op_set_struct_index(reg, index, value);
             }
             ir::Statement::ImplicitDef { .. } => {}
-            ir::Statement::Print(reg, ty) => {
-                let value = self.gen_operand(reg);
+            ir::Statement::Print(operand, ty) => {
+                let value = self.gen_operand(operand);
                 match self.tcx.types.probe_value(ty) {
                     Ty::F64 => self.code.op_print_f64(value),
                     Ty::I64 => self.code.op_print_i64(value),
@@ -300,6 +296,10 @@ impl<'a> Codegen<'a> {
                     Ty::Bool => self.code.op_print_bool(value),
                     _ => self.code.op_print_obj(value),
                 }
+            }
+            ir::Statement::Assert(operand) => {
+                let value = self.gen_operand(operand);
+                self.code.op_assert(value);
             }
             ir::Statement::Call {
                 callee, return_reg, ..

@@ -47,6 +47,7 @@ pub enum Opcode {
     PrintString,
     PrintBool,
     PrintObj,
+    Assert,
 
     // Two operands
     Copy,
@@ -293,6 +294,11 @@ impl Code {
         self.write_u16(value);
     }
 
+    pub fn op_assert(&mut self, value: Reg) {
+        self.op(Assert);
+        self.write_u16(value);
+    }
+
     pub fn op_copy(&mut self, dest: Reg, src: Reg) {
         self.op(Copy);
         self.write_u16(dest);
@@ -471,7 +477,7 @@ impl<'a> Disassembler<'a> {
                 Return => {
                     println!();
                 }
-                PrintF64 | PrintI64 | PrintU64 | PrintString | PrintBool | PrintObj => {
+                PrintF64 | PrintI64 | PrintU64 | PrintString | PrintBool | PrintObj | Assert => {
                     let value = self.read_u16();
                     println!(" r{value}");
                 }

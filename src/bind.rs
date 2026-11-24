@@ -39,6 +39,7 @@ pub struct StdSymbols {
     pub string: SymbolId,
     pub bool: SymbolId,
     pub print: SymbolId,
+    pub assert: SymbolId,
 }
 
 pub struct BindCtxt {
@@ -85,6 +86,7 @@ impl<'a> Binder<'a> {
                 string: SymbolId::MAX,
                 bool: SymbolId::MAX,
                 print: SymbolId::MAX,
+                assert: SymbolId::MAX,
             },
             loop_depth: 0,
             fn_depth: 0,
@@ -125,6 +127,7 @@ impl<'a> Binder<'a> {
 
     fn declare_default_functions(&mut self) {
         self.std.print = self.declare_default_function("print");
+        self.std.assert = self.declare_default_function("assert");
     }
 
     fn declare_default_function(&mut self, name: &str) -> SymbolId {

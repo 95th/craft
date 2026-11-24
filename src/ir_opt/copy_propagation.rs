@@ -57,9 +57,8 @@ impl CopyPropagation {
                 self.rewrite_operand(value);
             }
             ir::Statement::ImplicitDef { .. } => {}
-            ir::Statement::Print(operand, ..) => {
-                self.rewrite_operand(operand);
-            }
+            ir::Statement::Print(operand, ..) => self.rewrite_operand(operand),
+            ir::Statement::Assert(operand) => self.rewrite_operand(operand),
         }
     }
 

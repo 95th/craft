@@ -1146,11 +1146,14 @@ mod tests {
     #[test]
     fn test_lower_for_loop_with_unconditional_break() {
         let source = r#"
+            let x = 0;
             for (let i = 0; i < 10; i = i + 1) {
                 print(i);
                 break;
                 print(20);
+                x = x + 1;
             }
+            assert(x == 0);
         "#;
         run_ok(source);
     }
@@ -1163,6 +1166,7 @@ mod tests {
                 print(i);
                 i = i + 1;
             }
+            assert(i == 10);
         "#;
         run_ok(source);
     }
@@ -1178,6 +1182,7 @@ mod tests {
                 }
                 print(i);
             }
+            assert(i == 10);
         "#;
         run_ok(source);
     }
@@ -1191,6 +1196,7 @@ mod tests {
                 continue;
                 print(i);
             }
+            assert(i == 10);
         "#;
         run_ok(source);
     }
@@ -1206,6 +1212,7 @@ mod tests {
                 print(i);
                 i = i + 1;
             }
+            assert(i == 5);
         "#;
         run_ok(source);
     }
@@ -1262,7 +1269,7 @@ mod tests {
             let f = foo;
             let a = 10;
             let r = f(a + 2, a + 4, a + 6 + 7 + 8 + 9);
-            print(r == ());
+            assert(r == ());
         "#;
         run_ok(source)
     }
@@ -1309,7 +1316,7 @@ mod tests {
             fn foo() -> u64 {
                 return 10;
             }
-            print(foo());
+            assert(foo() == 10);
         "#;
         run_ok(source)
     }
@@ -1332,7 +1339,7 @@ mod tests {
             fn foo() -> u64 {
                 return 10
             }
-            print(foo());
+            assert(foo() == 10);
         "#;
         run_ok(source)
     }
@@ -1345,7 +1352,7 @@ mod tests {
                     return 10;
                 }
             }
-            print(foo());
+            assert(foo() == 10);
         "#;
         run_ok(source)
     }
@@ -1358,7 +1365,7 @@ mod tests {
                     return 10
                 }
             }
-            print(foo());
+            assert(foo() == 10);
         "#;
         run_ok(source)
     }
@@ -1385,7 +1392,7 @@ mod tests {
                 x + 2
             }
 
-            print(foo());
+            assert(foo() == 52);
         "#;
         run_ok(source)
     }
@@ -1401,7 +1408,7 @@ mod tests {
                 }
             }
 
-            print(foo());
+            assert(foo() == 2);
         "#;
         run_ok(source)
     }
@@ -1417,7 +1424,7 @@ mod tests {
                 }
             }
 
-            print(foo());
+            assert(foo() == 1);
         "#;
         run_ok(source)
     }
@@ -1445,7 +1452,7 @@ mod tests {
                 };
             }
 
-            print(foo());
+            assert(foo() == 1);
         "#;
         run_ok(source)
     }
@@ -1455,7 +1462,7 @@ mod tests {
         let source = r#"
             fn add(a: u64, b: u64) -> u64 { return a + b; }
 
-            print(add(3, add(4, 5)));
+            assert(add(3, add(4, 5)) == 12);
         "#;
         run_ok(source)
     }

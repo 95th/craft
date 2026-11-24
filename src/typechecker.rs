@@ -94,6 +94,12 @@ impl<'a> TypeChecker<'a> {
             .new_key(Ty::Fn([print_arg_ty].into(), self.std.unit));
         self.value_bindings.insert(self.bcx.std.print, print_fn_ty);
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
+
+        let assert_fn_ty = self
+            .types
+            .new_key(Ty::Fn([self.std.boolean].into(), self.std.unit));
+        self.value_bindings
+            .insert(self.bcx.std.assert, assert_fn_ty);
     }
 
     fn register_default_types(&mut self) {

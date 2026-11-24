@@ -253,6 +253,12 @@ impl<'a> Lowering<'a> {
                     return;
                 }
 
+                if symbol == self.tcx.bcx.std.assert {
+                    let arg = self.lower_expr(args[0]);
+                    self.push_stmt(Statement::Assert(arg));
+                    return;
+                }
+
                 if symbol != SymbolId::MAX
                     && let decl = self.tcx.bcx.symbols[symbol].declaration
                     && let ast::Stmt::TupleStruct(_) = &self.ast.stmts[decl]
@@ -635,6 +641,7 @@ pub enum Statement {
         args: Vec<RegId>,
     },
     Print(Operand, TyId),
+    Assert(Operand),
 }
 
 #[derive(Debug)]
@@ -893,6 +900,7 @@ impl<'a> Regs<'a> {
                 }
                 visitor.on_def(return_reg);
             }
+            Statement::Assert(operand) => self.visit_operand(operand, visitor),
         }
     }
 

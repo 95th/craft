@@ -131,6 +131,7 @@ impl ConstPropagation {
             ir::Statement::ImplicitDef { .. } => {}
             ir::Statement::Print(operand, ..) => self.rewrite_operand(operand),
             ir::Statement::Call { callee, .. } => self.rewrite_operand(callee),
+            ir::Statement::Assert(operand) => self.rewrite_operand(operand),
         }
     }
 
