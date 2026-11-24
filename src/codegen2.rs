@@ -43,6 +43,9 @@ impl<'a> Codegen2<'a> {
     }
 
     pub fn generate(mut self) -> Code {
+        if cfg!(feature = "trace") {
+            println!("Running codegen");
+        }
         self.gen_function(self.ir.main);
 
         let mut functions = FxHashMap::default();
@@ -80,8 +83,7 @@ impl<'a> Codegen2<'a> {
         self.allocate_registers(function);
         let offset = self.code.start_function();
         let mut offsets = FxHashMap::default();
-        let mut blocks = self.ir.reachable_postorder(function);
-        blocks.reverse();
+        let blocks = self.ir.reachable_reverse_postorder(function);
         if cfg!(feature = "trace") {
             println!("Block order for {function:?}: {blocks:?}");
         }

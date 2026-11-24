@@ -695,6 +695,21 @@ pub enum Constant {
     Function(SymbolId),
 }
 
+impl PartialEq for Constant {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Unit, Self::Unit) => true,
+            (Self::Bool(l), Self::Bool(r)) => l == r,
+            (Self::I64(l), Self::I64(r)) => l == r,
+            (Self::U64(l), Self::U64(r)) => l == r,
+            (Self::F64(l), Self::F64(r)) => l.to_bits() == r.to_bits(),
+            (Self::String(l), Self::String(r)) => l == r,
+            (Self::Function(l), Self::Function(r)) => l == r,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
     Constant(Constant),
@@ -809,6 +824,12 @@ impl Ir {
             Terminator::Jump { target } => f(target),
             Terminator::Return => {}
         }
+    }
+
+    pub fn reachable_reverse_postorder(&self, entry: BasicBlockId) -> Vec<BasicBlockId> {
+        let mut blocks = self.reachable_postorder(entry);
+        blocks.reverse();
+        blocks
     }
 
     pub fn reachable_postorder(&self, entry: BasicBlockId) -> Vec<BasicBlockId> {
