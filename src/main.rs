@@ -1,7 +1,8 @@
 mod arena;
 mod ast;
 mod bind;
-mod codegen2;
+mod chunk;
+mod codegen;
 mod diagnostics;
 mod heap;
 mod interner;
@@ -9,11 +10,10 @@ mod ir;
 mod ir_opt;
 mod liveness;
 mod parser;
-mod register_chunk;
-mod register_vm;
 mod scanner;
 mod typechecker;
 mod types;
+mod vm;
 
 use std::time::Instant;
 
@@ -21,8 +21,8 @@ use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
 
 use crate::{
-    ast::AstNodes, bind::Binder, codegen2::Codegen2, diagnostics::Diagnostics,
-    interner::StrInterner, ir::Lowering, parser::Parser, typechecker::TypeChecker,
+    ast::AstNodes, bind::Binder, codegen::Codegen, diagnostics::Diagnostics, interner::StrInterner,
+    ir::Lowering, parser::Parser, typechecker::TypeChecker,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,10 +40,7 @@ fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
 }
 
-fn lower_and_compile(
-    source: &str,
-    diagnostics: &mut Diagnostics,
-) -> Result<register_chunk::Code, Error> {
+fn lower_and_compile(source: &str, diagnostics: &mut Diagnostics) -> Result<chunk::Code, Error> {
     let ast = &mut AstNodes::new();
     let interner = &mut StrInterner::new();
     let mut parser = Parser::new(source, ast, interner, diagnostics);
@@ -60,7 +57,7 @@ fn lower_and_compile(
 
     ir_opt::optimize(&mut body);
 
-    let codegen = Codegen2::new(&body, &mut ty_ctx, interner);
+    let codegen = Codegen::new(&body, &mut ty_ctx, interner);
     let code = codegen.generate();
 
     Ok(code)
@@ -82,7 +79,7 @@ fn main() {
     let mut diagnostics = Diagnostics::new();
     match lower_and_compile(source, &mut diagnostics) {
         Ok(code) => {
-            let mut vm = register_vm::VM::new(code);
+            let mut vm = vm::VM::new(code);
             vm.run().expect("OK");
         }
         Err(_) => {
@@ -100,7 +97,7 @@ mod tests {
         let mut diagnostics = Diagnostics::new();
         let code = lower_and_compile(source, &mut diagnostics);
         diagnostics.print(source);
-        let mut vm = register_vm::VM::new(code?);
+        let mut vm = vm::VM::new(code?);
         vm.run()
     }
 

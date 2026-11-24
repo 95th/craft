@@ -3,15 +3,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     bind::SymbolId,
+    chunk::{Code, Opcode::*, Reg},
     interner::{StrId, StrInterner},
     ir,
     liveness::{Interval, LivenessAnalysis},
-    register_chunk::{Code, Opcode::*, Reg},
     typechecker::TyCtxt,
     types::Ty,
 };
 
-pub struct Codegen2<'a> {
+pub struct Codegen<'a> {
     ir: &'a ir::Ir,
     tcx: &'a mut TyCtxt,
     interner: &'a StrInterner,
@@ -25,7 +25,7 @@ pub struct Codegen2<'a> {
     max_scratch_reg: Reg,
 }
 
-impl<'a> Codegen2<'a> {
+impl<'a> Codegen<'a> {
     pub fn new(ir: &'a ir::Ir, tcx: &'a mut TyCtxt, interner: &'a StrInterner) -> Self {
         Self {
             ir,

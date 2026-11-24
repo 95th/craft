@@ -2,8 +2,8 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     Error,
+    chunk::{Code, Opcode},
     heap::Heap,
-    register_chunk::{Code, Opcode},
 };
 
 const TRUE: u64 = 1;
