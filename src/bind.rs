@@ -21,7 +21,6 @@ pub enum SymbolKind {
 
 pub struct Symbol {
     pub name: StrId,
-    pub local_index: u32,
     pub kind: SymbolKind,
     pub declaration: StmtId,
 }
@@ -192,7 +191,6 @@ impl<'a> Binder<'a> {
         let symbol = self.symbols.alloc(Symbol {
             name,
             kind,
-            local_index: self.local_count,
             declaration,
         });
         self.scopes[scope].symbols.insert(name, symbol);

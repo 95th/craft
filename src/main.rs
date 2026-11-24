@@ -1,8 +1,6 @@
 mod arena;
 mod ast;
 mod bind;
-mod chunk;
-mod codegen;
 mod codegen2;
 mod diagnostics;
 mod heap;
@@ -16,7 +14,6 @@ mod register_vm;
 mod scanner;
 mod typechecker;
 mod types;
-mod vm;
 
 use std::time::Instant;
 
@@ -24,9 +21,8 @@ use indexmap::IndexMap;
 use rustc_hash::FxBuildHasher;
 
 use crate::{
-    ast::AstNodes, bind::Binder, chunk::Code, codegen::Codegen, codegen2::Codegen2,
-    diagnostics::Diagnostics, interner::StrInterner, ir::Lowering, parser::Parser,
-    typechecker::TypeChecker, vm::VM,
+    ast::AstNodes, bind::Binder, codegen2::Codegen2, diagnostics::Diagnostics,
+    interner::StrInterner, ir::Lowering, parser::Parser, typechecker::TypeChecker,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,23 +38,6 @@ type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 #[inline(always)]
 fn stack_safe<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, f)
-}
-
-fn compile(source: &str, diagnostics: &mut Diagnostics) -> Result<Code, Error> {
-    let ast = &mut AstNodes::new();
-    let interner = &mut StrInterner::new();
-    let mut parser = Parser::new(source, ast, interner, diagnostics);
-    let nodes = parser.parse()?;
-
-    let binder = Binder::new(ast, interner, diagnostics);
-    let bind_ctx = binder.bind(&nodes)?;
-
-    let checker = TypeChecker::new(ast, interner, diagnostics, bind_ctx);
-    let ty_ctx = checker.check(&nodes)?;
-
-    let codegen = Codegen::new(ast, interner, ty_ctx);
-    let code = codegen.generate(&nodes);
-    Ok(code)
 }
 
 fn lower_and_compile(
@@ -99,33 +78,18 @@ fn main() {
         print(fib(35));
     "#;
 
-    if cfg!(feature = "lower") {
-        let start = Instant::now();
-        let mut diagnostics = Diagnostics::new();
-        match lower_and_compile(source, &mut diagnostics) {
-            Ok(code) => {
-                let mut vm = register_vm::VM::new(code);
-                vm.run().expect("OK");
-            }
-            Err(_) => {
-                diagnostics.print(source);
-            }
+    let start = Instant::now();
+    let mut diagnostics = Diagnostics::new();
+    match lower_and_compile(source, &mut diagnostics) {
+        Ok(code) => {
+            let mut vm = register_vm::VM::new(code);
+            vm.run().expect("OK");
         }
-        println!("Took {:?}", start.elapsed());
-    } else {
-        let start = Instant::now();
-        let mut diagnostics = Diagnostics::new();
-        match compile(source, &mut diagnostics) {
-            Ok(code) => {
-                let mut vm = VM::new(code);
-                vm.run()
-            }
-            Err(_) => {
-                diagnostics.print(source);
-            }
+        Err(_) => {
+            diagnostics.print(source);
         }
-        println!("Took {:?}", start.elapsed());
     }
+    println!("Took {:?}", start.elapsed());
 }
 
 #[cfg(test)]
@@ -134,18 +98,10 @@ mod tests {
 
     fn run(source: &str) -> Result<(), Error> {
         let mut diagnostics = Diagnostics::new();
-        if cfg!(feature = "lower") {
-            let code = lower_and_compile(source, &mut diagnostics);
-            diagnostics.print(source);
-            let mut vm = register_vm::VM::new(code?);
-            vm.run()?;
-        } else {
-            let code = compile(source, &mut diagnostics);
-            diagnostics.print(source);
-            let mut vm = VM::new(code?);
-            vm.run();
-        }
-        Ok(())
+        let code = lower_and_compile(source, &mut diagnostics);
+        diagnostics.print(source);
+        let mut vm = register_vm::VM::new(code?);
+        vm.run()
     }
 
     fn run_ok(source: &str) {
