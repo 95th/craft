@@ -130,6 +130,7 @@ impl ConstPropagation {
             }
             ir::Statement::ImplicitDef { .. } => {}
             ir::Statement::Print(operand, ..) => self.rewrite_operand(operand),
+            ir::Statement::Call { callee, .. } => self.rewrite_operand(callee),
         }
     }
 
@@ -166,9 +167,6 @@ impl ConstPropagation {
             ir::RValue::StructRepeat { value, count } => {
                 self.rewrite_operand(value);
                 self.rewrite_operand(count);
-            }
-            ir::RValue::Call { callee, .. } => {
-                self.rewrite_operand(callee);
             }
         }
     }

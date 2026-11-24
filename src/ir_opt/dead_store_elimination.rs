@@ -66,7 +66,6 @@ fn is_pure(value: &ir::RValue) -> bool {
         ir::RValue::I64Neg(_) => true,
         ir::RValue::Struct { .. } => false,
         ir::RValue::StructRepeat { .. } => false,
-        ir::RValue::Call { .. } => false,
     }
 }
 

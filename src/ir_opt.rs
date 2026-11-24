@@ -1,5 +1,6 @@
 mod branch_forward;
 mod const_propagation;
+mod copy_propagation;
 mod dead_store_elimination;
 mod simplify_branch;
 
@@ -7,7 +8,8 @@ use crate::{
     ir,
     ir_opt::{
         branch_forward::BranchForwarding, const_propagation::ConstPropagation,
-        dead_store_elimination::DeadStoreElimination, simplify_branch::SimplifyBranches,
+        copy_propagation::CopyPropagation, dead_store_elimination::DeadStoreElimination,
+        simplify_branch::SimplifyBranches,
     },
 };
 
@@ -29,6 +31,7 @@ fn optimize_function(ir: &mut ir::Ir, function: ir::BasicBlockId) {
         changed |= ConstPropagation::new().run(ir, function);
         changed |= BranchForwarding::new().run(ir, function);
         changed |= SimplifyBranches.run(ir, function);
+        changed |= CopyPropagation::new().run(ir, function);
         changed |= DeadStoreElimination.run(ir, function);
 
         if cfg!(feature = "trace") {

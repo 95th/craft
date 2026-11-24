@@ -265,14 +265,12 @@ impl<'a> Lowering<'a> {
                     for i in 0..args.len() {
                         self.lower_expr_into(arg_regs[i], args[i]);
                     }
-                    self.store_value(
-                        dest,
-                        RValue::Call {
-                            callee,
-                            return_reg,
-                            args: arg_regs,
-                        },
-                    )
+                    self.push_stmt(Statement::Call {
+                        callee,
+                        return_reg,
+                        args: arg_regs,
+                    });
+                    self.store_value(dest, RValue::Use(Operand::Reg(return_reg)))
                 }
             }
             ast::Expr::Array(ref args) | ast::Expr::Tuple(ref args) => {
@@ -631,6 +629,11 @@ pub enum Statement {
     ImplicitDef {
         reg: RegId,
     },
+    Call {
+        callee: Operand,
+        return_reg: RegId,
+        args: Vec<RegId>,
+    },
     Print(Operand, TyId),
 }
 
@@ -672,11 +675,6 @@ pub enum RValue {
     StructRepeat {
         value: Operand,
         count: Operand,
-    },
-    Call {
-        callee: Operand,
-        return_reg: RegId,
-        args: Vec<RegId>,
     },
 }
 
@@ -884,6 +882,17 @@ impl<'a> Regs<'a> {
                 visitor.on_def(reg);
             }
             Statement::Print(operand, ..) => self.visit_operand(operand, visitor),
+            Statement::Call {
+                callee,
+                return_reg,
+                ref args,
+            } => {
+                self.visit_operand(callee, visitor);
+                for arg in args {
+                    visitor.on_use(*arg);
+                }
+                visitor.on_def(return_reg);
+            }
         }
     }
 
@@ -923,17 +932,6 @@ impl<'a> Regs<'a> {
             RValue::StructRepeat { value, count } => {
                 self.visit_operand(value, visitor);
                 self.visit_operand(count, visitor);
-            }
-            RValue::Call {
-                callee,
-                return_reg,
-                ref args,
-            } => {
-                self.visit_operand(callee, visitor);
-                for arg in args {
-                    visitor.on_use(*arg);
-                }
-                visitor.on_def(return_reg);
             }
         }
     }

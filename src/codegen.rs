@@ -189,20 +189,9 @@ impl<'a> Codegen<'a> {
         let mut out = FxHashMap::default();
         for block in self.ir.reachable_postorder(entry) {
             for stmt in self.ir.basic_blocks[block].statements.iter() {
-                match stmt {
-                    ir::Statement::Assign { value, .. } => match *value {
-                        ir::RValue::Call {
-                            return_reg,
-                            ref args,
-                            ..
-                        } => {
-                            let start = return_reg;
-                            let end = args.last().copied().unwrap_or(return_reg);
-                            for reg in start..=end {
-                                out.insert(reg, (start, end));
-                            }
-                        }
-                        ir::RValue::Struct { ref fields } => {
+                match *stmt {
+                    ir::Statement::Assign { ref value, .. } => match value {
+                        ir::RValue::Struct { fields } => {
                             if let Some(start) = fields.first().copied() {
                                 let end = fields.last().copied().unwrap_or(start);
                                 for reg in start..=end {
@@ -212,6 +201,17 @@ impl<'a> Codegen<'a> {
                         }
                         _ => {}
                     },
+                    ir::Statement::Call {
+                        return_reg,
+                        ref args,
+                        ..
+                    } => {
+                        let start = return_reg;
+                        let end = args.last().copied().unwrap_or(return_reg);
+                        for reg in start..=end {
+                            out.insert(reg, (start, end));
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -301,6 +301,25 @@ impl<'a> Codegen<'a> {
                     _ => self.code.op_print_obj(value),
                 }
             }
+            ir::Statement::Call {
+                callee, return_reg, ..
+            } => match callee {
+                ir::Operand::Constant(constant) => {
+                    let ir::Constant::Function(id) = constant else {
+                        unreachable!()
+                    };
+                    let return_reg = self.gen_reg(return_reg);
+                    let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
+                    self.code.op_call_imm(return_reg, 0);
+                    self.function_worklist.push((id, offset, true));
+                }
+                ir::Operand::Reg(reg) => {
+                    let callee = self.gen_reg(reg);
+                    let return_reg = self.gen_reg(return_reg);
+                    self.code.op_copy(return_reg, callee);
+                    self.code.op_call(return_reg);
+                }
+            },
         }
     }
 
@@ -338,31 +357,6 @@ impl<'a> Codegen<'a> {
                 let count = self.gen_operand(count);
                 self.code.op_repeat_struct(dest, value, count);
             }
-            ir::RValue::Call {
-                callee, return_reg, ..
-            } => match callee {
-                ir::Operand::Constant(constant) => {
-                    let ir::Constant::Function(id) = constant else {
-                        unreachable!()
-                    };
-                    let return_reg = self.gen_reg(return_reg);
-                    let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
-                    self.code.op_call_imm(return_reg, 0);
-                    if dest != return_reg {
-                        self.code.op_copy(dest, return_reg);
-                    }
-                    self.function_worklist.push((id, offset, true));
-                }
-                ir::Operand::Reg(reg) => {
-                    let callee = self.gen_reg(reg);
-                    let return_reg = self.gen_reg(return_reg);
-                    self.code.op_copy(return_reg, callee);
-                    self.code.op_call(return_reg);
-                    if dest != return_reg {
-                        self.code.op_copy(dest, return_reg);
-                    }
-                }
-            },
         }
     }
 
