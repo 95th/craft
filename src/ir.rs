@@ -260,11 +260,7 @@ impl<'a> Lowering<'a> {
                     self.lower_struct_into(dest, args);
                 } else {
                     let callee = self.lower_expr(callee);
-                    let return_reg = if dest == self.next_register - 1 {
-                        dest
-                    } else {
-                        self.create_register(false)
-                    };
+                    let return_reg = self.create_register(false);
                     let arg_regs = self.create_n_registers(false, args.len());
                     for i in 0..args.len() {
                         self.lower_expr_into(arg_regs[i], args[i]);

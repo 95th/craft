@@ -1,0 +1,119 @@
+fn fib(n: u64) -> u64 {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let x = a;
+    let y = b;
+    while y != 0 {
+        let t = y;
+        y = x - (x / y) * y;
+        x = t;
+    }
+    return x;
+}
+
+fn classify(n: u64) -> u64 {
+    if n < 10 { return 1; }
+    if n < 100 { { return 2; } }
+    return 3;
+}
+
+fn noisy(x: u64) -> bool {
+    print(x);
+    return x > 0;
+}
+
+fn add(a: u64, b: u64) -> u64 { return a + b; }
+fn mul(a: u64, b: u64) -> u64 { return a * b; }
+
+fn ack(m: u64, n: u64) -> u64 {
+    if m == 0 { return n + 1; }
+    if n == 0 { return ack(m - 1, 1); }
+    return ack(m - 1, ack(m, n - 1));
+}
+
+// 1. recursion
+print(fib(20));
+
+// 2. loop with locals in the body
+print(gcd(48, 18));
+
+// 3. sieve: repeat init, index store, nested loops
+let sieve = [1; 50];
+sieve[0] = 0;
+sieve[1] = 0;
+for (let i = 2; i < 50; i = i + 1) {
+    if sieve[i] == 1 {
+        let j = i * i;
+        while j < 50 {
+            sieve[j] = 0;
+            j = j + i;
+        }
+    }
+}
+let primes = 0;
+for (let i = 0; i < 50; i = i + 1) {
+    if sieve[i] == 1 { primes = primes + 1; }
+}
+print(primes);
+
+// 4. bubble sort
+let a = [0; 6];
+a[0] = 5; a[1] = 2; a[2] = 9; a[3] = 1; a[4] = 7; a[5] = 3;
+for (let i = 0; i < 5; i = i + 1) {
+    for (let j = 0; j < 5 - i; j = j + 1) {
+        if a[j] > a[j + 1] {
+            let t = a[j];
+            a[j] = a[j + 1];
+            a[j + 1] = t;
+        }
+    }
+}
+for (let i = 0; i < 6; i = i + 1) { print(a[i]); }
+
+// 5. Collatz: if/else with loop-carried values
+let n = 27;
+let steps = 0;
+while n != 1 {
+    let half = n / 2;
+    if n - half * 2 == 0 { n = half; } else { n = 3 * n + 1; }
+    steps = steps + 1;
+}
+print(steps);
+
+// 6. break and continue
+let sum = 0;
+for (let i = 0; i < 100; i = i + 1) {
+    if i > 15 { break; }
+    if i - (i / 2) * 2 == 0 { continue; }
+    if i == 7 { continue; }
+    sum = sum + i;
+}
+print(sum);
+
+// 7. early returns, including a nested block
+print(classify(5));
+print(classify(50));
+print(classify(500));
+
+// 8. short-circuit evaluation with side effects
+let r = noisy(0) && noisy(1);
+let s = noisy(1) || noisy(2);
+print(r);
+print(s);
+
+// 9. nested calls as arguments
+print(add(mul(2, 3), mul(4, 5)));
+print(add(add(1, 2), add(3, add(4, 5))));
+
+// 10. constant propagation, folding, dead store, constant branch
+let k = 3;
+let dead = 99;
+let m = k * 4 + 1;
+print(m);
+if 1 == 2 { print(111); } else { print(222); }
+
+// 11. deep recursion with nested calls
+print(ack(2, 3));

@@ -64,16 +64,7 @@ fn lower_and_compile(source: &str, diagnostics: &mut Diagnostics) -> Result<chun
 }
 
 fn main() {
-    let source = r#"
-        fn fib(n: u64) -> u64 {
-            if n < 2 {
-                return n;
-            }
-            fib(n - 1) + fib(n - 2)
-        }
-
-        print(fib(35));
-    "#;
+    let source = include_str!("../test.craft");
 
     let start = Instant::now();
     let mut diagnostics = Diagnostics::new();
@@ -1455,6 +1446,16 @@ mod tests {
             }
 
             print(foo());
+        "#;
+        run_ok(source)
+    }
+
+    #[test]
+    fn test_nested_calls() {
+        let source = r#"
+            fn add(a: u64, b: u64) -> u64 { return a + b; }
+
+            print(add(3, add(4, 5)));
         "#;
         run_ok(source)
     }
