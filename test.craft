@@ -35,10 +35,10 @@ fn ack(m: u64, n: u64) -> u64 {
 }
 
 // 1. recursion
-print(fib(20));
+assert(fib(20) == 6765);
 
 // 2. loop with locals in the body
-print(gcd(48, 18));
+assert(gcd(48, 18) == 6);
 
 // 3. sieve: repeat init, index store, nested loops
 let sieve = [1; 50];
@@ -57,7 +57,7 @@ let primes = 0;
 for (let i = 0; i < 50; i = i + 1) {
     if sieve[i] == 1 { primes = primes + 1; }
 }
-print(primes);
+assert(primes == 15);
 
 // 4. bubble sort
 let a = [0; 6];
@@ -81,7 +81,7 @@ while n != 1 {
     if n - half * 2 == 0 { n = half; } else { n = 3 * n + 1; }
     steps = steps + 1;
 }
-print(steps);
+assert(steps == 111);
 
 // 6. break and continue
 let sum = 0;
@@ -91,29 +91,29 @@ for (let i = 0; i < 100; i = i + 1) {
     if i == 7 { continue; }
     sum = sum + i;
 }
-print(sum);
+assert(sum == 57);
 
 // 7. early returns, including a nested block
-print(classify(5));
-print(classify(50));
-print(classify(500));
+assert(classify(5) == 1);
+assert(classify(50) == 2);
+assert(classify(500) == 3);
 
 // 8. short-circuit evaluation with side effects
 let r = noisy(0) && noisy(1);
 let s = noisy(1) || noisy(2);
-print(r);
-print(s);
+assert(!r);
+assert(s);
 
 // 9. nested calls as arguments
-print(add(mul(2, 3), mul(4, 5)));
-print(add(add(1, 2), add(3, add(4, 5))));
+assert(add(mul(2, 3), mul(4, 5)) == 26);
+assert(add(add(1, 2), add(3, add(4, 5))) == 15);
 
 // 10. constant propagation, folding, dead store, constant branch
 let k = 3;
 let dead = 99;
 let m = k * 4 + 1;
-print(m);
+assert(m == 13);
 if 1 == 2 { print(111); } else { print(222); }
 
 // 11. deep recursion with nested calls
-print(ack(2, 3));
+assert(ack(2, 3) == 9);
