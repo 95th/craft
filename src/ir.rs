@@ -601,9 +601,9 @@ impl<'a> Lowering<'a> {
 
     fn is_ref_ty(&mut self, ty: TyId) -> bool {
         match self.tcx.types.probe_value(ty) {
-            Ty::Unknown | Ty::UnknownInt => unreachable!(),
+            Ty::Unknown | Ty::UnknownInt | Ty::Never => unreachable!(),
             Ty::TypeParam(..) => true,
-            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) | Ty::Never => false,
+            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) => false,
             Ty::String | Ty::Named(..) | Ty::Tuple(..) | Ty::Array(..) => true,
         }
     }
