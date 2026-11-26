@@ -254,6 +254,17 @@ mod tests {
                 c: bool
             }
 
+            fn foo_function() {
+                let foo = Foo {
+                    a: 10 + 3 + 4,
+                    b: "hello world",
+                    c: true == false != true
+                };
+
+                print(foo.b);
+                print(foo.a);
+            }
+
             let foo = Foo {
                 a: 10 + 3 + 4,
                 b: "hello world",
@@ -270,6 +281,8 @@ mod tests {
             };
             print(bar.b.a);
             print(foo);
+
+            foo_function();
         "#;
         run_ok(source);
     }
