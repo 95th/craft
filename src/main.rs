@@ -1496,4 +1496,13 @@ mod tests {
         "#;
         run_ok(source)
     }
+
+    #[test]
+    fn test_empty_array_with_no_type_info() {
+        let source = r#"
+            let a = [];
+            print(a);
+        "#;
+        run_err(source, Error::TypeCheck)
+    }
 }

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use ena::unify::InPlaceUnificationTable;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     Error, FxIndexMap,
@@ -12,9 +12,11 @@ use crate::{
     types::{StdTypes, Ty, TyId},
 };
 
+pub type TypesTable = InPlaceUnificationTable<TyId>;
+
 pub struct TyCtxt {
     pub bcx: BindCtxt,
-    pub types: InPlaceUnificationTable<TyId>,
+    pub types: TypesTable,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
@@ -25,7 +27,7 @@ pub struct TypeChecker<'a> {
     interner: &'a StrInterner,
     diagnostics: &'a mut Diagnostics,
     bcx: BindCtxt,
-    types: InPlaceUnificationTable<TyId>,
+    types: TypesTable,
     std: StdTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
@@ -76,6 +78,7 @@ impl<'a> TypeChecker<'a> {
 
         check_scope(&mut self, nodes, None);
         deferred_check_integers(&mut self);
+        check_unbound_types(&mut self);
         if self.has_error {
             Err(Error::TypeCheck)
         } else {
@@ -177,6 +180,47 @@ impl<'a> TypeChecker<'a> {
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.has_error = true;
         self.diagnostics.push(message, span);
+    }
+}
+
+fn check_unbound_types(c: &mut TypeChecker) {
+    let mut seen = FxHashSet::default();
+    for (expr, ty) in c.expr_types.iter() {
+        let ty = c.types.find(*ty);
+        if !seen.insert(ty) {
+            continue;
+        }
+        if has_unknown_type(&mut c.types, ty) {
+            let symbol = c.ast.exprs.value_binding(*expr);
+            if symbol == SymbolId::MAX || c.bcx.symbols[symbol].declaration == StmtId::MAX {
+                let span = c.ast.exprs.span(*expr);
+                c.diagnostics.push("Cannot infer type", span);
+            } else {
+                let decl = c.bcx.symbols[symbol].declaration;
+                let span = c.ast.stmts.span(decl);
+                c.diagnostics.push("Cannot infer type", span);
+            }
+            c.has_error = true;
+        }
+    }
+}
+
+fn has_unknown_type(types: &mut TypesTable, ty: TyId) -> bool {
+    match types.probe_value(ty) {
+        Ty::Unknown | Ty::UnknownInt => true,
+        Ty::Unit
+        | Ty::Bool
+        | Ty::F64
+        | Ty::I64
+        | Ty::U64
+        | Ty::String
+        | Ty::Named(..)
+        | Ty::TypeParam(..) => false,
+        Ty::Fn(params, ret) => {
+            has_unknown_type(types, ret) || params.iter().any(|t| has_unknown_type(types, *t))
+        }
+        Ty::Tuple(params) => params.iter().any(|t| has_unknown_type(types, *t)),
+        Ty::Array(element) => has_unknown_type(types, element),
     }
 }
 
