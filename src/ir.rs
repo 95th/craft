@@ -90,14 +90,14 @@ impl<'a> Lowering<'a> {
                 let symbol = self.ast.stmts.type_binding(function);
                 let ty = self.tcx.tuple_struct_properties[&symbol].clone();
                 let mut fields = Vec::with_capacity(ty.len());
-                let mut refs = BitVec::with_capacity(ty.len());
+                let mut ref_map = BitVec::with_capacity(ty.len());
                 for &ty in ty.iter() {
                     fields.push(self.create_register(true));
-                    refs.push(self.is_ref_ty(ty));
+                    ref_map.push(self.is_ref_ty(ty));
                 }
                 self.push_stmt(Statement::Assign {
                     reg: self.return_reg,
-                    value: RValue::Struct { fields, refs },
+                    value: RValue::Struct { fields, ref_map },
                 });
             }
             _ => unreachable!(),
@@ -320,13 +320,19 @@ impl<'a> Lowering<'a> {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let declared = self.tcx.struct_properties[&symbol].clone();
                 let regs = self.create_n_registers(false, declared.len());
-                let mut refs = BitVec::with_capacity(declared.len());
+                let mut ref_map = BitVec::with_capacity(declared.len());
                 for (i, name) in declared.keys().enumerate() {
                     let field = s.fields[name];
                     self.lower_expr_into(regs[i], field);
-                    refs.push(self.has_ref_ty(field));
+                    ref_map.push(self.has_ref_ty(field));
                 }
-                self.store_value(dest, RValue::Struct { fields: regs, refs })
+                self.store_value(
+                    dest,
+                    RValue::Struct {
+                        fields: regs,
+                        ref_map,
+                    },
+                )
             }
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
@@ -575,12 +581,18 @@ impl<'a> Lowering<'a> {
 
     fn lower_struct_into(&mut self, dest: RegId, fields: &[ast::ExprId]) {
         let regs = self.create_n_registers(false, fields.len());
-        let mut refs = BitVec::with_capacity(fields.len());
+        let mut ref_map = BitVec::with_capacity(fields.len());
         for i in 0..fields.len() {
             self.lower_expr_into(regs[i], fields[i]);
-            refs.push(self.has_ref_ty(fields[i]));
+            ref_map.push(self.has_ref_ty(fields[i]));
         }
-        self.store_value(dest, RValue::Struct { fields: regs, refs })
+        self.store_value(
+            dest,
+            RValue::Struct {
+                fields: regs,
+                ref_map,
+            },
+        )
     }
 
     fn has_ref_ty(&mut self, expr: ast::ExprId) -> bool {
@@ -725,7 +737,7 @@ pub enum RValue {
     I64Neg(Operand),
     Struct {
         fields: Vec<RegId>,
-        refs: BitVec,
+        ref_map: BitVec,
     },
     Array {
         elements: Vec<RegId>,

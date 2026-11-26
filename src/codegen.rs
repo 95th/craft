@@ -351,14 +351,14 @@ impl<'a> Codegen<'a> {
             }
             ir::RValue::Struct {
                 ref fields,
-                ref refs,
+                ref ref_map,
             } => {
                 let first = fields.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code.op_struct(
                     dest,
                     first,
                     fields.len() as u8,
-                    Layout::Struct(refs.clone()),
+                    Layout::Struct(ref_map.clone()),
                 );
             }
             ir::RValue::Array {
