@@ -16,6 +16,7 @@ pub struct TyCtxt {
     pub bcx: BindCtxt,
     pub types: InPlaceUnificationTable<TyId>,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
+    pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
 }
 
@@ -82,6 +83,7 @@ impl<'a> TypeChecker<'a> {
                 bcx: self.bcx,
                 types: self.types,
                 struct_properties: self.struct_properties,
+                tuple_struct_properties: self.tuple_struct_properties,
                 expr_types: self.expr_types,
             })
         }

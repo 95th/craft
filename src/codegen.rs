@@ -4,6 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{
     bind::SymbolId,
     chunk::{Code, Opcode::*, Reg},
+    heap::Layout,
     interner::{StrId, StrInterner},
     ir,
     liveness::{Interval, LivenessAnalysis},
@@ -191,7 +192,7 @@ impl<'a> Codegen<'a> {
             for stmt in self.ir.basic_blocks[block].statements.iter() {
                 match *stmt {
                     ir::Statement::Assign { ref value, .. } => match value {
-                        ir::RValue::Struct { fields } => {
+                        ir::RValue::Struct { fields, .. } => {
                             if let Some(start) = fields.first().copied() {
                                 let end = fields.last().copied().unwrap_or(start);
                                 for reg in start..=end {
@@ -348,14 +349,35 @@ impl<'a> Codegen<'a> {
                 let reg = self.gen_operand(operand);
                 self.code.op_neg_i64(dest, reg);
             }
-            ir::RValue::Struct { ref fields } => {
+            ir::RValue::Struct {
+                ref fields,
+                ref refs,
+            } => {
                 let first = fields.first().map_or(dest, |f| self.gen_reg(*f));
-                self.code.op_struct(dest, first, fields.len() as u8);
+                self.code.op_struct(
+                    dest,
+                    first,
+                    fields.len() as u8,
+                    Layout::Struct(refs.clone()),
+                );
             }
-            ir::RValue::StructRepeat { value, count } => {
+            ir::RValue::Array {
+                ref elements,
+                is_ref,
+            } => {
+                let first = elements.first().map_or(dest, |f| self.gen_reg(*f));
+                self.code
+                    .op_struct(dest, first, elements.len() as u8, Layout::Array(is_ref));
+            }
+            ir::RValue::ArrayRepeat {
+                value,
+                count,
+                is_ref,
+            } => {
                 let value = self.gen_operand(value);
                 let count = self.gen_operand(count);
-                self.code.op_repeat_struct(dest, value, count);
+                self.code
+                    .op_repeat_struct(dest, value, count, Layout::Array(is_ref));
             }
         }
     }

@@ -14,11 +14,15 @@ pub struct Id<T> {
 }
 
 impl<T> Id<T> {
-    pub const MAX: Self = Self::new(u32::MAX as usize);
+    pub const MAX: Self = Self::from_idx(u32::MAX);
 
-    const fn new(index: usize) -> Self {
-        Id {
-            idx: index as u32,
+    pub fn to_idx(self) -> u32 {
+        self.idx
+    }
+
+    pub const fn from_idx(idx: u32) -> Self {
+        Self {
+            idx,
             ph: PhantomData,
         }
     }
@@ -76,7 +80,7 @@ impl<T> Arena<T> {
     }
 
     pub fn alloc(&mut self, value: T) -> Id<T> {
-        let idx = Id::new(self.buf.len());
+        let idx = Id::from_idx(self.buf.len() as u32);
         self.buf.push(value);
         idx
     }
@@ -116,7 +120,7 @@ impl<T> AstArena<T> {
     }
 
     pub fn alloc(&mut self, value: T, span: Span) -> AstId<T> {
-        let idx = AstId::new(self.nodes.len());
+        let idx = AstId::from_idx(self.nodes.len() as u32);
         self.nodes.push(value);
         self.spans.push(span);
         self.type_bindings.push(Cell::new(SymbolId::MAX));

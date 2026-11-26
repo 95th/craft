@@ -1,5 +1,7 @@
 use Opcode::*;
 
+use crate::heap::{Layout, LayoutBuilder, Layouts};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Opcode {
@@ -19,10 +21,10 @@ pub enum Opcode {
     // i32 offset
     Jump,
 
-    // Operand_Dest + Operand_First + u8_Count
+    // u16_Layout + Operand_Dest + Operand_First + u8_Count
     Struct,
 
-    // Operand_Dest + Operand_Value + Operand_Count
+    // u16_Layout + Operand_Dest + Operand_Value + Operand_Count
     RepeatStruct,
 
     // Operand_Dest + Operand_Obj + u8 Index
@@ -134,18 +136,21 @@ pub enum Opcode {
 
 pub type Reg = u16;
 
-#[derive(Debug)]
 pub struct Code {
     code: Vec<u8>,
+    layouts: LayoutBuilder,
 }
 
 impl Code {
     pub fn new() -> Self {
-        Self { code: Vec::new() }
+        Self {
+            code: Vec::new(),
+            layouts: LayoutBuilder::new(),
+        }
     }
 
-    pub fn into_inner(self) -> Vec<u8> {
-        self.code
+    pub fn into_inner(self) -> (Vec<u8>, Layouts) {
+        (self.code, self.layouts.build())
     }
 
     pub fn len(&self) -> usize {
@@ -157,7 +162,7 @@ impl Code {
             return;
         }
 
-        Disassembler::new(&self.code).disassemble(end);
+        Disassembler::new(&self.code, &self.layouts).disassemble(end);
     }
 
     pub fn start_function(&mut self) -> usize {
@@ -218,15 +223,19 @@ impl Code {
         self.write_i32_at(from, offset as i32);
     }
 
-    pub fn op_struct(&mut self, dest: Reg, first: Reg, count: u8) {
+    pub fn op_struct(&mut self, dest: Reg, first: Reg, count: u8, layout: Layout) {
+        let layout = self.layouts.alloc(layout);
         self.op(Struct);
+        self.write_u16(layout);
         self.write_u16(dest);
         self.write_u16(first);
         self.write_u8(count);
     }
 
-    pub fn op_repeat_struct(&mut self, dest: Reg, value: Reg, count: Reg) {
+    pub fn op_repeat_struct(&mut self, dest: Reg, value: Reg, count: Reg, layout: Layout) {
+        let layout = self.layouts.alloc(layout);
         self.op(RepeatStruct);
+        self.write_u16(layout);
         self.write_u16(dest);
         self.write_u16(value);
         self.write_u16(count);
@@ -386,12 +395,17 @@ impl Code {
 
 struct Disassembler<'a> {
     code: &'a [u8],
+    layouts: &'a LayoutBuilder,
     i: usize,
 }
 
 impl<'a> Disassembler<'a> {
-    fn new(code: &'a [u8]) -> Self {
-        Self { code, i: 0 }
+    fn new(code: &'a [u8], layouts: &'a LayoutBuilder) -> Self {
+        Self {
+            code,
+            layouts,
+            i: 0,
+        }
     }
 
     pub fn disassemble(&mut self, end: usize) {
@@ -439,16 +453,20 @@ impl<'a> Disassembler<'a> {
                     println!(" {offset} (target: {target})");
                 }
                 Struct => {
+                    let layout = self.read_u16();
+                    let layout = self.layouts.of(layout);
                     let dest = self.read_u16();
                     let first = self.read_u16();
                     let count = self.read_u8();
-                    println!(" r{dest} = r{first} x {count}");
+                    println!(" r{dest} = r{first} x {count} ({layout:?})");
                 }
                 RepeatStruct => {
+                    let layout = self.read_u16();
+                    let layout = self.layouts.of(layout);
                     let dest = self.read_u16();
                     let start = self.read_u16();
                     let count = self.read_u16();
-                    println!(" r{dest} = r{start} x r{count}");
+                    println!(" r{dest} = r{start} x r{count} ({layout:?})");
                 }
                 GetStructProperty => {
                     let dest = self.read_u16();

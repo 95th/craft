@@ -79,8 +79,8 @@ impl CopyPropagation {
             RValue::Not(operand) => self.rewrite_operand(operand),
             RValue::F64Neg(operand) => self.rewrite_operand(operand),
             RValue::I64Neg(operand) => self.rewrite_operand(operand),
-            RValue::Struct { .. } => {}
-            RValue::StructRepeat { value, count } => {
+            RValue::Struct { .. } | RValue::Array { .. } => {}
+            RValue::ArrayRepeat { value, count, .. } => {
                 self.rewrite_operand(value);
                 self.rewrite_operand(count);
             }

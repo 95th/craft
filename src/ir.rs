@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use bitvec::vec::BitVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -85,15 +86,18 @@ impl<'a> Lowering<'a> {
                 }
                 self.lower_expr_into(self.return_reg, f.body);
             }
-            ast::Stmt::TupleStruct(args) => {
-                let fields = args
-                    .fields
-                    .iter()
-                    .map(|_| self.create_register(true))
-                    .collect();
+            ast::Stmt::TupleStruct(..) => {
+                let symbol = self.ast.stmts.type_binding(function);
+                let ty = self.tcx.tuple_struct_properties[&symbol].clone();
+                let mut fields = Vec::with_capacity(ty.len());
+                let mut refs = BitVec::with_capacity(ty.len());
+                for &ty in ty.iter() {
+                    fields.push(self.create_register(true));
+                    refs.push(self.is_ref_ty(ty));
+                }
                 self.push_stmt(Statement::Assign {
                     reg: self.return_reg,
-                    value: RValue::Struct { fields },
+                    value: RValue::Struct { fields, refs },
                 });
             }
             _ => unreachable!(),
@@ -279,22 +283,50 @@ impl<'a> Lowering<'a> {
                     self.store_value(dest, RValue::Use(Operand::Reg(return_reg)))
                 }
             }
-            ast::Expr::Array(ref args) | ast::Expr::Tuple(ref args) => {
-                self.lower_struct_into(dest, args);
+            ast::Expr::Array(ref values) => {
+                let Ty::Array(el_ty) = self.tcx.types.probe_value(ty) else {
+                    unreachable!()
+                };
+                let regs = self.create_n_registers(false, values.len());
+                for i in 0..values.len() {
+                    self.lower_expr_into(regs[i], values[i]);
+                }
+                let is_ref = self.is_ref_ty(el_ty);
+                self.store_value(
+                    dest,
+                    RValue::Array {
+                        elements: regs,
+                        is_ref,
+                    },
+                )
+            }
+            ast::Expr::Tuple(ref fields) => {
+                self.lower_struct_into(dest, fields);
             }
             ast::Expr::ArrayRepeat { expr, count } => {
                 let value = self.lower_expr(expr);
                 let count = self.lower_expr(count);
-                self.store_value(dest, RValue::StructRepeat { value, count })
+                let is_ref = self.has_ref_ty(expr);
+                self.store_value(
+                    dest,
+                    RValue::ArrayRepeat {
+                        value,
+                        count,
+                        is_ref,
+                    },
+                )
             }
             ast::Expr::Struct(ref s) => {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let declared = self.tcx.struct_properties[&symbol].clone();
                 let regs = self.create_n_registers(false, declared.len());
+                let mut refs = BitVec::with_capacity(declared.len());
                 for (i, name) in declared.keys().enumerate() {
-                    self.lower_expr_into(regs[i], s.fields[name]);
+                    let field = s.fields[name];
+                    self.lower_expr_into(regs[i], field);
+                    refs.push(self.has_ref_ty(field));
                 }
-                self.store_value(dest, RValue::Struct { fields: regs })
+                self.store_value(dest, RValue::Struct { fields: regs, refs })
             }
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
@@ -543,10 +575,25 @@ impl<'a> Lowering<'a> {
 
     fn lower_struct_into(&mut self, dest: RegId, fields: &[ast::ExprId]) {
         let regs = self.create_n_registers(false, fields.len());
+        let mut refs = BitVec::with_capacity(fields.len());
         for i in 0..fields.len() {
             self.lower_expr_into(regs[i], fields[i]);
+            refs.push(self.has_ref_ty(fields[i]));
         }
-        self.store_value(dest, RValue::Struct { fields: regs })
+        self.store_value(dest, RValue::Struct { fields: regs, refs })
+    }
+
+    fn has_ref_ty(&mut self, expr: ast::ExprId) -> bool {
+        self.is_ref_ty(self.tcx.expr_types[&expr])
+    }
+
+    fn is_ref_ty(&mut self, ty: TyId) -> bool {
+        match self.tcx.types.probe_value(ty) {
+            Ty::Unknown | Ty::UnknownInt => unreachable!(),
+            Ty::TypeParam(..) => true,
+            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) => false,
+            Ty::String | Ty::Named(..) | Ty::Tuple(..) | Ty::Array(..) => true,
+        }
     }
 
     fn store_constant(&mut self, dest: RegId, value: Constant) {
@@ -678,10 +725,16 @@ pub enum RValue {
     I64Neg(Operand),
     Struct {
         fields: Vec<RegId>,
+        refs: BitVec,
     },
-    StructRepeat {
+    Array {
+        elements: Vec<RegId>,
+        is_ref: bool,
+    },
+    ArrayRepeat {
         value: Operand,
         count: Operand,
+        is_ref: bool,
     },
 }
 
@@ -932,12 +985,17 @@ impl<'a> Regs<'a> {
             RValue::Not(operand) => self.visit_operand(operand, visitor),
             RValue::F64Neg(operand) => self.visit_operand(operand, visitor),
             RValue::I64Neg(operand) => self.visit_operand(operand, visitor),
-            RValue::Struct { ref fields } => {
+            RValue::Struct { ref fields, .. } => {
                 for value in fields.iter() {
                     visitor.on_use(*value);
                 }
             }
-            RValue::StructRepeat { value, count } => {
+            RValue::Array { ref elements, .. } => {
+                for e in elements.iter() {
+                    visitor.on_use(*e);
+                }
+            }
+            RValue::ArrayRepeat { value, count, .. } => {
                 self.visit_operand(value, visitor);
                 self.visit_operand(count, visitor);
             }

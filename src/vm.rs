@@ -88,14 +88,14 @@ pub struct VM {
 
 impl VM {
     pub fn new(code: Code) -> Self {
-        let code = code.into_inner();
+        let (code, layouts) = code.into_inner();
         let frame = CallFrame::new(&code, 0, 0);
         Self {
             stack: vec![0; frame.size as usize],
             frame,
             frames: Vec::new(),
             code,
-            heap: Heap::new(),
+            heap: Heap::new(layouts),
             string_pool: FxHashMap::default(),
         }
     }
@@ -154,22 +154,24 @@ impl VM {
                     self.frame.jump(offset);
                 }
                 Opcode::Struct => {
+                    let layout = self.frame.read_u16();
                     let dest = self.frame.read_u16();
                     let first = self.frame.read_u16();
                     let count = self.frame.read_u8();
                     let i = self.frame.sp + first as usize;
                     let args = &self.stack[i..i + count as usize];
-                    let obj = self.heap.alloc_struct(args);
+                    let obj = self.heap.alloc_struct(args, layout);
                     self.store(dest, obj as u64);
                 }
                 Opcode::RepeatStruct => {
+                    let layout = self.frame.read_u16();
                     let dest = self.frame.read_u16();
                     let value = self.frame.read_u16();
                     let count = self.frame.read_u16();
                     let value = self.load(value);
                     let count = self.load(count) as usize;
                     let data = vec![value; count];
-                    let obj = self.heap.alloc_struct(&data);
+                    let obj = self.heap.alloc_struct(&data, layout);
                     self.store(dest, obj as u64);
                 }
                 Opcode::GetStructProperty => {

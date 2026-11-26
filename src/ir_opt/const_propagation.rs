@@ -164,8 +164,8 @@ impl ConstPropagation {
             ir::RValue::I64Neg(operand) => {
                 self.rewrite_operand(operand);
             }
-            ir::RValue::Struct { .. } => {}
-            ir::RValue::StructRepeat { value, count } => {
+            ir::RValue::Struct { .. } | ir::RValue::Array { .. } => {}
+            ir::RValue::ArrayRepeat { value, count, .. } => {
                 self.rewrite_operand(value);
                 self.rewrite_operand(count);
             }
