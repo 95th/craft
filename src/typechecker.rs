@@ -117,50 +117,56 @@ impl<'a> TypeChecker<'a> {
             .insert(self.bcx.std.bool, self.std.boolean);
     }
 
-    fn unify(&mut self, lhs: TyId, rhs: TyId, span: Span) {
-        if self.can_unify(lhs, rhs) {
-            self.unify_recursively(lhs, rhs);
+    fn unify(&mut self, expected: TyId, actual: TyId, span: Span) {
+        if self.can_unify(expected, actual) {
+            self.unify_recursively(expected, actual);
         } else {
-            let lhs = lhs.display(self);
-            let rhs = rhs.display(self);
-            self.error(format!("expect `{lhs}`, found `{rhs}`"), span);
+            let expected = expected.display(self);
+            let actual = actual.display(self);
+            self.error(format!("expect `{expected}`, found `{actual}`"), span);
         }
     }
 
-    fn can_unify(&mut self, lhs: TyId, rhs: TyId) -> bool {
-        if self.types.unioned(lhs, rhs) {
+    fn can_unify(&mut self, expected: TyId, actual: TyId) -> bool {
+        if self.types.unioned(expected, actual) {
             return true;
         }
-        match (self.types.probe_value(lhs), self.types.probe_value(rhs)) {
+        match (
+            self.types.probe_value(expected),
+            self.types.probe_value(actual),
+        ) {
             (Ty::Tuple(a), Ty::Tuple(b)) => self.can_unify_list(&a, &b),
             (Ty::Fn(par_a, ret_a), Ty::Fn(par_b, ret_b)) => {
                 self.can_unify_list(&par_a, &par_b) && self.can_unify(ret_a, ret_b)
             }
             (Ty::Array(a), Ty::Array(b)) => self.can_unify(a, b),
             (Ty::Unknown, _) | (_, Ty::Unknown) => true,
-            (Ty::UnknownInt, Ty::I64 | Ty::U64)
-            | (Ty::I64 | Ty::U64, Ty::UnknownInt)
-            | (Ty::UnknownInt, Ty::UnknownInt) => true,
+            (Ty::UnknownInt, Ty::UnknownInt) => true,
+            (Ty::UnknownInt, Ty::I64 | Ty::U64) | (Ty::I64 | Ty::U64, Ty::UnknownInt) => true,
+            (_, Ty::Never) => true,
             _ => false,
         }
     }
 
-    fn can_unify_list(&mut self, lhs: &[TyId], rhs: &[TyId]) -> bool {
-        lhs.len() == rhs.len()
-            && lhs
+    fn can_unify_list(&mut self, expected: &[TyId], actual: &[TyId]) -> bool {
+        expected.len() == actual.len()
+            && expected
                 .iter()
-                .zip(rhs.iter())
+                .zip(actual.iter())
                 .all(|(a, b)| self.can_unify(*a, *b))
     }
 
-    fn unify_recursively(&mut self, lhs: TyId, rhs: TyId) {
-        if self.types.unioned(lhs, rhs) {
+    fn unify_recursively(&mut self, expected: TyId, actual: TyId) {
+        if self.types.unioned(expected, actual) {
             return;
         }
-        let lhs_ty = self.types.probe_value(lhs);
-        let rhs_ty = self.types.probe_value(rhs);
-        self.types.union(lhs, rhs);
-        match (lhs_ty, rhs_ty) {
+        let actual_ty = self.types.probe_value(actual);
+        if actual_ty == Ty::Never {
+            return;
+        }
+        let expected_ty = self.types.probe_value(expected);
+        self.types.union(expected, actual);
+        match (expected_ty, actual_ty) {
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
                 for (a, b) in a.iter().zip(b.iter()) {
                     self.unify_recursively(*a, *b);
@@ -191,15 +197,8 @@ fn check_unbound_types(c: &mut TypeChecker) {
             continue;
         }
         if has_unknown_type(&mut c.types, ty) {
-            let symbol = c.ast.exprs.value_binding(*expr);
-            if symbol == SymbolId::MAX || c.bcx.symbols[symbol].declaration == StmtId::MAX {
-                let span = c.ast.exprs.span(*expr);
-                c.diagnostics.push("Cannot infer type", span);
-            } else {
-                let decl = c.bcx.symbols[symbol].declaration;
-                let span = c.ast.stmts.span(decl);
-                c.diagnostics.push("Cannot infer type", span);
-            }
+            let span = c.ast.exprs.span(*expr);
+            c.diagnostics.push("Cannot infer type", span);
             c.has_error = true;
         }
     }
@@ -214,6 +213,7 @@ fn has_unknown_type(types: &mut TypesTable, ty: TyId) -> bool {
         | Ty::I64
         | Ty::U64
         | Ty::String
+        | Ty::Never
         | Ty::Named(..)
         | Ty::TypeParam(..) => false,
         Ty::Fn(params, ret) => {
@@ -507,23 +507,24 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 then_clause_ty
             } else {
                 c.unify(c.std.unit, then_clause_ty, c.ast.exprs.span(then_clause));
-                c.std.unit
+                then_clause_ty
             }
         }
         Expr::Block { ref stmts, expr } => crate::stack_safe(|| check_scope(c, stmts, expr)),
         Expr::While { cond, body } => {
             let cond_ty = check_expr(c, cond);
             c.unify(c.std.boolean, cond_ty, c.ast.exprs.span(cond));
-            check_expr(c, body);
+            let body_ty = check_expr(c, body);
+            c.unify(c.std.unit, body_ty, c.ast.exprs.span(body));
             c.std.unit
         }
         Expr::Break => {
             c.diverges = true;
-            c.types.new_key(Ty::Unknown)
+            c.types.new_key(Ty::Never)
         }
         Expr::Continue => {
             c.diverges = true;
-            c.types.new_key(Ty::Unknown)
+            c.types.new_key(Ty::Never)
         }
         Expr::Call { callee, ref args } => {
             let callee_ty = check_expr(c, callee);
@@ -556,7 +557,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 c.ast.exprs.span(node),
             );
             c.diverges = true;
-            c.types.new_key(Ty::Unknown)
+            c.types.new_key(Ty::Never)
         }
         Expr::Unit => c.std.unit,
         Expr::Tuple(ref types) => {
@@ -647,7 +648,8 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             if let Some(incr) = incr {
                 check_expr(c, incr);
             }
-            check_expr(c, body);
+            let body_ty = check_expr(c, body);
+            c.unify(c.std.unit, body_ty, c.ast.exprs.span(body));
             c.std.unit
         }
         Expr::Array(ref elements) => {
@@ -777,6 +779,7 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
         Ty::UnknownInt => buf.push_str("{integer}"),
         Ty::String => buf.push_str("string"),
         Ty::Unknown => buf.push_str("<cannot infer>"),
+        Ty::Never => buf.push_str("never"),
         Ty::Tuple(types) => {
             buf.push_str("(");
             let mut sep = "";

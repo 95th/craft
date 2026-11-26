@@ -19,6 +19,7 @@ pub enum Ty {
     Fn(Rc<[TyId]>, TyId),
     Tuple(Rc<[TyId]>),
     Array(TyId),
+    Never,
 }
 
 pub struct StdTypes {

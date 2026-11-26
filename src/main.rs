@@ -961,9 +961,20 @@ mod tests {
             foo(1);
             foo("Hello");
             foo(30.0);
-            foo(foo);
         "#;
         run_ok(source);
+    }
+
+    #[test]
+    fn test_generic_printer_cannot_infer() {
+        let source = r#"
+            fn foo<T>(n: T) {
+                print(n);
+            }
+
+            foo(foo);
+        "#;
+        run_err(source, Error::TypeCheck);
     }
 
     #[test]
@@ -974,6 +985,7 @@ mod tests {
             }
 
             let f = foo;
+            f(10);
         "#;
         run_ok(source);
     }
