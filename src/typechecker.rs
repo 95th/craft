@@ -31,8 +31,7 @@ pub struct TypeChecker<'a> {
     std: StdTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
-    type_bindings: FxHashMap<SymbolId, TyId>,
-    value_bindings: FxHashMap<SymbolId, TyId>,
+    symbol_types: FxHashMap<SymbolId, TyId>,
     struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     expr_types: FxHashMap<ExprId, TyId>,
@@ -60,8 +59,7 @@ impl<'a> TypeChecker<'a> {
             std,
             has_error: false,
             containing_return_ty: None,
-            type_bindings: FxHashMap::default(),
-            value_bindings: FxHashMap::default(),
+            symbol_types: FxHashMap::default(),
             struct_properties: FxHashMap::default(),
             tuple_struct_properties: FxHashMap::default(),
             expr_types: FxHashMap::default(),
@@ -97,23 +95,22 @@ impl<'a> TypeChecker<'a> {
         let print_fn_ty = self
             .types
             .new_key(Ty::Fn([print_arg_ty].into(), self.std.unit));
-        self.value_bindings.insert(self.bcx.std.print, print_fn_ty);
+        self.symbol_types.insert(self.bcx.std.print, print_fn_ty);
         self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
 
         let assert_fn_ty = self
             .types
             .new_key(Ty::Fn([self.std.boolean].into(), self.std.unit));
-        self.value_bindings
-            .insert(self.bcx.std.assert, assert_fn_ty);
+        self.symbol_types.insert(self.bcx.std.assert, assert_fn_ty);
     }
 
     fn register_default_types(&mut self) {
-        self.type_bindings.insert(self.bcx.std.f64, self.std.f64);
-        self.type_bindings.insert(self.bcx.std.i64, self.std.i64);
-        self.type_bindings.insert(self.bcx.std.u64, self.std.u64);
-        self.type_bindings
+        self.symbol_types.insert(self.bcx.std.f64, self.std.f64);
+        self.symbol_types.insert(self.bcx.std.i64, self.std.i64);
+        self.symbol_types.insert(self.bcx.std.u64, self.std.u64);
+        self.symbol_types
             .insert(self.bcx.std.string, self.std.string);
-        self.type_bindings
+        self.symbol_types
             .insert(self.bcx.std.bool, self.std.boolean);
     }
 
@@ -289,7 +286,7 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
             let ret = f.return_ty.map(|t| check_type(c, t)).unwrap_or(c.std.unit);
             let fn_ty = c.types.new_key(Ty::Fn(params, ret));
             let fn_symbol = c.ast.stmts.value_binding(node);
-            c.value_bindings.insert(fn_symbol, fn_ty);
+            c.symbol_types.insert(fn_symbol, fn_ty);
             if !type_params.is_empty() {
                 c.type_params.insert(fn_ty, type_params);
             }
@@ -297,12 +294,12 @@ fn declare_item(c: &mut TypeChecker, node: StmtId) {
         Stmt::Struct(..) => {
             let struct_symbol = c.ast.stmts.type_binding(node);
             let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
-            c.type_bindings.insert(struct_symbol, struct_ty);
+            c.symbol_types.insert(struct_symbol, struct_ty);
         }
         Stmt::TupleStruct { .. } => {
             let struct_symbol = c.ast.stmts.type_binding(node);
             let struct_ty = c.types.new_key(Ty::Named(struct_symbol));
-            c.type_bindings.insert(struct_symbol, struct_ty);
+            c.symbol_types.insert(struct_symbol, struct_ty);
         }
         _ => {}
     }
@@ -317,12 +314,12 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 c.unify(ty, init_ty, c.ast.exprs.span(init));
             }
             let symbol = c.ast.stmts.value_binding(node);
-            c.value_bindings.insert(symbol, init_ty);
+            c.symbol_types.insert(symbol, init_ty);
             c.std.unit
         }
         Stmt::Fn(ref f) => {
             let fn_symbol = c.ast.stmts.value_binding(node);
-            let fn_ty = c.value_bindings[&fn_symbol];
+            let fn_ty = c.symbol_types[&fn_symbol];
             let Ty::Fn(.., return_ty) = c.types.probe_value(fn_ty) else {
                 unreachable!();
             };
@@ -336,7 +333,7 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         Stmt::Param { ty, .. } => {
             let ty = check_type(c, ty);
             let symbol = c.ast.stmts.value_binding(node);
-            c.value_bindings.insert(symbol, ty);
+            c.symbol_types.insert(symbol, ty);
             ty
         }
         Stmt::Expr { expr, semi } => {
@@ -364,16 +361,16 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
             c.tuple_struct_properties
                 .insert(type_symbol, arg_tys.clone());
 
-            let struct_ty = c.type_bindings[&type_symbol];
+            let struct_ty = c.symbol_types[&type_symbol];
             let fn_ty = c.types.new_key(Ty::Fn(arg_tys, struct_ty));
             let value_symbol = c.ast.stmts.value_binding(node);
-            c.value_bindings.insert(value_symbol, fn_ty);
+            c.symbol_types.insert(value_symbol, fn_ty);
             c.std.unit
         }
         Stmt::TypeParam(..) => {
             let symbol = c.ast.stmts.type_binding(node);
             let ty = c.types.new_key(Ty::TypeParam(symbol));
-            c.type_bindings.insert(symbol, ty);
+            c.symbol_types.insert(symbol, ty);
             ty
         }
     }
@@ -487,7 +484,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Variable(..) => {
             let symbol = c.ast.exprs.value_binding(node);
-            instantiate(c, c.value_bindings[&symbol])
+            instantiate(c, c.symbol_types[&symbol])
         }
         Expr::If {
             cond,
@@ -613,7 +610,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
                 );
             }
 
-            c.type_bindings[&symbol]
+            c.symbol_types[&symbol]
         }
         Expr::StructField { obj, name } => {
             let expr_ty = check_expr(c, obj);
@@ -692,7 +689,7 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         Type::Unit => c.std.unit,
         Type::Named(..) => {
             let symbol = c.ast.types.type_binding(node);
-            c.type_bindings[&symbol]
+            c.symbol_types[&symbol]
         }
         Type::Tuple(ref items) => {
             let types = items.iter().map(|t| check_type(c, *t)).collect();
