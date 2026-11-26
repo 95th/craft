@@ -33,7 +33,7 @@ impl<'a> LivenessAnalysis<'a> {
             block_interval: FxHashMap::default(),
         };
 
-        let reg_count = self.ir.reg_count[&function] as usize;
+        let reg_count = self.ir.reg_maps[&function].len();
         let blocks = self.ir.reachable_postorder(function);
         let regs = self.ir.regs(function);
         for block in blocks.iter() {

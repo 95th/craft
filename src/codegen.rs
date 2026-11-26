@@ -7,7 +7,7 @@ use crate::{
     heap::Layout,
     interner::{StrId, StrInterner},
     ir,
-    liveness::{Interval, LivenessAnalysis},
+    liveness::{Interval, Liveness, LivenessAnalysis},
     typechecker::TyCtxt,
     types::Ty,
 };
@@ -24,6 +24,8 @@ pub struct Codegen<'a> {
     next_reg: Reg,
     next_scratch_reg: Reg,
     max_scratch_reg: Reg,
+    stmt_idx: usize,
+    safepoints: Vec<(usize, usize)>,
 }
 
 impl<'a> Codegen<'a> {
@@ -40,6 +42,8 @@ impl<'a> Codegen<'a> {
             next_reg: 0,
             next_scratch_reg: 0,
             max_scratch_reg: 0,
+            stmt_idx: 0,
+            safepoints: Vec::new(),
         }
     }
 
@@ -81,7 +85,10 @@ impl<'a> Codegen<'a> {
     }
 
     fn gen_function(&mut self, function: ir::BasicBlockId) {
-        self.allocate_registers(function);
+        let liveness = LivenessAnalysis::new(self.ir).compute(function);
+        self.allocate_registers(&liveness, function);
+        self.stmt_idx = 0;
+        self.safepoints.clear();
         let offset = self.code.start_function();
         let mut offsets = FxHashMap::default();
         let blocks = self.ir.reachable_reverse_postorder(function);
@@ -97,11 +104,10 @@ impl<'a> Codegen<'a> {
             self.code.patch_jump(patch_offset, offsets[&block]);
         }
         self.code.update_frame_size(offset, self.max_scratch_reg);
+        self.gen_safepoints(&liveness, function);
     }
 
-    fn allocate_registers(&mut self, function: ir::BasicBlockId) {
-        let liveness = LivenessAnalysis::new(self.ir).compute(function);
-
+    fn allocate_registers(&mut self, liveness: &Liveness, function: ir::BasicBlockId) {
         let mut intervals: Vec<_> = liveness
             .reg_interval
             .iter()
@@ -224,9 +230,11 @@ impl<'a> Codegen<'a> {
         for stmt in self.ir.basic_blocks[block].statements.iter() {
             self.reset_scratch_regs();
             self.gen_stmt(stmt);
+            self.stmt_idx += 1;
         }
         self.reset_scratch_regs();
         self.gen_terminator(block, next_block);
+        self.stmt_idx += 1;
     }
 
     fn gen_terminator(&mut self, block: ir::BasicBlockId, next: Option<ir::BasicBlockId>) {
@@ -304,23 +312,26 @@ impl<'a> Codegen<'a> {
             }
             ir::Statement::Call {
                 callee, return_reg, ..
-            } => match callee {
-                ir::Operand::Constant(constant) => {
-                    let ir::Constant::Function(id) = constant else {
-                        unreachable!()
-                    };
-                    let return_reg = self.gen_reg(return_reg);
-                    let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
-                    self.code.op_call_imm(return_reg, 0);
-                    self.function_worklist.push((id, offset, true));
+            } => {
+                self.record_safepoint();
+                match callee {
+                    ir::Operand::Constant(constant) => {
+                        let ir::Constant::Function(id) = constant else {
+                            unreachable!()
+                        };
+                        let return_reg = self.gen_reg(return_reg);
+                        let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
+                        self.code.op_call_imm(return_reg, 0);
+                        self.function_worklist.push((id, offset, true));
+                    }
+                    ir::Operand::Reg(reg) => {
+                        let callee = self.gen_reg(reg);
+                        let return_reg = self.gen_reg(return_reg);
+                        self.code.op_copy(return_reg, callee);
+                        self.code.op_call(return_reg);
+                    }
                 }
-                ir::Operand::Reg(reg) => {
-                    let callee = self.gen_reg(reg);
-                    let return_reg = self.gen_reg(return_reg);
-                    self.code.op_copy(return_reg, callee);
-                    self.code.op_call(return_reg);
-                }
-            },
+            }
         }
     }
 
@@ -353,6 +364,7 @@ impl<'a> Codegen<'a> {
                 ref fields,
                 ref ref_map,
             } => {
+                self.record_safepoint();
                 let first = fields.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code.op_struct(
                     dest,
@@ -365,6 +377,7 @@ impl<'a> Codegen<'a> {
                 ref elements,
                 is_ref,
             } => {
+                self.record_safepoint();
                 let first = elements.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code
                     .op_struct(dest, first, elements.len() as u8, Layout::Array(is_ref));
@@ -374,6 +387,7 @@ impl<'a> Codegen<'a> {
                 count,
                 is_ref,
             } => {
+                self.record_safepoint();
                 let value = self.gen_operand(value);
                 let count = self.gen_operand(count);
                 self.code
@@ -551,6 +565,7 @@ impl<'a> Codegen<'a> {
                 self.code.op_const(dest, x);
             }
             ir::Constant::String(s) => {
+                self.record_safepoint();
                 let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_string(dest, 0);
                 self.string_worklist.push((s, offset));
@@ -563,7 +578,28 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn gen_reg(&mut self, reg_id: ir::RegId) -> Reg {
+    fn record_safepoint(&mut self) {
+        self.safepoints.push((self.stmt_idx, self.code.len()))
+    }
+
+    fn gen_safepoints(&mut self, liveness: &Liveness, function: ir::BasicBlockId) {
+        let ref_map = &self.ir.reg_maps[&function];
+        for &(stmt_idx, offset) in self.safepoints.iter() {
+            let mut live = BitVec::repeat(false, self.max_scratch_reg as usize);
+            for (i, interval) in liveness.reg_interval.iter().enumerate() {
+                if interval.start < stmt_idx && interval.end > stmt_idx {
+                    if !ref_map[i] {
+                        continue;
+                    }
+                    let reg = self.gen_reg(i as ir::RegId) as usize;
+                    live.set(reg, true);
+                }
+            }
+            self.code.add_safepoint(offset, live);
+        }
+    }
+
+    fn gen_reg(&self, reg_id: ir::RegId) -> Reg {
         self.reg_map[&reg_id]
     }
 

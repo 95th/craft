@@ -269,6 +269,7 @@ mod tests {
                 c: false
             };
             print(bar.b.a);
+            print(foo);
         "#;
         run_ok(source);
     }

@@ -20,6 +20,7 @@ pub struct TyCtxt {
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
+    pub symbol_types: FxHashMap<SymbolId, TyId>,
 }
 
 pub struct TypeChecker<'a> {
@@ -78,16 +79,16 @@ impl<'a> TypeChecker<'a> {
         deferred_check_integers(&mut self);
         check_unbound_types(&mut self);
         if self.has_error {
-            Err(Error::TypeCheck)
-        } else {
-            Ok(TyCtxt {
-                bcx: self.bcx,
-                types: self.types,
-                struct_properties: self.struct_properties,
-                tuple_struct_properties: self.tuple_struct_properties,
-                expr_types: self.expr_types,
-            })
+            return Err(Error::TypeCheck);
         }
+        Ok(TyCtxt {
+            bcx: self.bcx,
+            types: self.types,
+            struct_properties: self.struct_properties,
+            tuple_struct_properties: self.tuple_struct_properties,
+            expr_types: self.expr_types,
+            symbol_types: self.symbol_types,
+        })
     }
 
     fn register_default_functions(&mut self) {

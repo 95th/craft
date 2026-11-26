@@ -22,13 +22,13 @@ pub struct Lowering<'a> {
     ast: &'a ast::AstNodes,
     tcx: &'a mut TyCtxt,
     basic_blocks: Arena<BasicBlock>,
-    next_register: RegId,
+    reg_map: BitVec,
     current_block: BasicBlockId,
     function_worklist: VecDeque<SymbolId>,
     loop_contexts: Vec<LoopContext>,
     symbol_registers: FxHashMap<SymbolId, RegId>,
     return_reg: RegId,
-    reg_count: FxHashMap<BasicBlockId, RegId>,
+    reg_maps: FxHashMap<BasicBlockId, BitVec>,
 }
 
 impl<'a> Lowering<'a> {
@@ -37,13 +37,13 @@ impl<'a> Lowering<'a> {
             ast,
             tcx,
             basic_blocks: Arena::new(),
-            next_register: 0,
+            reg_map: BitVec::new(),
             current_block: BasicBlockId::MAX,
             function_worklist: VecDeque::new(),
             loop_contexts: Vec::new(),
             symbol_registers: FxHashMap::default(),
             return_reg: RegId::MAX,
-            reg_count: FxHashMap::default(),
+            reg_maps: FxHashMap::default(),
         }
     }
 
@@ -53,7 +53,8 @@ impl<'a> Lowering<'a> {
         for &stmt in stmts {
             self.lower_stmt(stmt);
         }
-        self.reg_count.insert(main, self.next_register);
+        self.reg_maps
+            .insert(main, std::mem::take(&mut self.reg_map));
 
         let mut functions = FxHashMap::default();
         while let Some(symbol) = self.function_worklist.pop_front() {
@@ -61,24 +62,32 @@ impl<'a> Lowering<'a> {
                 continue;
             }
             let function = self.tcx.bcx.symbols[symbol].declaration;
-            self.next_register = 0;
             let entry = self.create_block();
             functions.insert(symbol, entry);
             self.current_block = entry;
             self.lower_function(function);
-            self.reg_count.insert(entry, self.next_register);
+            self.reg_maps
+                .insert(entry, std::mem::take(&mut self.reg_map));
         }
 
         Ir {
             main,
             functions,
             basic_blocks: self.basic_blocks,
-            reg_count: self.reg_count,
+            reg_maps: self.reg_maps,
         }
     }
 
     fn lower_function(&mut self, function: ast::StmtId) {
-        self.return_reg = self.create_register(true);
+        let symbol = self.ast.stmts.value_binding(function);
+        let ty = self.tcx.symbol_types[&symbol];
+        let Ty::Fn(_, return_ty) = self.tcx.types.probe_value(ty) else {
+            unreachable!()
+        };
+        self.return_reg = self.new_reg(return_ty);
+        self.push_stmt(Statement::ImplicitDef {
+            reg: self.return_reg,
+        });
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
@@ -92,7 +101,9 @@ impl<'a> Lowering<'a> {
                 let mut fields = Vec::with_capacity(ty.len());
                 let mut ref_map = BitVec::with_capacity(ty.len());
                 for &ty in ty.iter() {
-                    fields.push(self.create_register(true));
+                    let reg = self.new_reg(ty);
+                    self.push_stmt(Statement::ImplicitDef { reg });
+                    fields.push(reg);
                     ref_map.push(self.is_ref_ty(ty));
                 }
                 self.push_stmt(Statement::Assign {
@@ -107,17 +118,16 @@ impl<'a> Lowering<'a> {
     fn lower_stmt(&mut self, stmt: ast::StmtId) {
         match self.ast.stmts[stmt] {
             ast::Stmt::Let { init, .. } => {
-                let reg = self.create_register(false);
+                let (reg, symbol) = self.new_reg_for_decl(stmt);
                 self.lower_expr_into(reg, init);
-                let symbol = self.ast.stmts.value_binding(stmt);
                 self.symbol_registers.insert(symbol, reg);
             }
             ast::Stmt::Expr { expr, .. } => {
                 self.lower_expr(expr);
             }
             ast::Stmt::Param { .. } => {
-                let symbol = self.ast.stmts.value_binding(stmt);
-                let reg = self.create_register(true);
+                let (reg, symbol) = self.new_reg_for_decl(stmt);
+                self.push_stmt(Statement::ImplicitDef { reg });
                 self.symbol_registers.insert(symbol, reg);
             }
             _ => {}
@@ -152,7 +162,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::String(s) => Operand::Constant(Constant::String(s)),
             _ => {
-                let dest = self.create_register(false);
+                let dest = self.new_reg_for_expr(expr);
                 self.lower_expr_into(dest, expr);
                 Operand::Reg(dest)
             }
@@ -270,15 +280,15 @@ impl<'a> Lowering<'a> {
                     self.lower_struct_into(dest, args);
                 } else {
                     let callee = self.lower_expr(callee);
-                    let return_reg = self.create_register(false);
-                    let arg_regs = self.create_n_registers(false, args.len());
+                    let return_reg = self.new_reg_for_expr(expr);
+                    let regs: Vec<_> = args.iter().map(|arg| self.new_reg_for_expr(*arg)).collect();
                     for i in 0..args.len() {
-                        self.lower_expr_into(arg_regs[i], args[i]);
+                        self.lower_expr_into(regs[i], args[i]);
                     }
                     self.push_stmt(Statement::Call {
                         callee,
                         return_reg,
-                        args: arg_regs,
+                        args: regs,
                     });
                     self.store_value(dest, RValue::Use(Operand::Reg(return_reg)))
                 }
@@ -287,7 +297,10 @@ impl<'a> Lowering<'a> {
                 let Ty::Array(el_ty) = self.tcx.types.probe_value(ty) else {
                     unreachable!()
                 };
-                let regs = self.create_n_registers(false, values.len());
+                let regs: Vec<_> = values
+                    .iter()
+                    .map(|arg| self.new_reg_for_expr(*arg))
+                    .collect();
                 for i in 0..values.len() {
                     self.lower_expr_into(regs[i], values[i]);
                 }
@@ -319,7 +332,10 @@ impl<'a> Lowering<'a> {
             ast::Expr::Struct(ref s) => {
                 let symbol = self.ast.exprs.value_binding(expr);
                 let declared = self.tcx.struct_properties[&symbol].clone();
-                let regs = self.create_n_registers(false, declared.len());
+                let regs: Vec<_> = declared
+                    .keys()
+                    .map(|name| self.new_reg_for_expr(s.fields[name]))
+                    .collect();
                 let mut ref_map = BitVec::with_capacity(declared.len());
                 for (i, name) in declared.keys().enumerate() {
                     let field = s.fields[name];
@@ -580,7 +596,10 @@ impl<'a> Lowering<'a> {
     }
 
     fn lower_struct_into(&mut self, dest: RegId, fields: &[ast::ExprId]) {
-        let regs = self.create_n_registers(false, fields.len());
+        let regs: Vec<_> = fields
+            .iter()
+            .map(|arg| self.new_reg_for_expr(*arg))
+            .collect();
         let mut ref_map = BitVec::with_capacity(fields.len());
         for i in 0..fields.len() {
             self.lower_expr_into(regs[i], fields[i]);
@@ -601,10 +620,10 @@ impl<'a> Lowering<'a> {
 
     fn is_ref_ty(&mut self, ty: TyId) -> bool {
         match self.tcx.types.probe_value(ty) {
-            Ty::Unknown | Ty::UnknownInt | Ty::Never => unreachable!(),
             Ty::TypeParam(..) => true,
-            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) => false,
+            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) | Ty::Never => false,
             Ty::String | Ty::Named(..) | Ty::Tuple(..) | Ty::Array(..) => true,
+            Ty::Unknown | Ty::UnknownInt => unreachable!(),
         }
     }
 
@@ -630,17 +649,23 @@ impl<'a> Lowering<'a> {
         })
     }
 
-    fn create_register(&mut self, implicit: bool) -> RegId {
-        let reg = self.next_register;
-        self.next_register += 1;
-        if implicit {
-            self.push_stmt(Statement::ImplicitDef { reg });
-        }
-        reg
+    fn new_reg_for_decl(&mut self, stmt: ast::StmtId) -> (RegId, SymbolId) {
+        let symbol = self.ast.stmts.value_binding(stmt);
+        let ty = self.tcx.symbol_types[&symbol];
+        let reg = self.new_reg(ty);
+        (reg, symbol)
     }
 
-    fn create_n_registers(&mut self, implicit: bool, count: usize) -> Vec<RegId> {
-        (0..count).map(|_| self.create_register(implicit)).collect()
+    fn new_reg_for_expr(&mut self, expr: ast::ExprId) -> RegId {
+        let ty = self.tcx.expr_types[&expr];
+        self.new_reg(ty)
+    }
+
+    fn new_reg(&mut self, ty: TyId) -> RegId {
+        let is_ref = self.is_ref_ty(ty);
+        let reg = self.reg_map.len() as RegId;
+        self.reg_map.push(is_ref);
+        reg
     }
 
     fn push_stmt(&mut self, statement: Statement) {
@@ -667,7 +692,7 @@ pub struct Ir {
     pub main: BasicBlockId,
     pub functions: FxHashMap<SymbolId, BasicBlockId>,
     pub basic_blocks: Arena<BasicBlock>,
-    pub reg_count: FxHashMap<BasicBlockId, RegId>,
+    pub reg_maps: FxHashMap<BasicBlockId, BitVec>,
 }
 
 pub struct BasicBlock {

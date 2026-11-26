@@ -104,6 +104,7 @@ const HEADER_LEN: usize = mem::size_of::<ObjHeader>();
 #[derive(Clone, Copy)]
 #[repr(packed)]
 struct ObjHeader {
+    #[allow(dead_code)]
     forwarded: bool,
     layout: LayoutId,
     len: u32,
