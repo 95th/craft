@@ -1479,4 +1479,21 @@ mod tests {
         "#;
         run_ok(source)
     }
+
+    #[test]
+    fn break_continue_diverges() {
+        let source = r#"
+            for (let i = 0; i < 10; i = i + 1) {
+                let x = if i == 0 {
+                    break;
+                } else if i == 1 {
+                    continue;
+                } else {
+                    20
+                };
+                print(x);
+            }
+        "#;
+        run_ok(source)
+    }
 }

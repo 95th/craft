@@ -473,8 +473,14 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
             check_expr(c, body);
             c.std.unit
         }
-        Expr::Break => c.types.new_key(Ty::Unknown),
-        Expr::Continue => c.types.new_key(Ty::Unknown),
+        Expr::Break => {
+            c.diverges = true;
+            c.types.new_key(Ty::Unknown)
+        }
+        Expr::Continue => {
+            c.diverges = true;
+            c.types.new_key(Ty::Unknown)
+        }
         Expr::Call { callee, ref args } => {
             let callee_ty = check_expr(c, callee);
             let Ty::Fn(params, ret) = c.types.probe_value(callee_ty) else {
