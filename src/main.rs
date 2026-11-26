@@ -248,6 +248,12 @@ mod tests {
                 c: bool
             }
 
+            struct Bar {
+                a: u64,
+                b: Foo,
+                c: bool
+            }
+
             let foo = Foo {
                 a: 10 + 3 + 4,
                 b: "hello world",
@@ -256,6 +262,13 @@ mod tests {
 
             print(foo.b);
             print(foo.a);
+
+            let bar = Bar {
+                a: 20,
+                b: foo,
+                c: false
+            };
+            print(bar.b.a);
         "#;
         run_ok(source);
     }
