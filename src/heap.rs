@@ -72,11 +72,11 @@ impl Heap {
         true
     }
 
-    pub fn gc(&mut self, roots: Vec<(u64, usize)>, mut callback: impl FnMut(u64, usize)) {
+    pub fn gc(&mut self, roots: Vec<(u64, GcRoot)>, mut callback: impl FnMut(u64, GcRoot)) {
         let mut data = Vec::new();
-        for (obj, offset) in roots {
+        for (obj, root) in roots {
             let new_obj = forward_obj(&mut self.data, obj as usize, &mut data);
-            callback(new_obj, offset);
+            callback(new_obj, root);
         }
 
         let mut curr = 0;
@@ -164,6 +164,12 @@ const HEADER_LEN: usize = mem::size_of::<ObjHeader>();
 const _: () = {
     assert!(HEADER_LEN == 9);
 };
+
+#[derive(Clone, Copy)]
+pub enum GcRoot {
+    StringPool(usize),
+    Stack(usize),
+}
 
 #[derive(Clone, Copy)]
 #[repr(packed)]

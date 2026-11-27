@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     Error,
     chunk::{Code, Opcode},
-    heap::Heap,
+    heap::{GcRoot, Heap},
 };
 
 const TRUE: u64 = 1;
@@ -680,15 +680,24 @@ impl VM {
             let ip = frame.ip as usize - self.code.as_ptr() as usize;
             for i in self.safepoints[&ip].iter_ones() {
                 let offset = frame.sp + i;
-                roots.push((self.stack[offset], offset));
+                roots.push((self.stack[offset], GcRoot::Stack(offset)));
             }
         };
         collect_roots(&self.frame);
         for frame in self.frames.iter() {
             collect_roots(frame);
         }
-        self.heap
-            .gc(roots, |new_obj, offset| self.stack[offset] = new_obj);
+        for (str_offset, obj) in self.string_pool.iter() {
+            roots.push((*obj, GcRoot::StringPool(*str_offset)))
+        }
+        self.heap.gc(roots, |new_obj, root| match root {
+            GcRoot::StringPool(i) => {
+                self.string_pool.insert(i, new_obj);
+            }
+            GcRoot::Stack(i) => {
+                self.stack[i] = new_obj;
+            }
+        });
     }
 }
 

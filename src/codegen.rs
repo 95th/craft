@@ -387,8 +387,10 @@ impl<'a> Codegen<'a> {
                     Layout::Struct(ref_map.clone()),
                 );
                 let mut live = self.get_live_regs();
-                for r in fields {
-                    set_bit(&mut live, self.gen_reg(*r) as usize);
+                for (i, r) in fields.iter().enumerate() {
+                    if ref_map[i] {
+                        set_bit(&mut live, self.gen_reg(*r) as usize);
+                    }
                 }
                 self.code.add_safepoint(self.code.len(), live);
             }
@@ -401,8 +403,10 @@ impl<'a> Codegen<'a> {
                     .op_struct(dest, first, elements.len() as u8, Layout::Array(is_ref));
 
                 let mut live = self.get_live_regs();
-                for r in elements {
-                    set_bit(&mut live, self.gen_reg(*r) as usize);
+                if is_ref {
+                    for r in elements {
+                        set_bit(&mut live, self.gen_reg(*r) as usize);
+                    }
                 }
                 self.code.add_safepoint(self.code.len(), live);
             }
@@ -417,8 +421,9 @@ impl<'a> Codegen<'a> {
                     .op_repeat_struct(dest, value, count, Layout::Array(is_ref));
 
                 let mut live = self.get_live_regs();
-                set_bit(&mut live, value as usize);
-                set_bit(&mut live, count as usize);
+                if is_ref {
+                    set_bit(&mut live, value as usize);
+                }
                 self.code.add_safepoint(self.code.len(), live);
             }
         }
