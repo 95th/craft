@@ -1554,4 +1554,14 @@ mod tests {
         "#;
         run_ok(source)
     }
+
+    #[test]
+    fn test_generic_isolation_from_inner() {
+        let source = r#"
+            fn foo<T>(t: T) {
+                fn bar(t: T) {}
+            }
+        "#;
+        run_err(source, Error::Bind)
+    }
 }

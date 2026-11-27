@@ -3,13 +3,14 @@ use rustc_hash::FxHashMap;
 use crate::{
     Error,
     arena::{Arena, Id},
-    ast::{AstNodes, Expr, ExprId, Stmt, StmtId, Type, TypeId},
+    ast::{AstNodes, Expr, ExprId, Span, Stmt, StmtId, Type, TypeId},
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
 };
 
 type ScopeId = Id<Scope>;
 
+#[derive(PartialEq, Eq)]
 pub enum SymbolKind {
     Let,
     Fn,
@@ -54,6 +55,7 @@ pub struct Binder<'a> {
     type_scope: ScopeId,
     fn_scope: ScopeId,
     value_scope: ScopeId,
+    curr_ty_param_scope: ScopeId,
     symbols: Arena<Symbol>,
     interner: &'a mut StrInterner,
     has_error: bool,
@@ -76,6 +78,7 @@ impl<'a> Binder<'a> {
             type_scope: ScopeId::MAX,
             fn_scope: ScopeId::MAX,
             value_scope: ScopeId::MAX,
+            curr_ty_param_scope: ScopeId::MAX,
             symbols: Arena::new(),
             interner,
             has_error: false,
@@ -200,8 +203,26 @@ impl<'a> Binder<'a> {
         symbol
     }
 
-    fn lookup_type(&self, name: StrId) -> Option<SymbolId> {
-        self.lookup(self.type_scope, name)
+    fn lookup_type(&mut self, name: StrId, span: Span) -> Option<SymbolId> {
+        let mut curr = Some(self.type_scope);
+        while let Some(scope_id) = curr {
+            let scope = &self.scopes[scope_id];
+            if let Some(&symbol) = scope.symbols.get(&name) {
+                if self.symbols[symbol].kind == SymbolKind::TypeParam
+                    && scope_id != self.curr_ty_param_scope
+                {
+                    self.diagnostics
+                        .push("cannot use type parameter from parent scope here.", span);
+                    self.has_error = true;
+                }
+                return Some(symbol);
+            }
+            curr = scope.parent;
+        }
+
+        self.diagnostics.push("not found in this scope.", span);
+        self.has_error = true;
+        None
     }
 
     fn lookup_value(&self, name: StrId) -> Option<SymbolId> {
@@ -301,6 +322,8 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             for t in f.type_params.iter() {
                 bind_statement(b, *t);
             }
+            let prev_curr_fn_type_scope =
+                std::mem::replace(&mut b.curr_ty_param_scope, b.type_scope);
             b.with_value_scope(false, |b| {
                 let prev_local_count = std::mem::replace(&mut b.local_count, 0);
                 for param in f.params.iter() {
@@ -315,7 +338,8 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
                 b.fn_depth -= 1;
                 b.loop_depth = prev_loop_depth;
                 b.local_count = prev_local_count;
-            })
+            });
+            b.curr_ty_param_scope = prev_curr_fn_type_scope;
         }),
         Stmt::Param { name, ty } => {
             bind_ty(b, ty);
@@ -409,12 +433,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             bind_expr(b, obj);
         }
         Expr::Struct(ref s) => {
-            if let Some(symbol) = b.lookup_type(s.name) {
+            if let Some(symbol) = b.lookup_type(s.name, b.ast.exprs.span(node)) {
                 b.ast.exprs.bind_value(node, symbol);
-            } else {
-                b.diagnostics
-                    .push("not found in this scope.", b.ast.exprs.span(node));
-                b.has_error = true;
             }
 
             for expr in s.fields.values() {
@@ -462,12 +482,8 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
 fn bind_ty(b: &mut Binder, node: TypeId) {
     match b.ast.types[node] {
         Type::Named(name) => {
-            if let Some(symbol) = b.lookup_type(name) {
+            if let Some(symbol) = b.lookup_type(name, b.ast.types.span(node)) {
                 b.ast.types.bind_type(node, symbol);
-            } else {
-                b.diagnostics
-                    .push("not found in this scope.", b.ast.types.span(node));
-                b.has_error = true;
             }
         }
         Type::FnType { ref params, ret } => {
