@@ -1,4 +1,7 @@
-use std::{debug_assert_matches, fmt, mem};
+use std::{
+    debug_assert_matches, fmt, mem,
+    ops::{Deref, DerefMut},
+};
 
 use bitvec::prelude::*;
 use rustc_hash::FxHashMap;
@@ -6,100 +9,99 @@ use rustc_hash::FxHashMap;
 use crate::arena::{Arena, Id};
 
 pub struct Heap {
+    storage: HeapStorage,
     layouts: Layouts,
-    data: Vec<u8>,
 }
 
 impl Heap {
     pub fn new(layouts: Layouts) -> Self {
         Self {
+            storage: HeapStorage::new(),
             layouts,
-            data: Vec::new(),
         }
     }
 
     pub fn alloc_struct(&mut self, data: &[u64], layout: LayoutId) -> usize {
         let data =
             unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 8) };
-
-        self.alloc(data, layout)
+        self.storage.alloc(data, layout)
     }
 
     pub fn alloc_string(&mut self, data: &[u8]) -> usize {
-        self.alloc(data, self.layouts.common.string)
+        self.storage.alloc(data, self.layouts.common.string)
     }
 
     pub fn data(&self, obj: usize) -> &[u8] {
-        let header = header(&self.data, obj);
+        let header = self.storage.header(obj);
         let i = obj + HEADER_LEN;
         let len = header.len_bytes as usize;
-        &self.data[i..i + len]
+        &self.storage[i..i + len]
     }
 
     pub fn get_field(&self, obj: usize, field: usize) -> u64 {
         debug_assert_matches!(
-            self.layouts.of(header(&self.data, obj).layout),
+            self.layouts.of(self.storage.header(obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        get_field(&self.data, obj, field)
+        self.storage.get_field(obj, field)
     }
 
     pub fn set_field(&mut self, obj: usize, field: usize, value: u64) {
         debug_assert_matches!(
-            self.layouts.of(header(&self.data, obj).layout),
+            self.layouts.of(self.storage.header(obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        set_field(&mut self.data, obj, field, value);
+        self.storage.set_field(obj, field, value);
     }
 
     pub fn get_index(&self, obj: usize, index: usize) -> Option<u64> {
-        let header = header(&self.data, obj);
+        let header = self.storage.header(obj);
         debug_assert_matches!(self.layouts.of(header.layout), Layout::Array(..));
         if index * 8 >= header.len_bytes as usize {
             return None;
         }
-        Some(get_field(&self.data, obj, index))
+        Some(self.storage.get_field(obj, index))
     }
 
     #[must_use]
     pub fn set_index(&mut self, obj: usize, index: usize, value: u64) -> bool {
-        let header = header(&self.data, obj);
+        let header = self.storage.header(obj);
         debug_assert_matches!(self.layouts.of(header.layout), Layout::Array(..));
         if index * 8 >= header.len_bytes as usize {
             return false;
         }
-        set_field(&mut self.data, obj, index, value);
+        self.storage.set_field(obj, index, value);
         true
     }
 
     pub fn gc(&mut self, roots: Vec<(u64, GcRoot)>, mut callback: impl FnMut(u64, GcRoot)) {
-        let mut data = Vec::new();
+        let mut storage = HeapStorage::new();
         for (obj, root) in roots {
-            let new_obj = forward_obj(&mut self.data, obj as usize, &mut data);
+            let new_obj = self.storage.forward_obj(obj as usize, &mut storage);
             callback(new_obj, root);
         }
 
         let mut curr = 0;
-        while curr < data.len() {
-            let header = header(&data, curr);
+        while curr < storage.len() {
+            let header = storage.header(curr);
             let layout = self.layouts.of(header.layout);
             match layout {
                 Layout::String => {}
                 Layout::Array(is_ref) => {
                     if *is_ref {
                         for i in 0..header.len_bytes as usize / 8 {
-                            let old_el = get_field(&data, curr, i);
-                            let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
-                            set_field(&mut data, curr, i, new_el);
+                            let old = storage.get_field(curr, i);
+                            let new = self.storage.forward_obj(old as usize, &mut storage);
+                            storage.set_field(curr, i, new);
                         }
                     }
                 }
                 Layout::Struct(ref_map) => {
                     for i in 0..header.len_bytes as usize / 8 {
                         if ref_map[i] {
-                            let old_el = get_field(&data, curr, i);
-                            let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
-                            set_field(&mut data, curr, i, new_el);
+                            let old = storage.get_field(curr, i);
+                            let new = self.storage.forward_obj(old as usize, &mut storage);
+                            storage.set_field(curr, i, new);
                         }
                     }
                 }
@@ -107,7 +109,51 @@ impl Heap {
             curr += HEADER_LEN + header.len_bytes as usize;
         }
 
-        self.data = data;
+        self.storage = storage;
+    }
+}
+
+struct HeapStorage {
+    data: Vec<u8>,
+}
+
+impl HeapStorage {
+    fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+
+    fn header(&self, obj: usize) -> ObjHeader {
+        let data: [u8; HEADER_LEN] = *self[obj..].first_chunk().unwrap();
+        ObjHeader::from_data(data)
+    }
+
+    fn forward_obj(&mut self, obj: usize, target: &mut Self) -> u64 {
+        let header = self.header(obj);
+        if header.forwarded {
+            return self.forward_address(obj);
+        }
+
+        let new_obj = target.len() as u64;
+        target.extend_from_slice(&self[obj..obj + HEADER_LEN + header.len_bytes as usize]);
+        new_obj
+    }
+
+    fn forward_address(&self, obj: usize) -> u64 {
+        debug_assert!(self.header(obj).forwarded);
+        let address = self[obj + 1..obj + HEADER_LEN].first_chunk().unwrap();
+        u64::from_ne_bytes(*address)
+    }
+
+    fn set_field(&mut self, obj: usize, index: usize, value: u64) {
+        let i = obj + HEADER_LEN + index * 8;
+        let bytes = self[i..].first_chunk_mut().unwrap();
+        *bytes = value.to_ne_bytes();
+    }
+
+    fn get_field(&self, obj: usize, index: usize) -> u64 {
+        let i = obj + HEADER_LEN + index * 8;
+        let bytes = self[i..].first_chunk().unwrap();
+        u64::from_ne_bytes(*bytes)
     }
 
     fn alloc(&mut self, data: &[u8], layout: LayoutId) -> usize {
@@ -125,38 +171,18 @@ impl Heap {
     }
 }
 
-fn header(data: &[u8], obj: usize) -> ObjHeader {
-    let data: [u8; HEADER_LEN] = *data[obj..].first_chunk().unwrap();
-    ObjHeader::from_data(data)
-}
+impl Deref for HeapStorage {
+    type Target = Vec<u8>;
 
-fn forward_obj(data: &mut [u8], obj: usize, new_data: &mut Vec<u8>) -> u64 {
-    let header = header(data, obj);
-    if header.forwarded {
-        return forward_address(data, obj);
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
-
-    let new_obj = new_data.len() as u64;
-    new_data.extend_from_slice(&data[obj..obj + HEADER_LEN + header.len_bytes as usize]);
-    new_obj
 }
 
-fn forward_address(data: &[u8], obj: usize) -> u64 {
-    debug_assert!(header(data, obj).forwarded);
-    let address = data[obj + 1..obj + HEADER_LEN].first_chunk().unwrap();
-    u64::from_ne_bytes(*address)
-}
-
-fn set_field(data: &mut [u8], obj: usize, index: usize, value: u64) {
-    let i = obj + HEADER_LEN + index * 8;
-    let bytes = data[i..].first_chunk_mut().unwrap();
-    *bytes = value.to_ne_bytes();
-}
-
-fn get_field(data: &[u8], obj: usize, index: usize) -> u64 {
-    let i = obj + HEADER_LEN + index * 8;
-    let bytes = data[i..].first_chunk().unwrap();
-    u64::from_ne_bytes(*bytes)
+impl DerefMut for HeapStorage {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
 }
 
 const HEADER_LEN: usize = mem::size_of::<ObjHeader>();
