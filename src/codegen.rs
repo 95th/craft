@@ -610,10 +610,7 @@ impl<'a> Codegen<'a> {
                     continue;
                 }
                 let reg = self.gen_reg(i as ir::RegId) as usize;
-                while reg >= live.len() {
-                    live.push(false);
-                }
-                live.set(reg, true);
+                set_bit(&mut live, reg);
             }
         }
         live
