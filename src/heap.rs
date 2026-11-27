@@ -41,7 +41,7 @@ impl Heap {
             self.layouts.of(header(&self.data, obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        get(&self.data, obj, field)
+        get_field(&self.data, obj, field)
     }
 
     pub fn set_field(&mut self, obj: usize, field: usize, value: u64) {
@@ -49,7 +49,7 @@ impl Heap {
             self.layouts.of(header(&self.data, obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        set(&mut self.data, obj, field, value);
+        set_field(&mut self.data, obj, field, value);
     }
 
     pub fn get_index(&self, obj: usize, index: usize) -> Option<u64> {
@@ -58,7 +58,7 @@ impl Heap {
         if index * 8 >= header.len_bytes as usize {
             return None;
         }
-        Some(get(&self.data, obj, index))
+        Some(get_field(&self.data, obj, index))
     }
 
     #[must_use]
@@ -68,7 +68,7 @@ impl Heap {
         if index * 8 >= header.len_bytes as usize {
             return false;
         }
-        set(&mut self.data, obj, index, value);
+        set_field(&mut self.data, obj, index, value);
         true
     }
 
@@ -88,18 +88,18 @@ impl Heap {
                 Layout::Array(is_ref) => {
                     if *is_ref {
                         for i in 0..header.len_bytes as usize / 8 {
-                            let old_el = get(&data, curr, i);
+                            let old_el = get_field(&data, curr, i);
                             let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
-                            set(&mut data, curr, i, new_el);
+                            set_field(&mut data, curr, i, new_el);
                         }
                     }
                 }
                 Layout::Struct(ref_map) => {
                     for i in 0..header.len_bytes as usize / 8 {
                         if ref_map[i] {
-                            let old_el = get(&data, curr, i);
+                            let old_el = get_field(&data, curr, i);
                             let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
-                            set(&mut data, curr, i, new_el);
+                            set_field(&mut data, curr, i, new_el);
                         }
                     }
                 }
@@ -147,13 +147,13 @@ fn forward_address(data: &[u8], obj: usize) -> u64 {
     u64::from_ne_bytes(*address)
 }
 
-fn set(data: &mut [u8], obj: usize, index: usize, value: u64) {
+fn set_field(data: &mut [u8], obj: usize, index: usize, value: u64) {
     let i = obj + HEADER_LEN + index * 8;
     let bytes = data[i..].first_chunk_mut().unwrap();
     *bytes = value.to_ne_bytes();
 }
 
-fn get(data: &[u8], obj: usize, index: usize) -> u64 {
+fn get_field(data: &[u8], obj: usize, index: usize) -> u64 {
     let i = obj + HEADER_LEN + index * 8;
     let bytes = data[i..].first_chunk().unwrap();
     u64::from_ne_bytes(*bytes)
