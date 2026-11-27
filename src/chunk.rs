@@ -1,5 +1,6 @@
 use Opcode::*;
 use bitvec::vec::BitVec;
+use rustc_hash::FxHashMap;
 
 use crate::heap::{Layout, LayoutBuilder, Layouts};
 
@@ -140,7 +141,7 @@ pub type Reg = u16;
 pub struct Code {
     code: Vec<u8>,
     layouts: LayoutBuilder,
-    safepoints: Vec<(usize, BitVec)>,
+    safepoints: FxHashMap<usize, BitVec>,
 }
 
 impl Code {
@@ -148,12 +149,12 @@ impl Code {
         Self {
             code: Vec::new(),
             layouts: LayoutBuilder::new(),
-            safepoints: Vec::new(),
+            safepoints: FxHashMap::default(),
         }
     }
 
-    pub fn into_inner(self) -> (Vec<u8>, Layouts) {
-        (self.code, self.layouts.build())
+    pub fn into_parts(self) -> (Vec<u8>, Layouts, FxHashMap<usize, BitVec>) {
+        (self.code, self.layouts.build(), self.safepoints)
     }
 
     pub fn len(&self) -> usize {
@@ -364,7 +365,7 @@ impl Code {
     }
 
     pub fn add_safepoint(&mut self, offset: usize, live: BitVec) {
-        self.safepoints.push((offset, live));
+        self.safepoints.insert(offset, live);
     }
 
     fn op(&mut self, op: Opcode) {
@@ -403,7 +404,7 @@ impl Code {
 struct Disassembler<'a> {
     code: &'a [u8],
     layouts: &'a LayoutBuilder,
-    safepoints: &'a Vec<(usize, BitVec)>,
+    safepoints: &'a FxHashMap<usize, BitVec>,
     i: usize,
 }
 
@@ -411,7 +412,7 @@ impl<'a> Disassembler<'a> {
     fn new(
         code: &'a [u8],
         layouts: &'a LayoutBuilder,
-        safepoints: &'a Vec<(usize, BitVec)>,
+        safepoints: &'a FxHashMap<usize, BitVec>,
     ) -> Self {
         Self {
             code,

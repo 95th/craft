@@ -1,3 +1,4 @@
+use bitvec::vec::BitVec;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -84,11 +85,12 @@ pub struct VM {
     frame: CallFrame,
     frames: Vec<CallFrame>,
     string_pool: FxHashMap<usize, u64>,
+    safepoints: FxHashMap<usize, BitVec>,
 }
 
 impl VM {
     pub fn new(code: Code) -> Self {
-        let (code, layouts) = code.into_inner();
+        let (code, layouts, safepoints) = code.into_parts();
         let frame = CallFrame::new(&code, 0, 0);
         Self {
             stack: vec![0; frame.size as usize],
@@ -96,6 +98,7 @@ impl VM {
             frames: Vec::new(),
             code,
             heap: Heap::new(layouts),
+            safepoints,
             string_pool: FxHashMap::default(),
         }
     }
@@ -113,6 +116,7 @@ impl VM {
                 Opcode::String => {
                     let dest = self.frame.read_u16();
                     let index = self.frame.read_u64() as usize;
+                    self.gc_if_required();
                     let obj = *self.string_pool.entry(index).or_insert_with(|| {
                         let len = self.code[index..].first_chunk().unwrap();
                         let len = u32::from_ne_bytes(*len) as usize;
@@ -158,6 +162,7 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let first = self.frame.read_u16();
                     let count = self.frame.read_u8();
+                    self.gc_if_required();
                     let i = self.frame.sp + first as usize;
                     let args = &self.stack[i..i + count as usize];
                     let obj = self.heap.alloc_struct(args, layout);
@@ -168,6 +173,7 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let value = self.frame.read_u16();
                     let count = self.frame.read_u16();
+                    self.gc_if_required();
                     let value = self.load(value);
                     let count = self.load(count) as usize;
                     let data = vec![value; count];
@@ -666,6 +672,23 @@ impl VM {
         if self.stack.len() < sp + self.frame.size as usize {
             self.stack.resize(sp + self.frame.size as usize, 0);
         }
+    }
+
+    fn gc_if_required(&mut self) {
+        let mut roots = Vec::new();
+        let mut collect_roots = |frame: &CallFrame| {
+            let ip = frame.ip as usize - self.code.as_ptr() as usize;
+            for i in self.safepoints[&ip].iter_ones() {
+                let offset = frame.sp + i;
+                roots.push((self.stack[offset], offset));
+            }
+        };
+        collect_roots(&self.frame);
+        for frame in self.frames.iter() {
+            collect_roots(frame);
+        }
+        self.heap
+            .gc(roots, |new_obj, offset| self.stack[offset] = new_obj);
     }
 }
 

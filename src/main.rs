@@ -1537,16 +1537,20 @@ mod tests {
         let source = r#"
             struct Foo {
                 a: string,
-                b: string
+                b: [string]
             }
 
-            fn bar(a: string, b: string) -> Foo {
+            fn bar(a: string, b: [string]) -> Foo {
                 Foo { a: a, b: b }
             }
 
             let s = "keep";
-            let foo = bar("hello", "world");
+            let foo = bar("hello", ["world", "war", "z"]);
             print(s);
+
+            let x = foo.b;
+            print("123");
+            print(x[1]);
         "#;
         run_ok(source)
     }

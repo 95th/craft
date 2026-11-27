@@ -30,61 +30,92 @@ impl Heap {
     }
 
     pub fn data(&self, obj: usize) -> &[u8] {
-        let header = self.header(obj);
+        let header = header(&self.data, obj);
         let i = obj + HEADER_LEN;
-        let len = header.len as usize;
+        let len = header.len_bytes as usize;
         &self.data[i..i + len]
     }
 
     pub fn get_field(&self, obj: usize, field: usize) -> u64 {
         debug_assert_matches!(
-            self.layouts.of(self.header(obj).layout),
+            self.layouts.of(header(&self.data, obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        let i = obj + HEADER_LEN + field * 8;
-        let bytes = self.data[i..].first_chunk().unwrap();
-        u64::from_ne_bytes(*bytes)
+        get(&self.data, obj, field)
     }
 
     pub fn set_field(&mut self, obj: usize, field: usize, value: u64) {
         debug_assert_matches!(
-            self.layouts.of(self.header(obj).layout),
+            self.layouts.of(header(&self.data, obj).layout),
             Layout::Struct(fields) if field < fields.len()
         );
-        let i = obj + HEADER_LEN + field * 8;
-        let bytes = self.data[i..].first_chunk_mut().unwrap();
-        *bytes = value.to_ne_bytes();
+        set(&mut self.data, obj, field, value);
     }
 
-    pub fn get_index(&self, obj: usize, field: usize) -> Option<u64> {
-        let header = self.header(obj);
+    pub fn get_index(&self, obj: usize, index: usize) -> Option<u64> {
+        let header = header(&self.data, obj);
         debug_assert_matches!(self.layouts.of(header.layout), Layout::Array(..));
-        if field * 8 >= header.len as usize {
+        if index * 8 >= header.len_bytes as usize {
             return None;
         }
-        let i = obj + HEADER_LEN + field * 8;
-        let bytes = self.data[i..].first_chunk().unwrap();
-        Some(u64::from_ne_bytes(*bytes))
+        Some(get(&self.data, obj, index))
     }
 
     #[must_use]
-    pub fn set_index(&mut self, obj: usize, field: usize, value: u64) -> bool {
-        let header = self.header(obj);
+    pub fn set_index(&mut self, obj: usize, index: usize, value: u64) -> bool {
+        let header = header(&self.data, obj);
         debug_assert_matches!(self.layouts.of(header.layout), Layout::Array(..));
-        if field * 8 >= header.len as usize {
+        if index * 8 >= header.len_bytes as usize {
             return false;
         }
-        let i = obj + HEADER_LEN + field * 8;
-        let bytes = self.data[i..].first_chunk_mut().unwrap();
-        *bytes = value.to_ne_bytes();
+        set(&mut self.data, obj, index, value);
         true
+    }
+
+    pub fn gc(&mut self, roots: Vec<(u64, usize)>, mut callback: impl FnMut(u64, usize)) {
+        let mut data = Vec::new();
+        for (obj, offset) in roots {
+            let new_obj = forward_obj(&mut self.data, obj as usize, &mut data);
+            callback(new_obj, offset);
+        }
+
+        let mut curr = 0;
+        while curr < data.len() {
+            let header = header(&data, curr);
+            let layout = self.layouts.of(header.layout);
+            match layout {
+                Layout::String => {}
+                Layout::Array(is_ref) => {
+                    if *is_ref {
+                        for i in 0..header.len_bytes as usize / 8 {
+                            let old_el = get(&data, curr, i);
+                            let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
+                            set(&mut data, curr, i, new_el);
+                        }
+                    }
+                }
+                Layout::Struct(ref_map) => {
+                    for i in 0..header.len_bytes as usize / 8 {
+                        if ref_map[i] {
+                            let old_el = get(&data, curr, i);
+                            let new_el = forward_obj(&mut self.data, old_el as usize, &mut data);
+                            set(&mut data, curr, i, new_el);
+                        }
+                    }
+                }
+            }
+            curr += HEADER_LEN + header.len_bytes as usize;
+        }
+
+        self.data = data;
     }
 
     fn alloc(&mut self, data: &[u8], layout: LayoutId) -> usize {
         let header = ObjHeader {
             forwarded: false,
             layout,
-            len: data.len() as u32,
+            len_bytes: data.len() as u32,
+            _padding: 0,
         };
         let index = self.data.len();
         self.data.reserve(HEADER_LEN + data.len());
@@ -92,22 +123,55 @@ impl Heap {
         self.data.extend_from_slice(data);
         index
     }
+}
 
-    fn header(&self, obj: usize) -> ObjHeader {
-        let data: [u8; HEADER_LEN] = *self.data[obj..].first_chunk().unwrap();
-        ObjHeader::from_data(data)
+fn header(data: &[u8], obj: usize) -> ObjHeader {
+    let data: [u8; HEADER_LEN] = *data[obj..].first_chunk().unwrap();
+    ObjHeader::from_data(data)
+}
+
+fn forward_obj(data: &mut [u8], obj: usize, new_data: &mut Vec<u8>) -> u64 {
+    let header = header(data, obj);
+    if header.forwarded {
+        return forward_address(data, obj);
     }
+
+    let new_obj = new_data.len() as u64;
+    new_data.extend_from_slice(&data[obj..obj + HEADER_LEN + header.len_bytes as usize]);
+    new_obj
+}
+
+fn forward_address(data: &[u8], obj: usize) -> u64 {
+    debug_assert!(header(data, obj).forwarded);
+    let address = data[obj + 1..obj + HEADER_LEN].first_chunk().unwrap();
+    u64::from_ne_bytes(*address)
+}
+
+fn set(data: &mut [u8], obj: usize, index: usize, value: u64) {
+    let i = obj + HEADER_LEN + index * 8;
+    let bytes = data[i..].first_chunk_mut().unwrap();
+    *bytes = value.to_ne_bytes();
+}
+
+fn get(data: &[u8], obj: usize, index: usize) -> u64 {
+    let i = obj + HEADER_LEN + index * 8;
+    let bytes = data[i..].first_chunk().unwrap();
+    u64::from_ne_bytes(*bytes)
 }
 
 const HEADER_LEN: usize = mem::size_of::<ObjHeader>();
 
+const _: () = {
+    assert!(HEADER_LEN == 9);
+};
+
 #[derive(Clone, Copy)]
 #[repr(packed)]
 struct ObjHeader {
-    #[allow(dead_code)]
     forwarded: bool,
     layout: LayoutId,
-    len: u32,
+    len_bytes: u32,
+    _padding: u16,
 }
 
 impl ObjHeader {
