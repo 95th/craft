@@ -9,14 +9,12 @@ use crate::{
     bind::{BindCtxt, SymbolId},
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
-    types::{StdTypes, Ty, TyId},
+    types::{StdTypes, Ty, TyId, TyTable},
 };
-
-pub type TypesTable = InPlaceUnificationTable<TyId>;
 
 pub struct TyCtxt {
     pub bcx: BindCtxt,
-    pub types: TypesTable,
+    pub types: TyTable,
     pub struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
@@ -28,7 +26,7 @@ pub struct TypeChecker<'a> {
     interner: &'a StrInterner,
     diagnostics: &'a mut Diagnostics,
     bcx: BindCtxt,
-    types: TypesTable,
+    types: TyTable,
     std: StdTypes,
     has_error: bool,
     containing_return_ty: Option<TyId>,
@@ -202,7 +200,7 @@ fn check_unbound_types(c: &mut TypeChecker) {
     }
 }
 
-fn has_unknown_type(types: &mut TypesTable, ty: TyId) -> bool {
+fn has_unknown_type(types: &mut TyTable, ty: TyId) -> bool {
     match types.probe_value(ty) {
         Ty::Unknown | Ty::UnknownInt => true,
         Ty::Unit

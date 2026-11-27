@@ -4,6 +4,8 @@ use ena::unify::{InPlaceUnificationTable, NoError, UnifyKey, UnifyValue};
 
 use crate::bind::SymbolId;
 
+pub type TyTable = InPlaceUnificationTable<TyId>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
     Unknown,
@@ -32,7 +34,7 @@ pub struct StdTypes {
 }
 
 impl StdTypes {
-    pub fn new(table: &mut InPlaceUnificationTable<TyId>) -> Self {
+    pub fn new(table: &mut TyTable) -> Self {
         Self {
             boolean: table.new_key(Ty::Bool),
             f64: table.new_key(Ty::F64),
