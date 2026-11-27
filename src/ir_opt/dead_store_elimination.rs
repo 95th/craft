@@ -63,9 +63,10 @@ fn is_pure(value: &ir::RValue) -> bool {
         | ir::RValue::Not(_)
         | ir::RValue::F64Neg(_)
         | ir::RValue::I64Neg(_) => true,
-        ir::RValue::Struct { .. } | ir::RValue::Array { .. } | ir::RValue::ArrayRepeat { .. } => {
-            false
-        }
+        ir::RValue::String(..)
+        | ir::RValue::Struct { .. }
+        | ir::RValue::Array { .. }
+        | ir::RValue::ArrayRepeat { .. } => false,
         ir::RValue::Binary { op, .. } => !matches!(op, ir::BinaryOp::I64Div | ir::BinaryOp::U64Div),
     }
 }

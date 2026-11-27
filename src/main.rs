@@ -1531,4 +1531,23 @@ mod tests {
         "#;
         run_err(source, Error::TypeCheck)
     }
+
+    #[test]
+    fn test_safepoint() {
+        let source = r#"
+            struct Foo {
+                a: string,
+                b: string
+            }
+
+            fn bar(a: string, b: string) -> Foo {
+                Foo { a: a, b: b }
+            }
+
+            let s = "keep";
+            let foo = bar("hello", "world");
+            print(s);
+        "#;
+        run_ok(source)
+    }
 }

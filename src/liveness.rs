@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 
 use crate::ir::{self, RegId};
 
+#[derive(Default)]
 pub struct Liveness {
     pub live_in: FxHashMap<ir::BasicBlockId, BitVec>,
     pub live_out: FxHashMap<ir::BasicBlockId, BitVec>,

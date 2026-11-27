@@ -128,7 +128,7 @@ impl ConstPropagation {
                 self.rewrite_operand(index);
                 self.rewrite_operand(value);
             }
-            ir::Statement::ImplicitDef { .. } => {}
+            ir::Statement::Param { .. } => {}
             ir::Statement::Print(operand, ..) => self.rewrite_operand(operand),
             ir::Statement::Call { callee, .. } => self.rewrite_operand(callee),
             ir::Statement::Assert(operand) => self.rewrite_operand(operand),
@@ -164,7 +164,7 @@ impl ConstPropagation {
             ir::RValue::I64Neg(operand) => {
                 self.rewrite_operand(operand);
             }
-            ir::RValue::Struct { .. } | ir::RValue::Array { .. } => {}
+            ir::RValue::String(..) | ir::RValue::Struct { .. } | ir::RValue::Array { .. } => {}
             ir::RValue::ArrayRepeat { value, count, .. } => {
                 self.rewrite_operand(value);
                 self.rewrite_operand(count);

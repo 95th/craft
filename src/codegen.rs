@@ -25,7 +25,8 @@ pub struct Codegen<'a> {
     next_scratch_reg: Reg,
     max_scratch_reg: Reg,
     stmt_idx: usize,
-    safepoints: Vec<(usize, usize)>,
+    curr_fn: ir::BasicBlockId,
+    curr_liveness: Liveness,
 }
 
 impl<'a> Codegen<'a> {
@@ -43,7 +44,8 @@ impl<'a> Codegen<'a> {
             next_scratch_reg: 0,
             max_scratch_reg: 0,
             stmt_idx: 0,
-            safepoints: Vec::new(),
+            curr_fn: ir::BasicBlockId::MAX,
+            curr_liveness: Liveness::default(),
         }
     }
 
@@ -85,10 +87,10 @@ impl<'a> Codegen<'a> {
     }
 
     fn gen_function(&mut self, function: ir::BasicBlockId) {
-        let liveness = LivenessAnalysis::new(self.ir).compute(function);
-        self.allocate_registers(&liveness, function);
+        self.curr_fn = function;
+        self.curr_liveness = LivenessAnalysis::new(self.ir).compute(function);
+        self.allocate_registers();
         self.stmt_idx = 0;
-        self.safepoints.clear();
         let offset = self.code.start_function();
         let mut offsets = FxHashMap::default();
         let blocks = self.ir.reachable_reverse_postorder(function);
@@ -104,11 +106,11 @@ impl<'a> Codegen<'a> {
             self.code.patch_jump(patch_offset, offsets[&block]);
         }
         self.code.update_frame_size(offset, self.max_scratch_reg);
-        self.gen_safepoints(&liveness, function);
     }
 
-    fn allocate_registers(&mut self, liveness: &Liveness, function: ir::BasicBlockId) {
-        let mut intervals: Vec<_> = liveness
+    fn allocate_registers(&mut self) {
+        let mut intervals: Vec<_> = self
+            .curr_liveness
             .reg_interval
             .iter()
             .copied()
@@ -123,7 +125,7 @@ impl<'a> Codegen<'a> {
             .collect();
         intervals.sort_by_key(|(_, i)| i.start);
 
-        let reg_groups = self.collect_reg_groups(function);
+        let reg_groups = self.collect_reg_groups();
 
         self.reg_map.clear();
         let mut active_ir_regs = FxHashSet::default();
@@ -166,7 +168,7 @@ impl<'a> Codegen<'a> {
                         live.push(true);
                     }
                     self.reg_map.insert(ir_reg, reg as Reg);
-                    let interval = liveness.reg_interval[ir_reg as usize];
+                    let interval = self.curr_liveness.reg_interval[ir_reg as usize];
                     active.insert(reg as Reg, (ir_reg, interval.end));
                     active_ir_regs.insert(ir_reg);
                 }
@@ -189,12 +191,10 @@ impl<'a> Codegen<'a> {
         self.max_scratch_reg = self.next_reg;
     }
 
-    fn collect_reg_groups(
-        &self,
-        entry: ir::BasicBlockId,
-    ) -> FxHashMap<ir::RegId, (ir::RegId, ir::RegId)> {
+    fn collect_reg_groups(&self) -> FxHashMap<ir::RegId, (ir::RegId, ir::RegId)> {
         let mut out = FxHashMap::default();
-        for block in self.ir.reachable_postorder(entry) {
+        let mut param_max = 0;
+        for block in self.ir.reachable_postorder(self.curr_fn) {
             for stmt in self.ir.basic_blocks[block].statements.iter() {
                 match *stmt {
                     ir::Statement::Assign { ref value, .. } => match value {
@@ -219,8 +219,16 @@ impl<'a> Codegen<'a> {
                             out.insert(reg, (start, end));
                         }
                     }
+                    ir::Statement::Param { reg } => {
+                        param_max = param_max.max(reg);
+                    }
                     _ => {}
                 }
+            }
+        }
+        if param_max > 0 {
+            for reg in 0..=param_max {
+                out.insert(reg, (0, param_max));
             }
         }
         out
@@ -294,7 +302,7 @@ impl<'a> Codegen<'a> {
                 let value = self.gen_operand(value);
                 self.code.op_set_struct_index(reg, index, value);
             }
-            ir::Statement::ImplicitDef { .. } => {}
+            ir::Statement::Param { .. } => {}
             ir::Statement::Print(operand, ty) => {
                 let value = self.gen_operand(operand);
                 match self.tcx.types.probe_value(ty) {
@@ -313,24 +321,24 @@ impl<'a> Codegen<'a> {
             ir::Statement::Call {
                 callee, return_reg, ..
             } => {
-                self.record_safepoint();
+                let return_reg = self.gen_reg(return_reg);
                 match callee {
                     ir::Operand::Constant(constant) => {
                         let ir::Constant::Function(id) = constant else {
                             unreachable!()
                         };
-                        let return_reg = self.gen_reg(return_reg);
                         let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                         self.code.op_call_imm(return_reg, 0);
                         self.function_worklist.push((id, offset, true));
                     }
                     ir::Operand::Reg(reg) => {
                         let callee = self.gen_reg(reg);
-                        let return_reg = self.gen_reg(return_reg);
                         self.code.op_copy(return_reg, callee);
                         self.code.op_call(return_reg);
                     }
                 }
+                let live = self.get_live_regs();
+                self.code.add_safepoint(self.code.len(), live);
             }
         }
     }
@@ -360,11 +368,17 @@ impl<'a> Codegen<'a> {
                 let reg = self.gen_operand(operand);
                 self.code.op_neg_i64(dest, reg);
             }
+            ir::RValue::String(s) => {
+                let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
+                self.code.op_string(dest, 0);
+                self.string_worklist.push((s, offset));
+                let live = self.get_live_regs();
+                self.code.add_safepoint(self.code.len(), live);
+            }
             ir::RValue::Struct {
                 ref fields,
                 ref ref_map,
             } => {
-                self.record_safepoint();
                 let first = fields.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code.op_struct(
                     dest,
@@ -372,26 +386,40 @@ impl<'a> Codegen<'a> {
                     fields.len() as u8,
                     Layout::Struct(ref_map.clone()),
                 );
+                let mut live = self.get_live_regs();
+                for r in fields {
+                    set_bit(&mut live, self.gen_reg(*r) as usize);
+                }
+                self.code.add_safepoint(self.code.len(), live);
             }
             ir::RValue::Array {
                 ref elements,
                 is_ref,
             } => {
-                self.record_safepoint();
                 let first = elements.first().map_or(dest, |f| self.gen_reg(*f));
                 self.code
                     .op_struct(dest, first, elements.len() as u8, Layout::Array(is_ref));
+
+                let mut live = self.get_live_regs();
+                for r in elements {
+                    set_bit(&mut live, self.gen_reg(*r) as usize);
+                }
+                self.code.add_safepoint(self.code.len(), live);
             }
             ir::RValue::ArrayRepeat {
                 value,
                 count,
                 is_ref,
             } => {
-                self.record_safepoint();
                 let value = self.gen_operand(value);
                 let count = self.gen_operand(count);
                 self.code
                     .op_repeat_struct(dest, value, count, Layout::Array(is_ref));
+
+                let mut live = self.get_live_regs();
+                set_bit(&mut live, value as usize);
+                set_bit(&mut live, count as usize);
+                self.code.add_safepoint(self.code.len(), live);
             }
         }
     }
@@ -564,12 +592,6 @@ impl<'a> Codegen<'a> {
                 let x = x.to_bits();
                 self.code.op_const(dest, x);
             }
-            ir::Constant::String(s) => {
-                self.record_safepoint();
-                let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
-                self.code.op_string(dest, 0);
-                self.string_worklist.push((s, offset));
-            }
             ir::Constant::Function(id) => {
                 let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_const(dest, 0);
@@ -578,25 +600,23 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn record_safepoint(&mut self) {
-        self.safepoints.push((self.stmt_idx, self.code.len()))
-    }
-
-    fn gen_safepoints(&mut self, liveness: &Liveness, function: ir::BasicBlockId) {
-        let ref_map = &self.ir.reg_maps[&function];
-        for &(stmt_idx, offset) in self.safepoints.iter() {
-            let mut live = BitVec::repeat(false, self.max_scratch_reg as usize);
-            for (i, interval) in liveness.reg_interval.iter().enumerate() {
-                if interval.start < stmt_idx && interval.end > stmt_idx {
-                    if !ref_map[i] {
-                        continue;
-                    }
-                    let reg = self.gen_reg(i as ir::RegId) as usize;
-                    live.set(reg, true);
+    fn get_live_regs(&mut self) -> BitVec {
+        let ref_map = &self.ir.reg_maps[&self.curr_fn];
+        let mut live = BitVec::new();
+        for (i, interval) in self.curr_liveness.reg_interval.iter().enumerate() {
+            if interval.start < self.stmt_idx && interval.end > self.stmt_idx {
+                if !ref_map[i] {
+                    // not a reference slot
+                    continue;
                 }
+                let reg = self.gen_reg(i as ir::RegId) as usize;
+                while reg >= live.len() {
+                    live.push(false);
+                }
+                live.set(reg, true);
             }
-            self.code.add_safepoint(offset, live);
         }
+        live
     }
 
     fn gen_reg(&self, reg_id: ir::RegId) -> Reg {
@@ -613,4 +633,11 @@ impl<'a> Codegen<'a> {
         self.max_scratch_reg = self.max_scratch_reg.max(self.next_scratch_reg);
         self.next_scratch_reg = self.next_reg;
     }
+}
+
+fn set_bit(vec: &mut BitVec, index: usize) {
+    while index >= vec.len() {
+        vec.push(false);
+    }
+    vec.set(index, true);
 }

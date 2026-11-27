@@ -85,9 +85,6 @@ impl<'a> Lowering<'a> {
             unreachable!()
         };
         self.return_reg = self.new_reg(return_ty);
-        self.push_stmt(Statement::ImplicitDef {
-            reg: self.return_reg,
-        });
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
@@ -102,7 +99,7 @@ impl<'a> Lowering<'a> {
                 let mut ref_map = BitVec::with_capacity(ty.len());
                 for &ty in ty.iter() {
                     let reg = self.new_reg(ty);
-                    self.push_stmt(Statement::ImplicitDef { reg });
+                    self.push_stmt(Statement::Param { reg });
                     fields.push(reg);
                     ref_map.push(self.is_ref_ty(ty));
                 }
@@ -127,7 +124,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Stmt::Param { .. } => {
                 let (reg, symbol) = self.new_reg_for_decl(stmt);
-                self.push_stmt(Statement::ImplicitDef { reg });
+                self.push_stmt(Statement::Param { reg });
                 self.symbol_registers.insert(symbol, reg);
             }
             _ => {}
@@ -160,7 +157,6 @@ impl<'a> Lowering<'a> {
                     Operand::Constant(Constant::I64(x as i64))
                 }
             }
-            ast::Expr::String(s) => Operand::Constant(Constant::String(s)),
             _ => {
                 let dest = self.new_reg_for_expr(expr);
                 self.lower_expr_into(dest, expr);
@@ -191,7 +187,7 @@ impl<'a> Lowering<'a> {
                 self.store_constant(dest, constant);
             }
             ast::Expr::String(s) => {
-                self.store_constant(dest, Constant::String(s));
+                self.store_value(dest, RValue::String(s));
             }
             ast::Expr::Binary {
                 lhs,
@@ -716,7 +712,7 @@ pub enum Statement {
         index: Operand,
         value: Operand,
     },
-    ImplicitDef {
+    Param {
         reg: RegId,
     },
     Call {
@@ -760,6 +756,7 @@ pub enum RValue {
     Not(Operand),
     F64Neg(Operand),
     I64Neg(Operand),
+    String(StrId),
     Struct {
         fields: Vec<RegId>,
         ref_map: BitVec,
@@ -782,7 +779,6 @@ pub enum Constant {
     I64(i64),
     U64(u64),
     F64(f64),
-    String(StrId),
     Function(SymbolId),
 }
 
@@ -794,7 +790,6 @@ impl PartialEq for Constant {
             (Self::I64(l), Self::I64(r)) => l == r,
             (Self::U64(l), Self::U64(r)) => l == r,
             (Self::F64(l), Self::F64(r)) => l.to_bits() == r.to_bits(),
-            (Self::String(l), Self::String(r)) => l == r,
             (Self::Function(l), Self::Function(r)) => l == r,
             _ => false,
         }
@@ -975,7 +970,7 @@ impl<'a> Regs<'a> {
                 self.visit_operand(index, visitor);
                 self.visit_operand(value, visitor);
             }
-            Statement::ImplicitDef { reg } => {
+            Statement::Param { reg } => {
                 visitor.on_def(reg);
             }
             Statement::Print(operand, ..) => self.visit_operand(operand, visitor),
@@ -1022,6 +1017,7 @@ impl<'a> Regs<'a> {
             RValue::Not(operand) => self.visit_operand(operand, visitor),
             RValue::F64Neg(operand) => self.visit_operand(operand, visitor),
             RValue::I64Neg(operand) => self.visit_operand(operand, visitor),
+            RValue::String(..) => {}
             RValue::Struct { ref fields, .. } => {
                 for value in fields.iter() {
                     visitor.on_use(*value);

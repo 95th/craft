@@ -56,7 +56,7 @@ impl CopyPropagation {
                 self.rewrite_operand(index);
                 self.rewrite_operand(value);
             }
-            ir::Statement::ImplicitDef { .. } => {}
+            ir::Statement::Param { .. } => {}
             ir::Statement::Print(operand, ..) => self.rewrite_operand(operand),
             ir::Statement::Assert(operand) => self.rewrite_operand(operand),
         }
@@ -79,7 +79,7 @@ impl CopyPropagation {
             RValue::Not(operand) => self.rewrite_operand(operand),
             RValue::F64Neg(operand) => self.rewrite_operand(operand),
             RValue::I64Neg(operand) => self.rewrite_operand(operand),
-            RValue::Struct { .. } | RValue::Array { .. } => {}
+            RValue::String(..) | RValue::Struct { .. } | RValue::Array { .. } => {}
             RValue::ArrayRepeat { value, count, .. } => {
                 self.rewrite_operand(value);
                 self.rewrite_operand(count);
