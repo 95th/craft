@@ -1012,6 +1012,7 @@ mod tests {
             }
 
             foo(1);
+            foo(2);
             foo("Hello");
             foo(30.0);
         "#;
