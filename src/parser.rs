@@ -198,14 +198,14 @@ fn let_declaration(p: &mut Parser) -> StmtId {
     let start = p.prev_span;
     let name = p.token_text();
     p.consume(Identifier, "expect identifier");
-    let type_annotation = if p.eat(Colon) { Some(ty(p)) } else { None };
+    let type_annotation = if p.eat(Colon) { Some(typ(p)) } else { None };
     p.consume(Equal, "expect '='");
     let init = expression(p);
     p.consume(Semicolon, "expect ';'");
     p.ast.stmts.alloc(
         Stmt::Let {
             name,
-            ty: type_annotation,
+            typ: type_annotation,
             init,
         },
         start.to(p.prev_span),
@@ -242,11 +242,11 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
             p.consume(Identifier, "expect identifier");
             let param_span = p.prev_span;
             p.consume(Colon, "expect ':'");
-            let ty = ty(p);
+            let typ = typ(p);
             params.push(
                 p.ast
                     .stmts
-                    .alloc(Stmt::Param { name, ty }, param_span.to(p.prev_span)),
+                    .alloc(Stmt::Param { name, typ }, param_span.to(p.prev_span)),
             );
             if !p.eat(Comma) {
                 break;
@@ -254,7 +254,11 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
         }
     }
     p.consume(CloseParen, "expect ')'");
-    let return_ty = if p.eat(RightArrow) { Some(ty(p)) } else { None };
+    let return_typ = if p.eat(RightArrow) {
+        Some(typ(p))
+    } else {
+        None
+    };
     p.consume(OpenBrace, "expect '{'");
     let body = block_expr(p);
     p.ast.stmts.alloc(
@@ -262,7 +266,7 @@ fn fn_declaration(p: &mut Parser) -> StmtId {
             name,
             type_params,
             params: params.into_boxed_slice(),
-            return_ty,
+            return_typ: return_typ,
             body,
         })),
         start.to(p.prev_span),
@@ -279,7 +283,7 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
         let mut fields = Vec::new();
         if p.token != CloseParen {
             loop {
-                fields.push(ty(p));
+                fields.push(typ(p));
                 if !p.eat(Comma) {
                     break;
                 }
@@ -304,8 +308,8 @@ fn struct_declaration(p: &mut Parser) -> StmtId {
             p.consume(Identifier, "expect identifier");
             let name_span = p.prev_span;
             p.consume(Colon, "expect ':'");
-            let ty = ty(p);
-            if fields.insert(name, ty).is_some() {
+            let typ = typ(p);
+            if fields.insert(name, typ).is_some() {
                 p.error_at("duplicate field", name_span);
             };
             if !p.eat(Comma) {
@@ -329,12 +333,12 @@ fn expression_statement(p: &mut Parser) -> StmtId {
         .alloc(Stmt::Expr { expr, semi }, start.to(p.prev_span))
 }
 
-fn ty(p: &mut Parser) -> TypeId {
+fn typ(p: &mut Parser) -> TypeId {
     match p.token {
-        Identifier => named_ty(p),
-        Fn => fn_ty(p),
-        OpenParen => tuple_ty(p),
-        OpenBracket => array_ty(p),
+        Identifier => named_typ(p),
+        Fn => fn_typ(p),
+        OpenParen => tuple_typ(p),
+        OpenBracket => array_typ(p),
         _ => {
             p.error("unexpected token");
             TypeId::MAX
@@ -342,27 +346,31 @@ fn ty(p: &mut Parser) -> TypeId {
     }
 }
 
-fn named_ty(p: &mut Parser) -> TypeId {
+fn named_typ(p: &mut Parser) -> TypeId {
     let name = p.token_text();
     p.advance();
     p.ast.types.alloc(Type::Named(name), p.prev_span)
 }
 
-fn fn_ty(p: &mut Parser) -> TypeId {
+fn fn_typ(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
     p.consume(OpenParen, "expect '('");
     let mut params = Vec::new();
     if p.token != CloseParen {
         loop {
-            params.push(ty(p));
+            params.push(typ(p));
             if !p.eat(Comma) {
                 break;
             }
         }
     }
     p.consume(CloseParen, "expect ')'");
-    let ret = if p.eat(RightArrow) { Some(ty(p)) } else { None };
+    let ret = if p.eat(RightArrow) {
+        Some(typ(p))
+    } else {
+        None
+    };
     p.ast.types.alloc(
         Type::FnType {
             params: params.into_boxed_slice(),
@@ -372,14 +380,14 @@ fn fn_ty(p: &mut Parser) -> TypeId {
     )
 }
 
-fn tuple_ty(p: &mut Parser) -> TypeId {
+fn tuple_typ(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
     if p.eat(CloseParen) {
         return p.ast.types.alloc(Type::Unit, start.to(p.prev_span));
     }
 
-    let t = ty(p);
+    let t = typ(p);
     if p.eat(CloseParen) {
         return t;
     }
@@ -387,7 +395,7 @@ fn tuple_ty(p: &mut Parser) -> TypeId {
     let mut types = vec![t];
     if p.eat(Comma) {
         loop {
-            types.push(ty(p));
+            types.push(typ(p));
             if !p.eat(Comma) {
                 break;
             }
@@ -399,14 +407,14 @@ fn tuple_ty(p: &mut Parser) -> TypeId {
         .alloc(Type::Tuple(types.into_boxed_slice()), start.to(p.prev_span))
 }
 
-fn array_ty(p: &mut Parser) -> TypeId {
+fn array_typ(p: &mut Parser) -> TypeId {
     p.advance();
     let start = p.prev_span;
-    let element_ty = ty(p);
+    let element_typ = typ(p);
     p.consume(CloseBracket, "expect ']'");
     p.ast
         .types
-        .alloc(Type::Array(element_ty), start.to(p.prev_span))
+        .alloc(Type::Array(element_typ), start.to(p.prev_span))
 }
 
 fn expression(p: &mut Parser) -> ExprId {

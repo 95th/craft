@@ -132,7 +132,7 @@ impl<T> AstArena<T> {
         self.spans[index.idx as usize]
     }
 
-    pub fn bind_type(&self, index: AstId<T>, symbol: SymbolId) {
+    pub fn bind_typ(&self, index: AstId<T>, symbol: SymbolId) {
         let prev = self.type_bindings[index.idx as usize].replace(symbol);
         debug_assert_eq!(prev, SymbolId::MAX);
     }

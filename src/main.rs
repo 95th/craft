@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_wrong_type() {
+    fn test_struct_wrong_typ() {
         let source = r#"
             struct Foo {
                 a: f64

@@ -116,16 +116,16 @@ impl<'a> Binder<'a> {
     }
 
     fn declare_default_types(&mut self) {
-        self.std.i64 = self.declare_default_type("i64");
-        self.std.u64 = self.declare_default_type("u64");
-        self.std.f64 = self.declare_default_type("f64");
-        self.std.string = self.declare_default_type("string");
-        self.std.bool = self.declare_default_type("bool");
+        self.std.i64 = self.declare_default_typ("i64");
+        self.std.u64 = self.declare_default_typ("u64");
+        self.std.f64 = self.declare_default_typ("f64");
+        self.std.string = self.declare_default_typ("string");
+        self.std.bool = self.declare_default_typ("bool");
     }
 
-    fn declare_default_type(&mut self, name: &str) -> SymbolId {
+    fn declare_default_typ(&mut self, name: &str) -> SymbolId {
         let name = self.interner.intern(name);
-        self.declare_type(name, SymbolKind::Builtin, StmtId::MAX)
+        self.declare_typ(name, SymbolKind::Builtin, StmtId::MAX)
     }
 
     fn declare_default_functions(&mut self) {
@@ -138,7 +138,7 @@ impl<'a> Binder<'a> {
         self.declare_fn(name, StmtId::MAX)
     }
 
-    fn declare_type(&mut self, name: StrId, kind: SymbolKind, declaration: StmtId) -> SymbolId {
+    fn declare_typ(&mut self, name: StrId, kind: SymbolKind, declaration: StmtId) -> SymbolId {
         if let Some(s) = self.scopes[self.type_scope].symbols.get(&name) {
             self.diagnostics.push(
                 "already defined in this scope.",
@@ -149,7 +149,7 @@ impl<'a> Binder<'a> {
         }
         let symbol = self.declare_symbol(self.type_scope, name, kind, declaration);
         if declaration != StmtId::MAX {
-            self.ast.stmts.bind_type(declaration, symbol);
+            self.ast.stmts.bind_typ(declaration, symbol);
         }
         symbol
     }
@@ -203,7 +203,7 @@ impl<'a> Binder<'a> {
         symbol
     }
 
-    fn lookup_type(&mut self, name: StrId, span: Span) -> Option<SymbolId> {
+    fn lookup_typ(&mut self, name: StrId, span: Span) -> Option<SymbolId> {
         let mut curr = Some(self.type_scope);
         while let Some(scope_id) = curr {
             let scope = &self.scopes[scope_id];
@@ -299,10 +299,10 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
             b.declare_fn(f.name, stmt);
         }
         Stmt::Struct(s) => {
-            b.declare_type(s.name, SymbolKind::Struct, stmt);
+            b.declare_typ(s.name, SymbolKind::Struct, stmt);
         }
         Stmt::TupleStruct(s) => {
-            b.declare_type(s.name, SymbolKind::Struct, stmt);
+            b.declare_typ(s.name, SymbolKind::Struct, stmt);
             b.declare_fn(s.name, stmt);
         }
         _ => (),
@@ -311,10 +311,10 @@ fn declare_item(b: &mut Binder, stmt: StmtId) {
 
 fn bind_statement(b: &mut Binder, stmt: StmtId) {
     match b.ast.stmts[stmt] {
-        Stmt::Let { name, ty, init } => {
+        Stmt::Let { name, typ, init } => {
             bind_expr(b, init);
-            if let Some(ty) = ty {
-                bind_ty(b, ty);
+            if let Some(typ) = typ {
+                bind_typ(b, typ);
             }
             b.declare_value(name, SymbolKind::Let, stmt);
         }
@@ -329,8 +329,8 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
                 for param in f.params.iter() {
                     bind_statement(b, *param);
                 }
-                if let Some(return_ty) = f.return_ty {
-                    bind_ty(b, return_ty);
+                if let Some(return_typ) = f.return_typ {
+                    bind_typ(b, return_typ);
                 }
                 let prev_loop_depth = std::mem::replace(&mut b.loop_depth, 0);
                 b.fn_depth += 1;
@@ -341,22 +341,22 @@ fn bind_statement(b: &mut Binder, stmt: StmtId) {
             });
             b.curr_ty_param_scope = prev_curr_fn_type_scope;
         }),
-        Stmt::Param { name, ty } => {
-            bind_ty(b, ty);
+        Stmt::Param { name, typ } => {
+            bind_typ(b, typ);
             b.declare_value(name, SymbolKind::Param, stmt);
         }
         Stmt::TypeParam(name) => {
-            b.declare_type(name, SymbolKind::TypeParam, stmt);
+            b.declare_typ(name, SymbolKind::TypeParam, stmt);
         }
         Stmt::Expr { expr, .. } => bind_expr(b, expr),
         Stmt::Struct(ref s) => {
-            for ty in s.fields.values() {
-                bind_ty(b, *ty)
+            for typ in s.fields.values() {
+                bind_typ(b, *typ)
             }
         }
         Stmt::TupleStruct(ref s) => {
-            for ty in s.fields.iter() {
-                bind_ty(b, *ty)
+            for typ in s.fields.iter() {
+                bind_typ(b, *typ)
             }
         }
     }
@@ -433,7 +433,7 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
             bind_expr(b, obj);
         }
         Expr::Struct(ref s) => {
-            if let Some(symbol) = b.lookup_type(s.name, b.ast.exprs.span(node)) {
+            if let Some(symbol) = b.lookup_typ(s.name, b.ast.exprs.span(node)) {
                 b.ast.exprs.bind_value(node, symbol);
             }
 
@@ -479,27 +479,27 @@ fn bind_expr(b: &mut Binder, node: ExprId) {
     }
 }
 
-fn bind_ty(b: &mut Binder, node: TypeId) {
+fn bind_typ(b: &mut Binder, node: TypeId) {
     match b.ast.types[node] {
         Type::Named(name) => {
-            if let Some(symbol) = b.lookup_type(name, b.ast.types.span(node)) {
-                b.ast.types.bind_type(node, symbol);
+            if let Some(symbol) = b.lookup_typ(name, b.ast.types.span(node)) {
+                b.ast.types.bind_typ(node, symbol);
             }
         }
         Type::FnType { ref params, ret } => {
             for p in params {
-                bind_ty(b, *p);
+                bind_typ(b, *p);
             }
             if let Some(ret) = ret {
-                bind_ty(b, ret);
+                bind_typ(b, ret);
             }
         }
         Type::Unit => {}
         Type::Tuple(ref types) => {
             for t in types {
-                bind_ty(b, *t);
+                bind_typ(b, *t);
             }
         }
-        Type::Array(t) => bind_ty(b, t),
+        Type::Array(t) => bind_typ(b, t),
     }
 }

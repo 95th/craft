@@ -8,7 +8,7 @@ use crate::{
     ir,
     liveness::{Interval, Liveness, LivenessAnalysis},
     typechecker::TyCtxt,
-    types::Ty,
+    types::Typ,
 };
 
 pub struct Codegen<'a> {
@@ -302,14 +302,14 @@ impl<'a> Codegen<'a> {
                 self.code.op_set_struct_index(reg, index, value);
             }
             ir::Statement::Param { .. } => {}
-            ir::Statement::Print(operand, ty) => {
+            ir::Statement::Print(operand, typ) => {
                 let value = self.gen_operand(operand);
-                match self.tcx.types.probe_value(ty) {
-                    Ty::F64 => self.code.op_print_f64(value),
-                    Ty::I64 => self.code.op_print_i64(value),
-                    Ty::U64 => self.code.op_print_u64(value),
-                    Ty::String => self.code.op_print_string(value),
-                    Ty::Bool => self.code.op_print_bool(value),
+                match self.tcx.types.probe_value(typ) {
+                    Typ::F64 => self.code.op_print_f64(value),
+                    Typ::I64 => self.code.op_print_i64(value),
+                    Typ::U64 => self.code.op_print_u64(value),
+                    Typ::String => self.code.op_print_string(value),
+                    Typ::Bool => self.code.op_print_bool(value),
                     _ => self.code.op_print_obj(value),
                 }
             }

@@ -9,7 +9,7 @@ use crate::{
     bind::{SymbolId, SymbolKind},
     interner::StrId,
     typechecker::TyCtxt,
-    types::{CanonicalTy, Ty, TyId},
+    types::{CanonicalTy, Typ, TypId},
 };
 
 #[derive(Clone, Copy)]
@@ -30,7 +30,7 @@ pub struct Lowering<'a> {
     return_reg: RegId,
     reg_maps: FxHashMap<BasicBlockId, BitVec>,
     fn_registry: FnRegistry,
-    subst: FxHashMap<TyId, TyId>,
+    subst: FxHashMap<TypId, TypId>,
 }
 
 impl<'a> Lowering<'a> {
@@ -86,11 +86,11 @@ impl<'a> Lowering<'a> {
 
     fn lower_function(&mut self, function: ast::StmtId) {
         let symbol = self.ast.stmts.value_binding(function);
-        let ty = self.tcx.symbol_types[&symbol];
-        let Ty::Fn(fn_ty) = self.resolve_ty(ty) else {
+        let typ = self.tcx.symbol_types[&symbol];
+        let Typ::Fn(typ) = self.resolve_typ(typ) else {
             unreachable!()
         };
-        self.return_reg = self.new_reg(fn_ty.ret);
+        self.return_reg = self.new_reg(typ.ret);
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
@@ -100,14 +100,14 @@ impl<'a> Lowering<'a> {
             }
             ast::Stmt::TupleStruct(..) => {
                 let symbol = self.ast.stmts.type_binding(function);
-                let ty = self.tcx.tuple_struct_properties[&symbol].clone();
-                let mut fields = Vec::with_capacity(ty.len());
-                let mut ref_map = BitVec::with_capacity(ty.len());
-                for &ty in ty.iter() {
-                    let reg = self.new_reg(ty);
+                let typ = self.tcx.tuple_struct_properties[&symbol].clone();
+                let mut fields = Vec::with_capacity(typ.len());
+                let mut ref_map = BitVec::with_capacity(typ.len());
+                for &typ in typ.iter() {
+                    let reg = self.new_reg(typ);
                     self.push_stmt(Statement::Param { reg });
                     fields.push(reg);
-                    ref_map.push(self.is_ref_ty(ty));
+                    ref_map.push(self.is_ref_typ(typ));
                 }
                 self.push_stmt(Statement::Assign {
                     reg: self.return_reg,
@@ -138,7 +138,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn lower_expr(&mut self, expr: ast::ExprId) -> Operand {
-        let ty = self.tcx.expr_types[&expr];
+        let typ = self.tcx.expr_types[&expr];
         match self.ast.exprs[expr] {
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
@@ -148,11 +148,11 @@ impl<'a> Lowering<'a> {
                         Operand::Reg(self.symbol_registers[&symbol_id])
                     }
                     SymbolKind::Fn => {
-                        let ty = self.concrete_ty(ty);
-                        let declared_ty = self.tcx.symbol_types[&symbol_id];
+                        let typ = self.concrete_typ(typ);
+                        let declared_typ = self.tcx.symbol_types[&symbol_id];
                         let function_id =
                             self.fn_registry
-                                .create_mono_id(symbol_id, declared_ty, ty, self.tcx);
+                                .create_mono_id(symbol_id, declared_typ, typ, self.tcx);
                         self.function_worklist.push_back(function_id);
                         Operand::Constant(Constant::Function(function_id))
                     }
@@ -162,7 +162,7 @@ impl<'a> Lowering<'a> {
             ast::Expr::Bool(x) => Operand::Constant(Constant::Bool(x)),
             ast::Expr::Number(x) => Operand::Constant(Constant::F64(x)),
             ast::Expr::Int(x) => {
-                if self.resolve_ty(ty) == Ty::U64 {
+                if self.resolve_typ(typ) == Typ::U64 {
                     Operand::Constant(Constant::U64(x as u64))
                 } else {
                     Operand::Constant(Constant::I64(x as i64))
@@ -181,7 +181,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn unsafe_lower_expr_into(&mut self, dest: RegId, expr: ast::ExprId) {
-        let ty = self.tcx.expr_types[&expr];
+        let typ = self.tcx.expr_types[&expr];
         match self.ast.exprs[expr] {
             ast::Expr::Bool(x) => {
                 self.store_constant(dest, Constant::Bool(x));
@@ -190,7 +190,7 @@ impl<'a> Lowering<'a> {
                 self.store_constant(dest, Constant::F64(x));
             }
             ast::Expr::Int(x) => {
-                let constant = if self.resolve_ty(ty) == Ty::U64 {
+                let constant = if self.resolve_typ(typ) == Typ::U64 {
                     Constant::U64(x as u64)
                 } else {
                     Constant::I64(x as i64)
@@ -246,8 +246,8 @@ impl<'a> Lowering<'a> {
                 self.current_block = merge_block;
             }
             ast::Expr::Binary { lhs, op, rhs } => {
-                let lhs_ty = self.tcx.expr_types[&lhs];
-                let op = BinaryOp::from_ast(op, self.resolve_ty(lhs_ty));
+                let lhs_typ = self.tcx.expr_types[&lhs];
+                let op = BinaryOp::from_ast(op, self.resolve_typ(lhs_typ));
                 let lhs = self.lower_expr(lhs);
                 let rhs = self.lower_expr(rhs);
                 self.store_value(dest, RValue::Binary { op, lhs, rhs });
@@ -258,9 +258,9 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Negate(e) => {
                 let reg = self.lower_expr(e);
-                let value = match self.resolve_ty(ty) {
-                    Ty::F64 => RValue::F64Neg(reg),
-                    Ty::I64 => RValue::I64Neg(reg),
+                let value = match self.resolve_typ(typ) {
+                    Typ::F64 => RValue::F64Neg(reg),
+                    Typ::I64 => RValue::I64Neg(reg),
                     _ => unreachable!(),
                 };
                 self.store_value(dest, value);
@@ -269,8 +269,8 @@ impl<'a> Lowering<'a> {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.tcx.bcx.std.print {
                     let arg = self.lower_expr(args[0]);
-                    let arg_ty = self.tcx.expr_types[&args[0]];
-                    self.push_stmt(Statement::Print(arg, arg_ty));
+                    let arg_typ = self.tcx.expr_types[&args[0]];
+                    self.push_stmt(Statement::Print(arg, arg_typ));
                     return;
                 }
 
@@ -301,7 +301,7 @@ impl<'a> Lowering<'a> {
                 }
             }
             ast::Expr::Array(ref values) => {
-                let Ty::Array(el_ty) = self.resolve_ty(ty) else {
+                let Typ::Array(el_typ) = self.resolve_typ(typ) else {
                     unreachable!()
                 };
                 let regs: Vec<_> = values
@@ -311,7 +311,7 @@ impl<'a> Lowering<'a> {
                 for i in 0..values.len() {
                     self.lower_expr_into(regs[i], values[i]);
                 }
-                let is_ref = self.is_ref_ty(el_ty);
+                let is_ref = self.is_ref_typ(el_typ);
                 self.store_value(
                     dest,
                     RValue::Array {
@@ -326,7 +326,7 @@ impl<'a> Lowering<'a> {
             ast::Expr::ArrayRepeat { expr, count } => {
                 let value = self.lower_expr(expr);
                 let count = self.lower_expr(count);
-                let is_ref = self.has_ref_ty(expr);
+                let is_ref = self.has_ref_typ(expr);
                 self.store_value(
                     dest,
                     RValue::ArrayRepeat {
@@ -347,7 +347,7 @@ impl<'a> Lowering<'a> {
                 for (i, name) in declared.keys().enumerate() {
                     let field = s.fields[name];
                     self.lower_expr_into(regs[i], field);
-                    ref_map.push(self.has_ref_ty(field));
+                    ref_map.push(self.has_ref_typ(field));
                 }
                 self.store_value(
                     dest,
@@ -358,9 +358,9 @@ impl<'a> Lowering<'a> {
                 )
             }
             ast::Expr::StructField { obj, name } => {
-                let obj_ty = self.tcx.expr_types[&obj];
+                let obj_typ = self.tcx.expr_types[&obj];
                 let reg = self.lower_expr(obj);
-                let Ty::Named(symbol) = self.resolve_ty(obj_ty) else {
+                let Typ::Named(symbol) = self.resolve_typ(obj_typ) else {
                     unreachable!();
                 };
                 let properties = &self.tcx.struct_properties[&symbol];
@@ -412,11 +412,11 @@ impl<'a> Lowering<'a> {
                         }
                     }
                     SymbolKind::Fn => {
-                        let ty = self.concrete_ty(ty);
-                        let declared_ty = self.tcx.symbol_types[&symbol_id];
+                        let typ = self.concrete_typ(typ);
+                        let declared_typ = self.tcx.symbol_types[&symbol_id];
                         let function_id =
                             self.fn_registry
-                                .create_mono_id(symbol_id, declared_ty, ty, self.tcx);
+                                .create_mono_id(symbol_id, declared_typ, typ, self.tcx);
                         self.function_worklist.push_back(function_id);
                         self.store_constant(dest, Constant::Function(function_id));
                     }
@@ -475,8 +475,8 @@ impl<'a> Lowering<'a> {
                         });
                     }
                     ast::Expr::StructField { obj, name } => {
-                        let ty = self.tcx.expr_types[&obj];
-                        let Ty::Named(symbol) = self.resolve_ty(ty) else {
+                        let typ = self.tcx.expr_types[&obj];
+                        let Typ::Named(symbol) = self.resolve_typ(typ) else {
                             unreachable!();
                         };
                         let properties = &self.tcx.struct_properties[&symbol];
@@ -615,7 +615,7 @@ impl<'a> Lowering<'a> {
         let mut ref_map = BitVec::with_capacity(fields.len());
         for i in 0..fields.len() {
             self.lower_expr_into(regs[i], fields[i]);
-            ref_map.push(self.has_ref_ty(fields[i]));
+            ref_map.push(self.has_ref_typ(fields[i]));
         }
         self.store_value(
             dest,
@@ -626,15 +626,15 @@ impl<'a> Lowering<'a> {
         )
     }
 
-    fn has_ref_ty(&mut self, expr: ast::ExprId) -> bool {
-        self.is_ref_ty(self.tcx.expr_types[&expr])
+    fn has_ref_typ(&mut self, expr: ast::ExprId) -> bool {
+        self.is_ref_typ(self.tcx.expr_types[&expr])
     }
 
-    fn is_ref_ty(&mut self, ty: TyId) -> bool {
-        match self.resolve_ty(ty) {
-            Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) | Ty::Never => false,
-            Ty::String | Ty::Named(..) | Ty::Tuple(..) | Ty::Array(..) => true,
-            Ty::Unknown | Ty::UnknownInt | Ty::TypeParam(..) => unreachable!(),
+    fn is_ref_typ(&mut self, typ: TypId) -> bool {
+        match self.resolve_typ(typ) {
+            Typ::Unit | Typ::Bool | Typ::F64 | Typ::I64 | Typ::U64 | Typ::Fn(..) | Typ::Never => false,
+            Typ::String | Typ::Named(..) | Typ::Tuple(..) | Typ::Array(..) => true,
+            Typ::Unknown | Typ::UnknownInt | Typ::TypeParam(..) => unreachable!(),
         }
     }
 
@@ -662,18 +662,18 @@ impl<'a> Lowering<'a> {
 
     fn new_reg_for_decl(&mut self, stmt: ast::StmtId) -> (RegId, SymbolId) {
         let symbol = self.ast.stmts.value_binding(stmt);
-        let ty = self.tcx.symbol_types[&symbol];
-        let reg = self.new_reg(ty);
+        let typ = self.tcx.symbol_types[&symbol];
+        let reg = self.new_reg(typ);
         (reg, symbol)
     }
 
     fn new_reg_for_expr(&mut self, expr: ast::ExprId) -> RegId {
-        let ty = self.tcx.expr_types[&expr];
-        self.new_reg(ty)
+        let typ = self.tcx.expr_types[&expr];
+        self.new_reg(typ)
     }
 
-    fn new_reg(&mut self, ty: TyId) -> RegId {
-        let is_ref = self.is_ref_ty(ty);
+    fn new_reg(&mut self, typ: TypId) -> RegId {
+        let is_ref = self.is_ref_typ(typ);
         let reg = self.reg_map.len() as RegId;
         self.reg_map.push(is_ref);
         reg
@@ -695,16 +695,16 @@ impl<'a> Lowering<'a> {
         })
     }
 
-    fn resolve_ty(&mut self, ty: TyId) -> Ty {
-        let ty = self.concrete_ty(ty);
-        self.tcx.types.probe_value(ty)
+    fn resolve_typ(&mut self, typ: TypId) -> Typ {
+        let typ = self.concrete_typ(typ);
+        self.tcx.types.probe_value(typ)
     }
 
-    fn concrete_ty(&mut self, ty: TyId) -> TyId {
+    fn concrete_typ(&mut self, typ: TypId) -> TypId {
         if self.subst.is_empty() {
-            ty
+            typ
         } else {
-            ty.substitute(&mut self.tcx.types, &self.subst)
+            typ.substitute(&mut self.tcx.types, &self.subst)
         }
     }
 }
@@ -721,7 +721,7 @@ struct InstanceKey {
 
 struct FnRegistry {
     map: FxHashMap<InstanceKey, FunctionId>,
-    vec: Vec<(SymbolId, FxHashMap<TyId, TyId>)>,
+    vec: Vec<(SymbolId, FxHashMap<TypId, TypId>)>,
 }
 
 impl FnRegistry {
@@ -735,25 +735,25 @@ impl FnRegistry {
     fn create_mono_id(
         &mut self,
         symbol: SymbolId,
-        declared_ty: TyId,
-        actual_ty: TyId,
+        declared_typ: TypId,
+        actual_typ: TypId,
         tcx: &mut TyCtxt,
     ) -> FunctionId {
         if cfg!(feature = "trace") {
-            let declared = declared_ty.debug(&mut tcx.types);
-            let actual = actual_ty.debug(&mut tcx.types);
+            let declared = declared_typ.debug(&mut tcx.types);
+            let actual = actual_typ.debug(&mut tcx.types);
             println!("Computing the substitution map from {declared} to {actual}");
         }
         let mut subst = FxHashMap::default();
-        let type_params = if let Some(type_params) = declared_ty.type_params(&mut tcx.types) {
+        let type_params = if let Some(type_params) = declared_typ.type_params(&mut tcx.types) {
             for &typ in type_params.iter() {
-                if let Ty::TypeParam(..) = tcx.types.probe_value(typ) {
-                    subst.insert(typ, tcx.types.new_key(Ty::Unknown));
+                if let Typ::TypeParam(..) = tcx.types.probe_value(typ) {
+                    subst.insert(typ, tcx.types.new_key(Typ::Unknown));
                 }
             }
             if !subst.is_empty() {
-                let subst_ty = declared_ty.substitute(&mut tcx.types, &subst);
-                subst_ty.unify(actual_ty, &mut tcx.types);
+                let subst_typ = declared_typ.substitute(&mut tcx.types, &subst);
+                subst_typ.unify(actual_typ, &mut tcx.types);
             }
             type_params
                 .iter()
@@ -812,7 +812,7 @@ pub enum Statement {
         return_reg: RegId,
         args: Vec<RegId>,
     },
-    Print(Operand, TyId),
+    Print(Operand, TypId),
     Assert(Operand),
 }
 
@@ -934,9 +934,9 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    fn from_ast(op: ast::BinaryOp, ty: Ty) -> Self {
-        match ty {
-            Ty::F64 => match op {
+    fn from_ast(op: ast::BinaryOp, typ: Typ) -> Self {
+        match typ {
+            Typ::F64 => match op {
                 ast::BinaryOp::Add => Self::F64Add,
                 ast::BinaryOp::Sub => Self::F64Sub,
                 ast::BinaryOp::Mul => Self::F64Mul,
@@ -949,7 +949,7 @@ impl BinaryOp {
                 ast::BinaryOp::NotEqual => Self::F64NotEqual,
                 _ => unreachable!(),
             },
-            Ty::I64 => match op {
+            Typ::I64 => match op {
                 ast::BinaryOp::Add => Self::I64Add,
                 ast::BinaryOp::Sub => Self::I64Sub,
                 ast::BinaryOp::Mul => Self::I64Mul,
@@ -964,7 +964,7 @@ impl BinaryOp {
                 ast::BinaryOp::BitAnd => Self::I64And,
                 _ => unreachable!(),
             },
-            Ty::U64 => match op {
+            Typ::U64 => match op {
                 ast::BinaryOp::Add => Self::U64Add,
                 ast::BinaryOp::Sub => Self::U64Sub,
                 ast::BinaryOp::Mul => Self::U64Mul,

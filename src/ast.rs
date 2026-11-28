@@ -96,7 +96,7 @@ pub enum Expr {
 pub enum Stmt {
     Let {
         name: StrId,
-        ty: Option<TypeId>,
+        typ: Option<TypeId>,
         init: ExprId,
     },
     Expr {
@@ -105,7 +105,7 @@ pub enum Stmt {
     },
     Param {
         name: StrId,
-        ty: TypeId,
+        typ: TypeId,
     },
     Fn(Box<FnDecl>),
     Struct(Box<StructDecl>),
@@ -136,7 +136,7 @@ pub struct FnDecl {
     pub name: StrId,
     pub type_params: Box<[StmtId]>,
     pub params: Box<[StmtId]>,
-    pub return_ty: Option<TypeId>,
+    pub return_typ: Option<TypeId>,
     pub body: ExprId,
 }
 
