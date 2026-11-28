@@ -997,6 +997,28 @@ mod tests {
     }
 
     #[test]
+    fn test_generic_chain() {
+        let source = r#"
+            fn foo<T>(n: T) {
+                bar(n);
+            }
+
+            fn bar<U>(n: U) {
+                baz(n);
+            }
+
+            fn baz<X>(n: X) {
+                print(n);
+            }
+
+            foo(1);
+            foo("Hello");
+            foo(30.0);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
     fn test_generic_printer_cannot_infer() {
         let source = r#"
             fn foo<T>(n: T) {
