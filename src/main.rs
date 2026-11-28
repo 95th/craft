@@ -1658,4 +1658,14 @@ mod tests {
         "#;
         run_ok(source);
     }
+
+    #[test]
+    fn test_huge_arrays() {
+        let source = r#"
+            for (let i = 0; i < 100000; i = i + 1) {
+                let a = [0; i];
+            }
+        "#;
+        run_ok(source);
+    }
 }

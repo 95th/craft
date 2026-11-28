@@ -8,6 +8,8 @@ use rustc_hash::FxHashMap;
 
 use crate::arena::{Arena, Id};
 
+const INITIAL_HEAP_SIZE: usize = 100 * 1024;
+
 pub struct Heap {
     storage: HeapStorage,
     layouts: Layouts,
@@ -16,9 +18,13 @@ pub struct Heap {
 impl Heap {
     pub fn new(layouts: Layouts) -> Self {
         Self {
-            storage: HeapStorage::new(),
+            storage: HeapStorage::with_capacity(INITIAL_HEAP_SIZE),
             layouts,
         }
+    }
+
+    pub fn can_allocate(&self, len: usize) -> bool {
+        self.storage.can_allocate(len)
     }
 
     pub fn alloc_struct(&mut self, data: &[u64], layout: LayoutId) -> usize {
@@ -74,8 +80,13 @@ impl Heap {
         true
     }
 
-    pub fn gc(&mut self, roots: Vec<(u64, GcRoot)>, mut callback: impl FnMut(u64, GcRoot)) {
-        let mut storage = HeapStorage::new();
+    pub fn gc_and_reserve(
+        &mut self,
+        additional_len: usize,
+        roots: Vec<(u64, GcRoot)>,
+        mut callback: impl FnMut(u64, GcRoot),
+    ) {
+        let mut storage = HeapStorage::with_capacity(INITIAL_HEAP_SIZE);
         for (obj, root) in roots {
             let new_obj = self.storage.forward_obj(obj as usize, &mut storage);
             callback(new_obj, root);
@@ -109,11 +120,24 @@ impl Heap {
             curr += HEADER_LEN + header.len_bytes as usize;
         }
 
+        let needed = storage.len() + additional_len + HEADER_LEN;
+        let new_capacity = if needed * 2 > self.storage.capacity() {
+            std::cmp::max(needed * 2, self.storage.capacity() * 2)
+        } else if needed * 2 < self.storage.capacity() / 4 {
+            std::cmp::max(self.storage.capacity() / 2, INITIAL_HEAP_SIZE)
+        } else {
+            self.storage.capacity()
+        };
+        let to_reserve = new_capacity - storage.len();
+        storage.reserve(to_reserve);
+
         if cfg!(feature = "trace") {
             println!(
-                "GC: before: {}, after: {}",
+                "GC: before: {}(capacity: {}), after: {}(capacity: {})",
                 self.storage.len(),
-                storage.len()
+                self.storage.capacity(),
+                storage.len(),
+                storage.capacity()
             );
         }
 
@@ -126,8 +150,14 @@ struct HeapStorage {
 }
 
 impl HeapStorage {
-    fn new() -> Self {
-        Self { data: Vec::new() }
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn can_allocate(&self, len_bytes: usize) -> bool {
+        self.len() + len_bytes + HEADER_LEN <= self.capacity()
     }
 
     fn header(&self, obj: usize) -> ObjHeader {

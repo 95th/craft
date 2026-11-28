@@ -116,15 +116,17 @@ impl VM {
                 Opcode::String => {
                     let dest = self.frame.read_u16();
                     let index = self.frame.read_u64() as usize;
-                    self.gc_if_required();
-                    let obj = *self.string_pool.entry(index).or_insert_with(|| {
+                    let obj = if let Some(&obj) = self.string_pool.get(&index) {
+                        obj
+                    } else {
                         let len = self.code[index..].first_chunk().unwrap();
                         let len = u32::from_ne_bytes(*len) as usize;
+                        self.reserve_heap(len);
                         let index = index + 4;
                         let data = &self.code[index..index + len];
                         let obj = self.heap.alloc_string(data);
                         obj as u64
-                    });
+                    };
                     self.store(dest, obj);
                 }
                 Opcode::Call => {
@@ -162,7 +164,7 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let first = self.frame.read_u16();
                     let count = self.frame.read_u8();
-                    self.gc_if_required();
+                    self.reserve_heap(count as usize * 8);
                     let i = self.frame.sp + first as usize;
                     let args = &self.stack[i..i + count as usize];
                     let obj = self.heap.alloc_struct(args, layout);
@@ -173,9 +175,9 @@ impl VM {
                     let dest = self.frame.read_u16();
                     let value = self.frame.read_u16();
                     let count = self.frame.read_u16();
-                    self.gc_if_required();
-                    let value = self.load(value);
                     let count = self.load(count) as usize;
+                    self.reserve_heap(count * 8);
+                    let value = self.load(value);
                     let data = vec![value; count];
                     let obj = self.heap.alloc_struct(&data, layout);
                     self.store(dest, obj as u64);
@@ -674,7 +676,11 @@ impl VM {
         }
     }
 
-    fn gc_if_required(&mut self) {
+    fn reserve_heap(&mut self, additional: usize) {
+        if self.heap.can_allocate(additional) {
+            return;
+        }
+
         let mut roots = Vec::new();
         let mut collect_roots = |frame: &CallFrame| {
             let ip = frame.ip as usize - self.code.as_ptr() as usize;
@@ -690,14 +696,15 @@ impl VM {
         for (str_offset, obj) in self.string_pool.iter() {
             roots.push((*obj, GcRoot::StringPool(*str_offset)))
         }
-        self.heap.gc(roots, |new_obj, root| match root {
-            GcRoot::StringPool(i) => {
-                self.string_pool.insert(i, new_obj);
-            }
-            GcRoot::Stack(i) => {
-                self.stack[i] = new_obj;
-            }
-        });
+        self.heap
+            .gc_and_reserve(additional, roots, |new_obj, root| match root {
+                GcRoot::StringPool(i) => {
+                    self.string_pool.insert(i, new_obj);
+                }
+                GcRoot::Stack(i) => {
+                    self.stack[i] = new_obj;
+                }
+            });
     }
 }
 
