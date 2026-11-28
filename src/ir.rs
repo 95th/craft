@@ -269,7 +269,7 @@ impl<'a> Lowering<'a> {
                 let symbol = self.ast.exprs.value_binding(callee);
                 if symbol == self.tcx.bcx.std.print {
                     let arg = self.lower_expr(args[0]);
-                    let arg_typ = self.tcx.expr_types[&args[0]];
+                    let arg_typ = self.concrete_typ(self.tcx.expr_types[&args[0]]);
                     self.push_stmt(Statement::Print(arg, arg_typ));
                     return;
                 }
@@ -632,7 +632,9 @@ impl<'a> Lowering<'a> {
 
     fn is_ref_typ(&mut self, typ: TypId) -> bool {
         match self.resolve_typ(typ) {
-            Typ::Unit | Typ::Bool | Typ::F64 | Typ::I64 | Typ::U64 | Typ::Fn(..) | Typ::Never => false,
+            Typ::Unit | Typ::Bool | Typ::F64 | Typ::I64 | Typ::U64 | Typ::Fn(..) | Typ::Never => {
+                false
+            }
             Typ::String | Typ::Named(..) | Typ::Tuple(..) | Typ::Array(..) => true,
             Typ::Unknown | Typ::UnknownInt | Typ::TypeParam(..) => unreachable!(),
         }

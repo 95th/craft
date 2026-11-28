@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use bitvec::vec::BitVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -17,7 +19,7 @@ pub struct Codegen<'a> {
     interner: &'a StrInterner,
     code: Code,
     jump_worklist: Vec<(ir::BasicBlockId, usize)>,
-    function_worklist: Vec<(ir::FunctionId, usize, bool)>,
+    function_worklist: VecDeque<(ir::FunctionId, usize, bool)>,
     string_worklist: Vec<(StrId, usize)>,
     reg_map: FxHashMap<u32, Reg>,
     next_reg: Reg,
@@ -36,7 +38,7 @@ impl<'a> Codegen<'a> {
             interner,
             code: Code::new(),
             jump_worklist: Vec::new(),
-            function_worklist: Vec::new(),
+            function_worklist: VecDeque::new(),
             string_worklist: Vec::new(),
             reg_map: FxHashMap::default(),
             next_reg: 0,
@@ -55,7 +57,7 @@ impl<'a> Codegen<'a> {
         self.gen_function(self.ir.main);
 
         let mut functions = FxHashMap::default();
-        while let Some((function, patch_offset, immediate)) = self.function_worklist.pop() {
+        while let Some((function, patch_offset, immediate)) = self.function_worklist.pop_front() {
             let function = *functions.entry(function).or_insert_with(|| {
                 let function_offset = self.code.len();
                 self.gen_function(self.ir.functions[&function]);
@@ -328,7 +330,7 @@ impl<'a> Codegen<'a> {
                         };
                         let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                         self.code.op_call_imm(return_reg, 0);
-                        self.function_worklist.push((id, offset, true));
+                        self.function_worklist.push_back((id, offset, true));
                     }
                     ir::Operand::Reg(reg) => {
                         let callee = self.gen_reg(reg);
@@ -599,7 +601,7 @@ impl<'a> Codegen<'a> {
             ir::Constant::Function(id) => {
                 let offset = self.code.len() + 1 + std::mem::size_of::<Reg>();
                 self.code.op_const(dest, 0);
-                self.function_worklist.push((id, offset, false));
+                self.function_worklist.push_back((id, offset, false));
             }
         }
     }
