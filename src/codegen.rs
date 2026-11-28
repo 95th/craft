@@ -2,7 +2,6 @@ use bitvec::vec::BitVec;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    bind::SymbolId,
     chunk::{Code, Opcode::*, Reg},
     heap::Layout,
     interner::{StrId, StrInterner},
@@ -18,7 +17,7 @@ pub struct Codegen<'a> {
     interner: &'a StrInterner,
     code: Code,
     jump_worklist: Vec<(ir::BasicBlockId, usize)>,
-    function_worklist: Vec<(SymbolId, usize, bool)>,
+    function_worklist: Vec<(ir::FunctionId, usize, bool)>,
     string_worklist: Vec<(StrId, usize)>,
     reg_map: FxHashMap<u32, Reg>,
     next_reg: Reg,

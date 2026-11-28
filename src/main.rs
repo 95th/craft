@@ -690,6 +690,7 @@ mod tests {
             let f: fn(f64, bool) -> (f64, bool) = foo;
             print(f(10.0, true).0);
             print(f(20.0, false).0);
+            print(foo("hello", 10).0);
         "#;
         run_ok(source);
     }
@@ -710,9 +711,25 @@ mod tests {
     }
 
     #[test]
-    fn test_generic_function_with_generic_args() {
+    fn test_generic_function_with_generic_args_fail_unbound_type_param() {
         let source = r#"
             fn foo<T, U>(a: T, b: fn(T) -> string) -> string {
+                b(a)
+            }
+
+            fn bar<T>(t: T) -> string {
+                "Hello world"
+            }
+
+            print(foo(10, bar));
+        "#;
+        run_err(source, Error::TypeCheck);
+    }
+
+    #[test]
+    fn test_generic_function_with_generic_args_ok() {
+        let source = r#"
+            fn foo<T>(a: T, b: fn(T) -> string) -> string {
                 b(a)
             }
 

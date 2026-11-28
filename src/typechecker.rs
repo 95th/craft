@@ -19,6 +19,7 @@ pub struct TyCtxt {
     pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
     pub symbol_types: FxHashMap<SymbolId, TyId>,
+    pub type_params: FxHashMap<TyId, Vec<TyId>>,
 }
 
 pub struct TypeChecker<'a> {
@@ -86,6 +87,7 @@ impl<'a> TypeChecker<'a> {
             tuple_struct_properties: self.tuple_struct_properties,
             expr_types: self.expr_types,
             symbol_types: self.symbol_types,
+            type_params: self.type_params,
         })
     }
 
@@ -115,7 +117,7 @@ impl<'a> TypeChecker<'a> {
 
     fn unify(&mut self, expected: TyId, actual: TyId, span: Span) {
         if self.can_unify(expected, actual) {
-            self.unify_recursively(expected, actual);
+            expected.unify(actual, &mut self.types);
         } else {
             let expected = expected.display(self);
             let actual = actual.display(self);
@@ -150,33 +152,6 @@ impl<'a> TypeChecker<'a> {
                 .iter()
                 .zip(actual.iter())
                 .all(|(a, b)| self.can_unify(*a, *b))
-    }
-
-    fn unify_recursively(&mut self, expected: TyId, actual: TyId) {
-        if self.types.unioned(expected, actual) {
-            return;
-        }
-        let actual_ty = self.types.probe_value(actual);
-        if actual_ty == Ty::Never {
-            return;
-        }
-        let expected_ty = self.types.probe_value(expected);
-        self.types.union(expected, actual);
-        match (expected_ty, actual_ty) {
-            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => {
-                for (a, b) in a.iter().zip(b.iter()) {
-                    self.unify_recursively(*a, *b);
-                }
-            }
-            (Ty::Fn(a_params, a_ret), Ty::Fn(b_params, b_ret)) => {
-                for (a, b) in a_params.iter().zip(b_params.iter()) {
-                    self.unify_recursively(*a, *b);
-                }
-                self.unify_recursively(a_ret, b_ret);
-            }
-            (Ty::Array(a), Ty::Array(b)) => self.unify_recursively(a, b),
-            _ => {}
-        }
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
@@ -703,45 +678,21 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
 
 fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
     if let Some(type_params) = c.type_params.get(&ty) {
-        let mut subst = FxHashMap::default();
-        for t in type_params {
-            subst.insert(*t, c.types.new_key(Ty::Unknown));
-        }
-        substitute(c, ty, &subst)
+        ty.instantiate(&mut c.types, type_params)
     } else {
         ty
-    }
-}
-
-fn substitute(c: &mut TypeChecker, ty: TyId, subst: &FxHashMap<TyId, TyId>) -> TyId {
-    match c.types.probe_value(ty) {
-        Ty::Fn(params, ret) => {
-            let params = params.iter().map(|p| substitute(c, *p, subst)).collect();
-            let ret = substitute(c, ret, subst);
-            c.types.new_key(Ty::Fn(params, ret))
-        }
-        Ty::Tuple(params) => {
-            let params = params.iter().map(|p| substitute(c, *p, subst)).collect();
-            c.types.new_key(Ty::Tuple(params))
-        }
-        Ty::Array(el) => {
-            let el = substitute(c, el, subst);
-            c.types.new_key(Ty::Array(el))
-        }
-        Ty::TypeParam(_) => subst.get(&ty).copied().unwrap_or(ty),
-        _ => ty,
     }
 }
 
 impl TyId {
     pub fn display(self, c: &mut TypeChecker) -> String {
         let mut buf = String::new();
-        print_type(self, c, &mut buf);
+        write_type(self, c, &mut buf);
         buf
     }
 }
 
-fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
+fn write_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
     match c.types.probe_value(ty) {
         Ty::Named(symbol) | Ty::TypeParam(symbol) => {
             buf.push_str(c.interner.lookup(c.bcx.symbols[symbol].name))
@@ -753,7 +704,7 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
                 let mut sep = "";
                 for p in type_params {
                     buf.push_str(sep);
-                    print_type(p, c, buf);
+                    write_type(p, c, buf);
                     sep = ", ";
                 }
                 buf.push_str(">");
@@ -761,11 +712,11 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
             let mut sep = "";
             for p in params.iter() {
                 buf.push_str(sep);
-                print_type(*p, c, buf);
+                write_type(*p, c, buf);
                 sep = ", ";
             }
             buf.push_str(") -> ");
-            print_type(ret, c, buf);
+            write_type(ret, c, buf);
         }
         Ty::Unit => buf.push_str("()"),
         Ty::Bool => buf.push_str("bool"),
@@ -781,14 +732,14 @@ fn print_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
             let mut sep = "";
             for t in types.iter() {
                 buf.push_str(sep);
-                print_type(*t, c, buf);
+                write_type(*t, c, buf);
                 sep = ", ";
             }
             buf.push_str(")")
         }
         Ty::Array(element) => {
             buf.push_str("[");
-            print_type(element, c, buf);
+            write_type(element, c, buf);
             buf.push_str("]");
         }
     }

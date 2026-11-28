@@ -9,7 +9,7 @@ use crate::{
     bind::{SymbolId, SymbolKind},
     interner::StrId,
     typechecker::TyCtxt,
-    types::{Ty, TyId},
+    types::{CanonicalTy, Ty, TyId},
 };
 
 #[derive(Clone, Copy)]
@@ -24,11 +24,13 @@ pub struct Lowering<'a> {
     basic_blocks: Arena<BasicBlock>,
     reg_map: BitVec,
     current_block: BasicBlockId,
-    function_worklist: VecDeque<SymbolId>,
+    function_worklist: VecDeque<FunctionId>,
     loop_contexts: Vec<LoopContext>,
     symbol_registers: FxHashMap<SymbolId, RegId>,
     return_reg: RegId,
     reg_maps: FxHashMap<BasicBlockId, BitVec>,
+    fn_registry: FnRegistry,
+    subst: FxHashMap<TyId, TyId>,
 }
 
 impl<'a> Lowering<'a> {
@@ -44,6 +46,8 @@ impl<'a> Lowering<'a> {
             symbol_registers: FxHashMap::default(),
             return_reg: RegId::MAX,
             reg_maps: FxHashMap::default(),
+            fn_registry: FnRegistry::new(),
+            subst: FxHashMap::default(),
         }
     }
 
@@ -57,14 +61,16 @@ impl<'a> Lowering<'a> {
             .insert(main, std::mem::take(&mut self.reg_map));
 
         let mut functions = FxHashMap::default();
-        while let Some(symbol) = self.function_worklist.pop_front() {
-            if functions.contains_key(&symbol) {
+        while let Some(function_id) = self.function_worklist.pop_front() {
+            if functions.contains_key(&function_id) {
                 continue;
             }
+            let (symbol, subst) = self.fn_registry.vec[function_id as usize].clone();
             let function = self.tcx.bcx.symbols[symbol].declaration;
             let entry = self.create_block();
-            functions.insert(symbol, entry);
+            functions.insert(function_id, entry);
             self.current_block = entry;
+            self.subst = subst;
             self.lower_function(function);
             self.reg_maps
                 .insert(entry, std::mem::take(&mut self.reg_map));
@@ -81,7 +87,7 @@ impl<'a> Lowering<'a> {
     fn lower_function(&mut self, function: ast::StmtId) {
         let symbol = self.ast.stmts.value_binding(function);
         let ty = self.tcx.symbol_types[&symbol];
-        let Ty::Fn(_, return_ty) = self.tcx.types.probe_value(ty) else {
+        let Ty::Fn(_, return_ty) = self.resolve_ty(ty) else {
             unreachable!()
         };
         self.return_reg = self.new_reg(return_ty);
@@ -132,6 +138,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn lower_expr(&mut self, expr: ast::ExprId) -> Operand {
+        let ty = self.tcx.expr_types[&expr];
         match self.ast.exprs[expr] {
             ast::Expr::Variable(..) => {
                 let symbol_id = self.ast.exprs.value_binding(expr);
@@ -141,8 +148,13 @@ impl<'a> Lowering<'a> {
                         Operand::Reg(self.symbol_registers[&symbol_id])
                     }
                     SymbolKind::Fn => {
-                        self.function_worklist.push_back(symbol_id);
-                        Operand::Constant(Constant::Function(symbol_id))
+                        let ty = self.concrete_ty(ty);
+                        let declared_ty = self.tcx.symbol_types[&symbol_id];
+                        let function_id =
+                            self.fn_registry
+                                .create_mono_id(symbol_id, declared_ty, ty, self.tcx);
+                        self.function_worklist.push_back(function_id);
+                        Operand::Constant(Constant::Function(function_id))
                     }
                     _ => unreachable!(),
                 }
@@ -150,8 +162,7 @@ impl<'a> Lowering<'a> {
             ast::Expr::Bool(x) => Operand::Constant(Constant::Bool(x)),
             ast::Expr::Number(x) => Operand::Constant(Constant::F64(x)),
             ast::Expr::Int(x) => {
-                let ty = self.tcx.expr_types[&expr];
-                if self.tcx.types.probe_value(ty) == Ty::U64 {
+                if self.resolve_ty(ty) == Ty::U64 {
                     Operand::Constant(Constant::U64(x as u64))
                 } else {
                     Operand::Constant(Constant::I64(x as i64))
@@ -179,7 +190,7 @@ impl<'a> Lowering<'a> {
                 self.store_constant(dest, Constant::F64(x));
             }
             ast::Expr::Int(x) => {
-                let constant = if self.tcx.types.probe_value(ty) == Ty::U64 {
+                let constant = if self.resolve_ty(ty) == Ty::U64 {
                     Constant::U64(x as u64)
                 } else {
                     Constant::I64(x as i64)
@@ -236,7 +247,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Binary { lhs, op, rhs } => {
                 let lhs_ty = self.tcx.expr_types[&lhs];
-                let op = BinaryOp::from_ast(op, self.tcx.types.probe_value(lhs_ty));
+                let op = BinaryOp::from_ast(op, self.resolve_ty(lhs_ty));
                 let lhs = self.lower_expr(lhs);
                 let rhs = self.lower_expr(rhs);
                 self.store_value(dest, RValue::Binary { op, lhs, rhs });
@@ -247,7 +258,7 @@ impl<'a> Lowering<'a> {
             }
             ast::Expr::Negate(e) => {
                 let reg = self.lower_expr(e);
-                let value = match self.tcx.types.probe_value(ty) {
+                let value = match self.resolve_ty(ty) {
                     Ty::F64 => RValue::F64Neg(reg),
                     Ty::I64 => RValue::I64Neg(reg),
                     _ => unreachable!(),
@@ -290,7 +301,7 @@ impl<'a> Lowering<'a> {
                 }
             }
             ast::Expr::Array(ref values) => {
-                let Ty::Array(el_ty) = self.tcx.types.probe_value(ty) else {
+                let Ty::Array(el_ty) = self.resolve_ty(ty) else {
                     unreachable!()
                 };
                 let regs: Vec<_> = values
@@ -349,7 +360,7 @@ impl<'a> Lowering<'a> {
             ast::Expr::StructField { obj, name } => {
                 let obj_ty = self.tcx.expr_types[&obj];
                 let reg = self.lower_expr(obj);
-                let Ty::Named(symbol) = self.tcx.types.probe_value(obj_ty) else {
+                let Ty::Named(symbol) = self.resolve_ty(obj_ty) else {
                     unreachable!();
                 };
                 let properties = &self.tcx.struct_properties[&symbol];
@@ -401,8 +412,13 @@ impl<'a> Lowering<'a> {
                         }
                     }
                     SymbolKind::Fn => {
-                        self.function_worklist.push_back(symbol_id);
-                        self.store_constant(dest, Constant::Function(symbol_id));
+                        let ty = self.concrete_ty(ty);
+                        let declared_ty = self.tcx.symbol_types[&symbol_id];
+                        let function_id =
+                            self.fn_registry
+                                .create_mono_id(symbol_id, declared_ty, ty, self.tcx);
+                        self.function_worklist.push_back(function_id);
+                        self.store_constant(dest, Constant::Function(function_id));
                     }
                     _ => unreachable!(),
                 };
@@ -460,7 +476,7 @@ impl<'a> Lowering<'a> {
                     }
                     ast::Expr::StructField { obj, name } => {
                         let ty = self.tcx.expr_types[&obj];
-                        let Ty::Named(symbol) = self.tcx.types.probe_value(ty) else {
+                        let Ty::Named(symbol) = self.resolve_ty(ty) else {
                             unreachable!();
                         };
                         let properties = &self.tcx.struct_properties[&symbol];
@@ -615,11 +631,10 @@ impl<'a> Lowering<'a> {
     }
 
     fn is_ref_ty(&mut self, ty: TyId) -> bool {
-        match self.tcx.types.probe_value(ty) {
-            Ty::TypeParam(..) => true,
+        match self.resolve_ty(ty) {
             Ty::Unit | Ty::Bool | Ty::F64 | Ty::I64 | Ty::U64 | Ty::Fn(..) | Ty::Never => false,
             Ty::String | Ty::Named(..) | Ty::Tuple(..) | Ty::Array(..) => true,
-            Ty::Unknown | Ty::UnknownInt => unreachable!(),
+            Ty::Unknown | Ty::UnknownInt | Ty::TypeParam(..) => unreachable!(),
         }
     }
 
@@ -679,14 +694,87 @@ impl<'a> Lowering<'a> {
             break_target,
         })
     }
+
+    fn resolve_ty(&mut self, ty: TyId) -> Ty {
+        let ty = self.concrete_ty(ty);
+        self.tcx.types.probe_value(ty)
+    }
+
+    fn concrete_ty(&mut self, ty: TyId) -> TyId {
+        if self.subst.is_empty() {
+            ty
+        } else {
+            ty.substitute(&mut self.tcx.types, &self.subst)
+        }
+    }
 }
 
 pub type BasicBlockId = Id<BasicBlock>;
 pub type RegId = u32;
+pub type FunctionId = u32;
+
+#[derive(PartialEq, Eq, Hash)]
+struct InstanceKey {
+    symbol: SymbolId,
+    type_params: Vec<CanonicalTy>,
+}
+
+struct FnRegistry {
+    map: FxHashMap<InstanceKey, FunctionId>,
+    vec: Vec<(SymbolId, FxHashMap<TyId, TyId>)>,
+}
+
+impl FnRegistry {
+    fn new() -> Self {
+        Self {
+            map: FxHashMap::default(),
+            vec: Vec::new(),
+        }
+    }
+
+    fn create_mono_id(
+        &mut self,
+        symbol: SymbolId,
+        declared_ty: TyId,
+        actual_ty: TyId,
+        tcx: &mut TyCtxt,
+    ) -> FunctionId {
+        if cfg!(feature = "trace") {
+            let declared = declared_ty.debug(&mut tcx.types);
+            let actual = actual_ty.debug(&mut tcx.types);
+            println!("Computing the substitution map from {declared} to {actual}");
+        }
+        let mut subst = FxHashMap::default();
+        let type_params = if let Some(type_params) = tcx.type_params.get(&declared_ty) {
+            for t in type_params {
+                subst.insert(*t, tcx.types.new_key(Ty::Unknown));
+            }
+            let subst_ty = declared_ty.substitute(&mut tcx.types, &subst);
+            subst_ty.unify(actual_ty, &mut tcx.types);
+            type_params
+                .iter()
+                .map(|t| subst[t].canonicalize(&mut tcx.types))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let key = InstanceKey {
+            symbol,
+            type_params,
+        };
+        if let Some(id) = self.map.get(&key) {
+            return *id;
+        }
+        let id = self.vec.len() as FunctionId;
+        self.vec.push((symbol, subst));
+        self.map.insert(key, id);
+        id
+    }
+}
 
 pub struct Ir {
     pub main: BasicBlockId,
-    pub functions: FxHashMap<SymbolId, BasicBlockId>,
+    pub functions: FxHashMap<FunctionId, BasicBlockId>,
     pub basic_blocks: Arena<BasicBlock>,
     pub reg_maps: FxHashMap<BasicBlockId, BitVec>,
 }
@@ -779,7 +867,7 @@ pub enum Constant {
     I64(i64),
     U64(u64),
     F64(f64),
-    Function(SymbolId),
+    Function(FunctionId),
 }
 
 impl PartialEq for Constant {
