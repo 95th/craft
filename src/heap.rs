@@ -109,6 +109,14 @@ impl Heap {
             curr += HEADER_LEN + header.len_bytes as usize;
         }
 
+        if cfg!(feature = "trace") {
+            println!(
+                "GC: before: {}, after: {}",
+                self.storage.len(),
+                storage.len()
+            );
+        }
+
         self.storage = storage;
     }
 }

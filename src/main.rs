@@ -1604,4 +1604,58 @@ mod tests {
         "#;
         run_err(source, Error::Bind)
     }
+
+    #[test]
+    fn test_stress_gc() {
+        let source = r#"
+            struct Pair { a: u64, b: string }
+
+            fn make(i: u64) -> Pair {
+                Pair { a: i, b: "tmp" }
+            }
+
+            let keep = Pair { a: 42, b: "keeper" };
+            let keep_str = "survivor";
+
+            let total = 0;
+            for (let i = 0; i < 10000; i = i + 1) {
+                let p = make(i);
+                total = total + p.a;
+            }
+
+            assert(total == 49995000);
+            assert(keep.a == 42);
+            print(keep.b);
+            print(keep_str);
+        "#;
+        run_ok(source);
+    }
+
+    #[test]
+    fn test_stress_gc_deeper() {
+        let source = r#"
+            struct Inner { text: string }
+            struct Outer { id: u64, inner: Inner }
+            struct Pair { a: u64, b: string }
+
+            fn make(i: u64) -> Pair {
+                Pair { a: i, b: "tmp" }
+            }
+
+            let keep = Outer { id: 7, inner: Inner { text: "deep survivor" } };
+            let keep_str = "survivor";
+
+            let total = 0;
+            for (let i = 0; i < 10000; i = i + 1) {
+                let p = make(i);
+                total = total + p.a;
+            }
+
+            assert(total == 49995000);
+            assert(keep.id == 7);
+            print(keep.inner.text);
+            print(keep_str);
+        "#;
+        run_ok(source);
+    }
 }
