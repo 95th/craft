@@ -87,10 +87,10 @@ impl<'a> Lowering<'a> {
     fn lower_function(&mut self, function: ast::StmtId) {
         let symbol = self.ast.stmts.value_binding(function);
         let ty = self.tcx.symbol_types[&symbol];
-        let Ty::Fn(_, return_ty) = self.resolve_ty(ty) else {
+        let Ty::Fn(fn_ty) = self.resolve_ty(ty) else {
             unreachable!()
         };
-        self.return_reg = self.new_reg(return_ty);
+        self.return_reg = self.new_reg(fn_ty.ret);
         match &self.ast.stmts[function] {
             ast::Stmt::Fn(f) => {
                 for &p in f.params.iter() {
@@ -745,15 +745,19 @@ impl FnRegistry {
             println!("Computing the substitution map from {declared} to {actual}");
         }
         let mut subst = FxHashMap::default();
-        let type_params = if let Some(type_params) = tcx.type_params.get(&declared_ty) {
-            for t in type_params {
-                subst.insert(*t, tcx.types.new_key(Ty::Unknown));
+        let type_params = if let Some(type_params) = declared_ty.type_params(&mut tcx.types) {
+            for &typ in type_params.iter() {
+                if let Ty::TypeParam(..) = tcx.types.probe_value(typ) {
+                    subst.insert(typ, tcx.types.new_key(Ty::Unknown));
+                }
             }
-            let subst_ty = declared_ty.substitute(&mut tcx.types, &subst);
-            subst_ty.unify(actual_ty, &mut tcx.types);
+            if !subst.is_empty() {
+                let subst_ty = declared_ty.substitute(&mut tcx.types, &subst);
+                subst_ty.unify(actual_ty, &mut tcx.types);
+            }
             type_params
                 .iter()
-                .map(|t| subst[t].canonicalize(&mut tcx.types))
+                .map(|t| subst.get(t).unwrap_or(t).canonicalize(&mut tcx.types))
                 .collect()
         } else {
             Vec::new()

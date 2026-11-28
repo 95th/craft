@@ -20,9 +20,16 @@ pub enum Ty {
     String,
     Named(SymbolId),
     TypeParam(SymbolId),
-    Fn(Rc<[TyId]>, TyId),
+    Fn(FnTy),
     Tuple(Rc<[TyId]>),
     Array(TyId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnTy {
+    pub type_params: Rc<[TyId]>,
+    pub params: Rc<[TyId]>,
+    pub ret: TyId,
 }
 
 pub struct StdTypes {
@@ -109,10 +116,21 @@ impl TyId {
             Ty::U64 => CanonicalTy::U64,
             Ty::String => CanonicalTy::String,
             Ty::Named(id) => CanonicalTy::Named(id),
-            Ty::Fn(params, ret) => CanonicalTy::Fn {
-                params: params.iter().map(|t| t.canonicalize(table)).collect(),
-                ret: Box::new(ret.canonicalize(table)),
-            },
+            Ty::Fn(f) => {
+                if cfg!(debug_assertions) {
+                    // All type params must be fully resolved here.
+                    for p in f.type_params.iter() {
+                        assert!(!matches!(
+                            table.probe_value(*p),
+                            Ty::TypeParam(..) | Ty::Unknown | Ty::UnknownInt
+                        ));
+                    }
+                }
+                CanonicalTy::Fn {
+                    params: f.params.iter().map(|t| t.canonicalize(table)).collect(),
+                    ret: Box::new(f.ret.canonicalize(table)),
+                }
+            }
             Ty::Tuple(fields) => {
                 CanonicalTy::Tuple(fields.iter().map(|t| t.canonicalize(table)).collect())
             }
@@ -123,9 +141,20 @@ impl TyId {
         }
     }
 
-    pub fn instantiate(self, types: &mut TyTable, type_params: &[TyId]) -> Self {
+    pub fn type_params(self, types: &mut TyTable) -> Option<Rc<[TyId]>> {
+        match types.probe_value(self) {
+            Ty::Fn(f) if !f.type_params.is_empty() => Some(f.type_params.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn instantiate(self, types: &mut TyTable) -> Self {
+        let Some(type_params) = self.type_params(types) else {
+            return self;
+        };
+
         let mut subst = FxHashMap::default();
-        for t in type_params {
+        for t in type_params.iter() {
             subst.insert(*t, types.new_key(Ty::Unknown));
         }
         self.substitute(types, &subst)
@@ -134,10 +163,23 @@ impl TyId {
     pub fn substitute(self, types: &mut TyTable, subst: &FxHashMap<TyId, TyId>) -> TyId {
         let t = types.find(self);
         match types.probe_value(t) {
-            Ty::Fn(params, ret) => {
-                let params = params.iter().map(|p| p.substitute(types, subst)).collect();
-                let ret = ret.substitute(types, subst);
-                types.new_key(Ty::Fn(params, ret))
+            Ty::Fn(f) => {
+                let type_params = f
+                    .type_params
+                    .iter()
+                    .map(|p| p.substitute(types, subst))
+                    .collect();
+                let params = f
+                    .params
+                    .iter()
+                    .map(|p| p.substitute(types, subst))
+                    .collect();
+                let ret = f.ret.substitute(types, subst);
+                types.new_key(Ty::Fn(FnTy {
+                    type_params,
+                    params,
+                    ret,
+                }))
             }
             Ty::Tuple(params) => {
                 let params = params.iter().map(|p| p.substitute(types, subst)).collect();
@@ -168,11 +210,11 @@ impl TyId {
                     lhs.unify(*rhs, table);
                 }
             }
-            (Ty::Fn(lhs_params, lhs_ret), Ty::Fn(rhs_params, rhs_ret)) => {
-                for (lhs_param, rhs_param) in lhs_params.iter().zip(rhs_params.iter()) {
-                    lhs_param.unify(*rhs_param, table);
+            (Ty::Fn(lhs), Ty::Fn(rhs)) => {
+                for (lhs, rhs) in lhs.params.iter().zip(rhs.params.iter()) {
+                    lhs.unify(*rhs, table);
                 }
-                lhs_ret.unify(rhs_ret, table);
+                lhs.ret.unify(rhs.ret, table);
             }
             (Ty::Array(lhs_element), Ty::Array(rhs_element)) => {
                 lhs_element.unify(rhs_element, table)
@@ -198,16 +240,27 @@ fn write_type(ty: TyId, table: &mut TyTable, buf: &mut String) {
         Ty::TypeParam(symbol) => {
             write!(buf, "TypeParam({symbol:?})").unwrap();
         }
-        Ty::Fn(params, ret) => {
-            buf.push_str("fn(");
+        Ty::Fn(f) => {
+            buf.push_str("fn");
+            if !f.type_params.is_empty() {
+                buf.push_str("<");
+                let mut sep = "";
+                for p in f.type_params.iter() {
+                    buf.push_str(sep);
+                    write_type(*p, table, buf);
+                    sep = ", ";
+                }
+                buf.push_str(">");
+            }
+            buf.push_str("(");
             let mut sep = "";
-            for p in params.iter() {
+            for p in f.params.iter() {
                 buf.push_str(sep);
                 write_type(*p, table, buf);
                 sep = ", ";
             }
             buf.push_str(") -> ");
-            write_type(ret, table, buf);
+            write_type(f.ret, table, buf);
         }
         Ty::Unit => buf.push_str("()"),
         Ty::Bool => buf.push_str("bool"),

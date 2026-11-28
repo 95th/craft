@@ -9,7 +9,7 @@ use crate::{
     bind::{BindCtxt, SymbolId},
     diagnostics::Diagnostics,
     interner::{StrId, StrInterner},
-    types::{StdTypes, Ty, TyId, TyTable},
+    types::{FnTy, StdTypes, Ty, TyId, TyTable},
 };
 
 pub struct TyCtxt {
@@ -19,7 +19,6 @@ pub struct TyCtxt {
     pub tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     pub expr_types: FxHashMap<ExprId, TyId>,
     pub symbol_types: FxHashMap<SymbolId, TyId>,
-    pub type_params: FxHashMap<TyId, Vec<TyId>>,
 }
 
 pub struct TypeChecker<'a> {
@@ -35,7 +34,6 @@ pub struct TypeChecker<'a> {
     struct_properties: FxHashMap<SymbolId, FxIndexMap<StrId, TyId>>,
     tuple_struct_properties: FxHashMap<SymbolId, Rc<[TyId]>>,
     expr_types: FxHashMap<ExprId, TyId>,
-    type_params: FxHashMap<TyId, Vec<TyId>>,
     integer_literals: Vec<(ExprId, TyId)>,
     deferred_negation_checks: Vec<(ExprId, TyId)>,
     diverges: bool,
@@ -63,7 +61,6 @@ impl<'a> TypeChecker<'a> {
             struct_properties: FxHashMap::default(),
             tuple_struct_properties: FxHashMap::default(),
             expr_types: FxHashMap::default(),
-            type_params: FxHashMap::default(),
             integer_literals: Vec::new(),
             deferred_negation_checks: Vec::new(),
             diverges: false,
@@ -87,22 +84,29 @@ impl<'a> TypeChecker<'a> {
             tuple_struct_properties: self.tuple_struct_properties,
             expr_types: self.expr_types,
             symbol_types: self.symbol_types,
-            type_params: self.type_params,
         })
     }
 
     fn register_default_functions(&mut self) {
-        let print_arg_ty = self.types.new_key(Ty::TypeParam(self.bcx.std.print));
-        let print_fn_ty = self
-            .types
-            .new_key(Ty::Fn([print_arg_ty].into(), self.std.unit));
-        self.symbol_types.insert(self.bcx.std.print, print_fn_ty);
-        self.type_params.insert(print_fn_ty, vec![print_arg_ty]);
+        {
+            let arg = self.types.new_key(Ty::TypeParam(self.bcx.std.print));
+            let params = Rc::<[TyId]>::from([arg]);
+            let fn_ty = self.types.new_key(Ty::Fn(FnTy {
+                type_params: params.clone(),
+                params,
+                ret: self.std.unit,
+            }));
+            self.symbol_types.insert(self.bcx.std.print, fn_ty);
+        }
 
-        let assert_fn_ty = self
-            .types
-            .new_key(Ty::Fn([self.std.boolean].into(), self.std.unit));
-        self.symbol_types.insert(self.bcx.std.assert, assert_fn_ty);
+        {
+            let fn_ty = self.types.new_key(Ty::Fn(FnTy {
+                type_params: [].into(),
+                params: [self.std.boolean].into(),
+                ret: self.std.unit,
+            }));
+            self.symbol_types.insert(self.bcx.std.assert, fn_ty);
+        }
     }
 
     fn register_default_types(&mut self) {
@@ -134,8 +138,8 @@ impl<'a> TypeChecker<'a> {
             self.types.probe_value(actual),
         ) {
             (Ty::Tuple(a), Ty::Tuple(b)) => self.can_unify_list(&a, &b),
-            (Ty::Fn(par_a, ret_a), Ty::Fn(par_b, ret_b)) => {
-                self.can_unify_list(&par_a, &par_b) && self.can_unify(ret_a, ret_b)
+            (Ty::Fn(a), Ty::Fn(b)) => {
+                self.can_unify_list(&a.params, &b.params) && self.can_unify(a.ret, b.ret)
             }
             (Ty::Array(a), Ty::Array(b)) => self.can_unify(a, b),
             (Ty::Unknown, _) | (_, Ty::Unknown) => true,
@@ -187,8 +191,10 @@ fn has_unknown_type(types: &mut TyTable, ty: TyId) -> bool {
         | Ty::Never
         | Ty::Named(..)
         | Ty::TypeParam(..) => false,
-        Ty::Fn(params, ret) => {
-            has_unknown_type(types, ret) || params.iter().any(|t| has_unknown_type(types, *t))
+        Ty::Fn(f) => {
+            has_unknown_type(types, f.ret)
+                || f.params.iter().any(|t| has_unknown_type(types, *t))
+                || f.type_params.iter().any(|t| has_unknown_type(types, *t))
         }
         Ty::Tuple(params) => params.iter().any(|t| has_unknown_type(types, *t)),
         Ty::Array(element) => has_unknown_type(types, element),
@@ -255,15 +261,16 @@ fn check_scope(c: &mut TypeChecker, nodes: &[StmtId], trailing_expr: Option<Expr
 fn declare_item(c: &mut TypeChecker, node: StmtId) {
     match c.ast.stmts[node] {
         Stmt::Fn(ref f) => {
-            let type_params: Vec<TyId> = f.type_params.iter().map(|p| check_stmt(c, *p)).collect();
+            let type_params = f.type_params.iter().map(|p| check_stmt(c, *p)).collect();
             let params = f.params.iter().map(|p| check_stmt(c, *p)).collect();
             let ret = f.return_ty.map(|t| check_type(c, t)).unwrap_or(c.std.unit);
-            let fn_ty = c.types.new_key(Ty::Fn(params, ret));
+            let fn_ty = c.types.new_key(Ty::Fn(FnTy {
+                type_params,
+                params,
+                ret,
+            }));
             let fn_symbol = c.ast.stmts.value_binding(node);
             c.symbol_types.insert(fn_symbol, fn_ty);
-            if !type_params.is_empty() {
-                c.type_params.insert(fn_ty, type_params);
-            }
         }
         Stmt::Struct(..) => {
             let struct_symbol = c.ast.stmts.type_binding(node);
@@ -294,13 +301,13 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
         Stmt::Fn(ref f) => {
             let fn_symbol = c.ast.stmts.value_binding(node);
             let fn_ty = c.symbol_types[&fn_symbol];
-            let Ty::Fn(.., return_ty) = c.types.probe_value(fn_ty) else {
+            let Ty::Fn(fn_ty) = c.types.probe_value(fn_ty) else {
                 unreachable!();
             };
 
-            let prev_containing_return_ty = c.containing_return_ty.replace(return_ty);
+            let prev_containing_return_ty = c.containing_return_ty.replace(fn_ty.ret);
             let body_ty = check_expr(c, f.body);
-            c.unify(return_ty, body_ty, c.ast.exprs.span(f.body));
+            c.unify(fn_ty.ret, body_ty, c.ast.exprs.span(f.body));
             c.containing_return_ty = prev_containing_return_ty;
             c.std.unit
         }
@@ -336,7 +343,11 @@ fn check_stmt(c: &mut TypeChecker, node: StmtId) -> TyId {
                 .insert(type_symbol, arg_tys.clone());
 
             let struct_ty = c.symbol_types[&type_symbol];
-            let fn_ty = c.types.new_key(Ty::Fn(arg_tys, struct_ty));
+            let fn_ty = c.types.new_key(Ty::Fn(FnTy {
+                type_params: [].into(),
+                params: arg_tys,
+                ret: struct_ty,
+            }));
             let value_symbol = c.ast.stmts.value_binding(node);
             c.symbol_types.insert(value_symbol, fn_ty);
             c.std.unit
@@ -458,7 +469,7 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Variable(..) => {
             let symbol = c.ast.exprs.value_binding(node);
-            instantiate(c, c.symbol_types[&symbol])
+            c.symbol_types[&symbol].instantiate(&mut c.types)
         }
         Expr::If {
             cond,
@@ -499,22 +510,22 @@ fn check_expr_inner(c: &mut TypeChecker, node: ExprId) -> TyId {
         }
         Expr::Call { callee, ref args } => {
             let callee_ty = check_expr(c, callee);
-            let Ty::Fn(params, ret) = c.types.probe_value(callee_ty) else {
+            let Ty::Fn(f) = c.types.probe_value(callee_ty) else {
                 c.error("call expression requires function", c.ast.exprs.span(node));
                 return c.types.new_key(Ty::Unknown);
             };
-            if args.len() != params.len() {
+            if args.len() != f.params.len() {
                 c.error(
-                    format!("expect {} arguments, found {}", params.len(), args.len()),
+                    format!("expect {} arguments, found {}", f.params.len(), args.len()),
                     c.ast.exprs.span(node),
                 );
                 return c.types.new_key(Ty::Unknown);
             }
-            for (&arg, param) in args.iter().zip(params.iter()) {
+            for (&arg, param) in args.iter().zip(f.params.iter()) {
                 let arg_ty = check_expr(c, arg);
                 c.unify(*param, arg_ty, c.ast.exprs.span(arg));
             }
-            ret
+            f.ret
         }
         Expr::Return(value) => {
             let value_ty = if let Some(value) = value {
@@ -658,7 +669,11 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
         Type::FnType { ref params, ret } => {
             let params = params.iter().map(|t| check_type(c, *t)).collect();
             let ret = ret.map(|t| check_type(c, t)).unwrap_or(c.std.unit);
-            c.types.new_key(Ty::Fn(params, ret))
+            c.types.new_key(Ty::Fn(FnTy {
+                type_params: [].into(),
+                params,
+                ret,
+            }))
         }
         Type::Unit => c.std.unit,
         Type::Named(..) => {
@@ -676,14 +691,6 @@ fn check_type(c: &mut TypeChecker, node: TypeId) -> TyId {
     }
 }
 
-fn instantiate(c: &mut TypeChecker, ty: TyId) -> TyId {
-    if let Some(type_params) = c.type_params.get(&ty) {
-        ty.instantiate(&mut c.types, type_params)
-    } else {
-        ty
-    }
-}
-
 impl TyId {
     pub fn display(self, c: &mut TypeChecker) -> String {
         let mut buf = String::new();
@@ -697,26 +704,27 @@ fn write_type(ty: TyId, c: &mut TypeChecker, buf: &mut String) {
         Ty::Named(symbol) | Ty::TypeParam(symbol) => {
             buf.push_str(c.interner.lookup(c.bcx.symbols[symbol].name))
         }
-        Ty::Fn(params, ret) => {
-            buf.push_str("fn(");
-            if let Some(type_params) = c.type_params.get(&ty).cloned() {
+        Ty::Fn(f) => {
+            buf.push_str("fn");
+            if !f.type_params.is_empty() {
                 buf.push_str("<");
                 let mut sep = "";
-                for p in type_params {
+                for p in f.type_params.iter() {
                     buf.push_str(sep);
-                    write_type(p, c, buf);
+                    write_type(*p, c, buf);
                     sep = ", ";
                 }
                 buf.push_str(">");
             }
+            buf.push_str("(");
             let mut sep = "";
-            for p in params.iter() {
+            for p in f.params.iter() {
                 buf.push_str(sep);
                 write_type(*p, c, buf);
                 sep = ", ";
             }
             buf.push_str(") -> ");
-            write_type(ret, c, buf);
+            write_type(f.ret, c, buf);
         }
         Ty::Unit => buf.push_str("()"),
         Ty::Bool => buf.push_str("bool"),
